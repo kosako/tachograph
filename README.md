@@ -39,11 +39,13 @@ go install github.com/kosako/tachograph/cmd/tacho@latest
 tacho                  # one-shot compact status, one line per agent
 tacho watch -n 5       # refresh continuously
 tacho status --json    # unified schema JSON (see docs/schema.md)
+tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
+tacho cmux push|clear  # manage cmux sidebar pills manually
 ```
 
 ```
-claude Fable 5           ctx 8%   5h ██░░░░░░ 24% ↻02:00  wk ███░░░░░ 41% ↻06/15
-codex  gpt-5.5           ctx 44%  5h ░░░░░░░░  4% ↻13:06  wk █░░░░░░░ 11% ↻06/08
+claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  wk █████░░░ 68% ↻17:00
+codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
 `⚠1h` marks data older than 15 minutes with its age, and the whole line is
@@ -80,6 +82,12 @@ Put a template in `~/.config/tachograph/statusline.tmpl` (or pass
 {claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
 ```
 
+Or a dial-style variant:
+
+```
+{claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
+```
+
 Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 
 | field | renders |
@@ -102,7 +110,7 @@ Missing values render as `--`. Percentages and bars are colored by usage
 
 ### cmux sidebar
 
-Inside a [cmux](https://cmux.io) terminal, `tacho statusline` automatically
+Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
 mirrors the status to the workspace sidebar as colored pills —
 `claude ctx24% 5h24% wk41%` / `codex 5h4% wk11%`, colored green/yellow/red
 by usage and gray when stale — with no extra setup beyond the status line.
