@@ -1,0 +1,10 @@
+# build artifacts
+/tacho
+dist/
+*.test
+
+# OS
+.DS_Store
+
+# local tool settings
+.claude/settings.local.json
