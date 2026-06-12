@@ -1,46 +1,42 @@
 # tachograph
 
-> A compact instrument cluster for your coding agents.
+日本語 | [English](README.en.md)
 
-`tacho` shows, at a glance, what your AI coding agents are doing and how much
-headroom you have left:
+> コーディングエージェントのためのコンパクトな計器盤。
 
-- current model per session
-- rate-limit usage (5-hour / weekly windows) and reset times
-- context-window usage
+`tacho` は、AIコーディングエージェントの稼働状況と残り枠を「パッと見」で把握するためのCLIです:
 
-Supported agents: **Claude Code** and **Codex CLI**.
+- セッションごとの現在使用モデル
+- レートリミット使用率(5時間枠 / 週次枠)とリセット時刻
+- コンテキストウィンドウ使用率
 
-## Why "tachograph"?
+対応エージェント: **Claude Code** / **Codex CLI**
 
-A tachograph is the legally mandated instrument in trucks that records driving
-time, mandatory rest periods, and when the driver may resume. That is exactly
-what this tool does for coding agents: it tracks how much of your rate-limit
-window you have burned, when it resets, and what is currently running.
+## なぜ "tachograph"?
 
-## Design principles
+タコグラフは、トラックに搭載が義務付けられた、運転時間・休憩義務・運転再開可能時刻を記録する計器です。このツールがコーディングエージェントに対してやることはまさにそれです — レートリミット枠をどれだけ使ったか、いつリセットされるか、いま何が動いているかを記録・表示します。
 
-1. **An instrument, not an observability platform.** No log accumulation, no
-   cost analytics, no dashboards. Optimized for the quick glance.
-2. **Collectors and renderers are separate.** The core emits a single unified
-   JSON schema (`tacho status --json`); display targets are pluggable.
-3. **No resident daemon.** On-demand collection with a short-lived file cache.
-4. **Thin by design.** Reads the data your agents already write to disk.
+## 設計原則
 
-## Install
+1. **計器であって観測基盤ではない。** ログ蓄積・コスト分析・ダッシュボードは作らない。「パッと見」に特化する
+2. **コレクタ(収集)とレンダラ(表示)の分離。** コアは統一スキーマのJSON(`tacho status --json`)を出力し、表示先はプラガブル
+3. **常駐デーモンなし。** オンデマンド収集+短命のファイルキャッシュのみ
+4. **薄く作る。** エージェントが既にディスクへ書いているデータを読むだけ
+
+## インストール
 
 ```sh
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
-## Usage
+## 使い方
 
 ```sh
-tacho                  # one-shot compact status, one line per agent
-tacho watch -n 5       # refresh continuously
-tacho status --json    # unified schema JSON (see docs/schema.md)
-tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
-tacho cmux push|clear  # manage cmux sidebar pills manually
+tacho                  # ワンショット表示(1エージェント=1行)
+tacho watch -n 5       # 定期再描画
+tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
+tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
+tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
 ```
 
 ```
@@ -48,14 +44,11 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠1h` marks data older than 15 minutes with its age, and the whole line is
-dimmed — usage can only go down while an agent is idle, so a stale value
-reads as an upper bound. Agents without rate-limit windows (e.g. Claude
-Code on Bedrock) fall back to session tokens and estimated cost.
+`⚠6h` は15分より古いデータの印(数値は経過時間)で、その行は全体が薄く表示されます — エージェントがアイドルの間は消費が増えないため、staleな値は「上限値」として読めます。レートリミット枠が存在しないバックエンド(Bedrock上のClaude Code等)では、セッショントークン数と推定コストの表示に自動で切り替わります。
 
-### Claude Code status line
+### Claude Code ステータスライン
 
-Add to `~/.claude/settings.json`:
+`~/.claude/settings.json` に追加:
 
 ```json
 {
@@ -67,70 +60,56 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Claude Code pipes its session JSON (model, context, rate limits) to
-`tacho statusline`, which prints one line combining it with Codex usage.
-As a side effect each invocation snapshots the Claude rate limits, so bare
-`tacho` / `tacho watch` in other terminals can show them too (for up to
-10 minutes).
+Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも(最大10分間)リミットが表示できます。
 
-### Customizing the status line
+### ステータスラインのカスタマイズ
 
-Put a template in `~/.config/tachograph/statusline.tmpl` (or pass
-`--template`). Default:
+`~/.config/tachograph/statusline.tmpl` にテンプレートを置きます(または `--template`)。デフォルト:
 
 ```
 {claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
 ```
 
-Or a dial-style variant:
+ダイヤル版の例:
 
 ```
 {claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
 ```
 
-Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
+プレースホルダは `{tool.field}` 形式(`tool` = `claude` | `codex`):
 
-| field | renders |
+| field | 表示 |
 |---|---|
-| `model` | model display name (`Fable 5`, `gpt-5.5`) |
-| `ctx` | context window usage, `8%` |
-| `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
-| `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |
-| `5h.dial` / `wk.dial` | single-character dial, `○◔◑◕●` (`◌` when no data) |
-| `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
-| `tokens` | session tokens, `989k` / `12.5M` |
-| `cost` | estimated session cost, `$0.05` |
-| `plan` | plan name (`prolite`, …) |
-| `cwd` | session working directory (basename) |
-| `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |
-| `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
+| `model` | モデル表示名(`Fable 5`、`gpt-5.5`) |
+| `ctx` | コンテキストウィンドウ使用率、`8%` |
+| `5h.pct` / `wk.pct` | 5時間枠 / 週次枠のリミット使用率 |
+| `5h.bar:8` / `wk.bar:8` | 指定幅のゲージ、`██░░░░░░` |
+| `5h.dial` / `wk.dial` | 1文字ダイヤル、`○◔◑◕●`(データ無しは `◌`) |
+| `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(当日)または `↻06/15` |
+| `tokens` | セッショントークン、`989k` / `12.5M` |
+| `cost` | 推定セッションコスト、`$0.05` |
+| `plan` | プラン名(`prolite` 等) |
+| `cwd` | 作業ディレクトリ(basename) |
+| `stale` | 15分超で `⚠1h `(印+経過時間)、それ以外は空 |
+| `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
 
-Missing values render as `--`. Percentages and bars are colored by usage
-(<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.
+欠損値は `--` で表示されます。パーセントとゲージは使用率で色分け(<50% 緑 / ≥50% 黄 / ≥80% 赤)。`--no-color` または `NO_COLOR` で無効化できます。
 
-### cmux sidebar
+### cmux サイドバー
 
-Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
-mirrors the status to the workspace sidebar as colored pills —
-`claude ctx24% 5h24% wk41%` / `codex 5h4% wk11%`, colored green/yellow/red
-by usage and gray when stale — with no extra setup beyond the status line.
-It detects cmux via `CMUX_WORKSPACE_ID` and talks through the bundled cmux
-CLI, fire-and-forget, so the status line latency is unaffected.
+[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h24% wk41%` / `codex 5h4% wk11%` の形式で、使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、同梱のcmux CLI経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
 
-Manual control:
+手動操作:
 
 ```sh
-tacho cmux push    # push pills once (e.g. from cron or other hooks)
-tacho cmux clear   # remove tacho's pills
+tacho cmux push    # ピルを一回push(cron等からも使える)
+tacho cmux clear   # tachoのピルを削除
 ```
 
 ### Codex TUI
 
-Codex's own status line is configured natively — run `/statusline` in the
-TUI and pick e.g. `model + five-hour-limit + weekly-limit`. tachograph
-does not (and cannot) draw inside the Codex TUI; it reads Codex session
-logs non-invasively for display everywhere else.
+Codex自身のステータスラインはネイティブ設定です — TUIで `/statusline` を実行し、`model + five-hour-limit + weekly-limit` などを選んでください。tachographはCodex TUIの中には描画できません(する必要もありません)。Codexのセッションログを非侵襲に読んで、それ以外のあらゆる場所に表示します。
 
-## License
+## ライセンス
 
 [MIT](LICENSE)
