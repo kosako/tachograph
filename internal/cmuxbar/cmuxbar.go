@@ -67,7 +67,8 @@ func Pills(s schema.Status, now time.Time) []Pill {
 		if key == schema.ToolClaudeCode {
 			key = "claude"
 		}
-		pills = append(pills, Pill{Key: key, Value: pillValue(t, now), Color: pillColor(t)})
+		// The sidebar renders only the value, so the tool name leads it.
+		pills = append(pills, Pill{Key: key, Value: key + " " + pillValue(t, now), Color: pillColor(t)})
 	}
 	return pills
 }
