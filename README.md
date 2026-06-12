@@ -27,16 +27,81 @@ window you have burned, when it resets, and what is currently running.
 3. **No resident daemon.** On-demand collection with a short-lived file cache.
 4. **Thin by design.** Reads the data your agents already write to disk.
 
-## Status
-
-🚧 Under construction — MVP in progress. See the
-[issues](https://github.com/kosako/tachograph/issues) for the roadmap.
-
 ## Install
 
 ```sh
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
+
+## Usage
+
+```sh
+tacho                  # one-shot compact status, one line per agent
+tacho watch -n 5       # refresh continuously
+tacho status --json    # unified schema JSON (see docs/schema.md)
+```
+
+```
+claude Fable 5           ctx 8%   5h ██░░░░░░ 24% ↻02:00  wk ███░░░░░ 41% ↻06/15
+codex  gpt-5.5           ctx 44%  5h ░░░░░░░░  4% ↻13:06  wk █░░░░░░░ 11% ↻06/08
+```
+
+`⚠` marks data older than 15 minutes. Agents without rate-limit windows
+(e.g. Claude Code on Bedrock) fall back to session tokens and estimated cost.
+
+### Claude Code status line
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "tacho statusline",
+    "padding": 0
+  }
+}
+```
+
+Claude Code pipes its session JSON (model, context, rate limits) to
+`tacho statusline`, which prints one line combining it with Codex usage.
+As a side effect each invocation snapshots the Claude rate limits, so bare
+`tacho` / `tacho watch` in other terminals can show them too (for up to
+10 minutes).
+
+### Customizing the status line
+
+Put a template in `~/.config/tachograph/statusline.tmpl` (or pass
+`--template`). Default:
+
+```
+{claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
+```
+
+Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
+
+| field | renders |
+|---|---|
+| `model` | model display name (`Fable 5`, `gpt-5.5`) |
+| `ctx` | context window usage, `8%` |
+| `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
+| `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |
+| `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
+| `tokens` | session tokens, `989k` / `12.5M` |
+| `cost` | estimated session cost, `$0.05` |
+| `plan` | plan name (`prolite`, …) |
+| `cwd` | session working directory (basename) |
+| `stale` | `⚠ ` when data is older than 15 minutes, else empty |
+
+Missing values render as `--`. Percentages and bars are colored by usage
+(<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.
+
+### Codex TUI
+
+Codex's own status line is configured natively — run `/statusline` in the
+TUI and pick e.g. `model + five-hour-limit + weekly-limit`. tachograph
+does not (and cannot) draw inside the Codex TUI; it reads Codex session
+logs non-invasively for display everywhere else.
 
 ## License
 
