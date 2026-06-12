@@ -30,6 +30,15 @@ func TestBar(t *testing.T) {
 	}
 }
 
+func TestDial(t *testing.T) {
+	cases := map[float64]string{0: "○", 5: "○", 24: "◔", 50: "◑", 75: "◕", 90: "●", 100: "●"}
+	for pct, want := range cases {
+		if got := Dial(pct); got != want {
+			t.Errorf("Dial(%v) = %q, want %q", pct, got, want)
+		}
+	}
+}
+
 func TestFormatTokens(t *testing.T) {
 	cases := map[int64]string{42: "42", 989120: "989k", 12504028: "12.5M", 3000000: "3M"}
 	for n, want := range cases {

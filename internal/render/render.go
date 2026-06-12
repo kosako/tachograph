@@ -59,6 +59,25 @@ func Bar(pct float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
+// Dial renders pct (0-100, used) as a single-character gauge: ○◔◑◕●.
+func Dial(pct float64) string {
+	switch {
+	case pct < 12.5:
+		return "○"
+	case pct < 37.5:
+		return "◔"
+	case pct < 62.5:
+		return "◑"
+	case pct < 87.5:
+		return "◕"
+	default:
+		return "●"
+	}
+}
+
+// DialMissing keeps single-character alignment when a dial has no data.
+const DialMissing = "◌"
+
 // FormatTokens compacts a token count: 989120 → "989k", 12504028 → "12.5M".
 func FormatTokens(n int64) string {
 	switch {

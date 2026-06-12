@@ -88,6 +88,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `ctx` | context window usage, `8%` |
 | `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
 | `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |
+| `5h.dial` / `wk.dial` | single-character dial, `○◔◑◕●` (`◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` | session tokens, `989k` / `12.5M` |
 | `cost` | estimated session cost, `$0.05` |
