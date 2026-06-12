@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/render"
@@ -24,6 +25,8 @@ const usage = `usage:
   tacho watch [-n sec]  refresh continuously
   tacho status --json   unified schema JSON (see docs/schema.md)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
+  tacho cmux push       push status pills to the cmux sidebar once
+  tacho cmux clear      remove tacho's pills from the cmux sidebar
 `
 
 func main() {
@@ -41,6 +44,8 @@ func main() {
 		os.Exit(runWatch(args))
 	case "statusline":
 		os.Exit(runStatusline(args))
+	case "cmux":
+		os.Exit(runCmux(args))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
 			fmt.Println("tacho " + version)
@@ -118,6 +123,38 @@ func runStatusline(args []string) int {
 		tmpl = loadTemplate()
 	}
 	fmt.Println(render.Template(tmpl, s, now, style(*noColor)))
+
+	// R3 piggyback: inside a cmux terminal, mirror the status to the
+	// sidebar. Fire-and-forget so the statusline stays fast.
+	if cmuxbar.Detect() {
+		if cli := cmuxbar.FindCLI(); cli != "" {
+			_ = cmuxbar.Push(cli, s, now, false)
+		}
+	}
+	return 0
+}
+
+func runCmux(args []string) int {
+	if len(args) < 1 || (args[0] != "push" && args[0] != "clear") {
+		fmt.Fprintln(os.Stderr, "usage: tacho cmux <push|clear>")
+		return 2
+	}
+	cli := cmuxbar.FindCLI()
+	if cli == "" {
+		fmt.Fprintln(os.Stderr, "tacho: cmux CLI not found (is cmux installed? set TACHO_CMUX_BIN to override)")
+		return 1
+	}
+	var err error
+	if args[0] == "clear" {
+		err = cmuxbar.Clear(cli, true)
+	} else {
+		now := time.Now()
+		err = cmuxbar.Push(cli, core.Status(core.Options{Now: now}), now, true)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
 	return 0
 }
 

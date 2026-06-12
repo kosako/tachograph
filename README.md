@@ -99,6 +99,22 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 Missing values render as `--`. Percentages and bars are colored by usage
 (<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.
 
+### cmux sidebar
+
+Inside a [cmux](https://cmux.io) terminal, `tacho statusline` automatically
+mirrors the status to the workspace sidebar as colored pills (key `claude` /
+`codex`, e.g. `ctx24% 5h24% wk41%`, green/yellow/red by usage, gray when
+stale) — no extra setup beyond the status line. It detects cmux via
+`CMUX_WORKSPACE_ID` and talks through the bundled cmux CLI, fire-and-forget,
+so the status line latency is unaffected.
+
+Manual control:
+
+```sh
+tacho cmux push    # push pills once (e.g. from cron or other hooks)
+tacho cmux clear   # remove tacho's pills
+```
+
 ### Codex TUI
 
 Codex's own status line is configured natively — run `/statusline` in the
