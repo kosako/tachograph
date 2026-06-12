@@ -46,8 +46,10 @@ claude Fable 5           ctx 8%   5h ██░░░░░░ 24% ↻02:00  wk �
 codex  gpt-5.5           ctx 44%  5h ░░░░░░░░  4% ↻13:06  wk █░░░░░░░ 11% ↻06/08
 ```
 
-`⚠` marks data older than 15 minutes. Agents without rate-limit windows
-(e.g. Claude Code on Bedrock) fall back to session tokens and estimated cost.
+`⚠1h` marks data older than 15 minutes with its age, and the whole line is
+dimmed — usage can only go down while an agent is idle, so a stale value
+reads as an upper bound. Agents without rate-limit windows (e.g. Claude
+Code on Bedrock) fall back to session tokens and estimated cost.
 
 ### Claude Code status line
 
@@ -91,7 +93,8 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `cost` | estimated session cost, `$0.05` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
-| `stale` | `⚠ ` when data is older than 15 minutes, else empty |
+| `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |
+| `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
 
 Missing values render as `--`. Percentages and bars are colored by usage
 (<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.
