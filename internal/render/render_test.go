@@ -130,6 +130,37 @@ func TestToolLineUnavailableAndStale(t *testing.T) {
 	if got := ToolLine(tool, time.Now(), plain); !strings.Contains(got, "⚠") {
 		t.Errorf("stale marker missing: %q", got)
 	}
+
+	now := time.Now()
+	collected := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	tool.CollectedAt = &collected
+	if got := ToolLine(tool, now, plain); !strings.Contains(got, "⚠2h") {
+		t.Errorf("stale age missing: %q", got)
+	}
+	colored := ToolLine(tool, now, Style{Color: true})
+	if !strings.HasPrefix(colored, "\x1b[2m") || !strings.HasSuffix(colored, "\x1b[0m") {
+		t.Errorf("stale line should be dimmed as a whole: %q", colored)
+	}
+	if strings.Contains(strings.TrimSuffix(colored[4:], "\x1b[0m"), "\x1b[") {
+		t.Errorf("stale line should not contain inner color codes: %q", colored)
+	}
+}
+
+func TestAge(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	cases := map[string]string{
+		"2026-06-12T20:59:30+09:00": "30s",
+		"2026-06-12T20:15:00+09:00": "45m",
+		"2026-06-12T16:00:00+09:00": "5h",
+		"2026-06-04T21:00:00+09:00": "8d",
+		"garbage":                   "",
+		"2026-06-12T22:00:00+09:00": "", // future
+	}
+	for iso, want := range cases {
+		if got := Age(iso, now); got != want {
+			t.Errorf("Age(%q) = %q, want %q", iso, got, want)
+		}
+	}
 }
 
 func TestStatusLines(t *testing.T) {

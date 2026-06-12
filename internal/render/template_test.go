@@ -67,6 +67,20 @@ func TestTemplateStaleMarker(t *testing.T) {
 	if !strings.HasPrefix(got, "⚠ ") {
 		t.Errorf("Template = %q, want stale marker prefix", got)
 	}
+
+	now := time.Now()
+	collected := now.Add(-90 * time.Minute).Format(time.RFC3339)
+	s.Tools[0].CollectedAt = &collected
+	if got := Template("{claude.stale}", s, now, plain); got != "⚠1h " {
+		t.Errorf("Template stale with age = %q, want \"⚠1h \"", got)
+	}
+	if got := Template("{claude.age}", s, now, plain); got != "1h" {
+		t.Errorf("Template age = %q, want \"1h\"", got)
+	}
+	s.Tools[1].CollectedAt = nil
+	if got := Template("{codex.age}", s, now, plain); got != Missing {
+		t.Errorf("Template age (nil collected_at) = %q, want %q", got, Missing)
+	}
 }
 
 func TestDefaultTemplateRenders(t *testing.T) {

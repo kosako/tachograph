@@ -55,10 +55,15 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) string {
 	switch path[0] {
 	case "stale":
-		if t.Stale {
-			return "⚠ "
+		if m := staleMark(*t, now); m != "" {
+			return m + " "
 		}
 		return ""
+	case "age":
+		if t.CollectedAt == nil {
+			return Missing
+		}
+		return Age(*t.CollectedAt, now)
 	case "model":
 		if !t.Available || t.Model == nil {
 			return Missing

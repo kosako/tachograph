@@ -71,6 +71,41 @@ func FormatTokens(n int64) string {
 	}
 }
 
+// Age renders the elapsed time since an RFC 3339 timestamp compactly:
+// "42s", "5m", "1h", "3d". Empty on parse failure or future timestamps.
+func Age(iso string, now time.Time) string {
+	ts, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return ""
+	}
+	d := now.Sub(ts)
+	switch {
+	case d < 0:
+		return ""
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// staleMark renders "⚠1h" for stale data (age omitted when unknown).
+func staleMark(t schema.Tool, now time.Time) string {
+	if !t.Stale {
+		return ""
+	}
+	if t.CollectedAt != nil {
+		if a := Age(*t.CollectedAt, now); a != "" {
+			return "⚠" + a
+		}
+	}
+	return "⚠"
+}
+
 // ResetShort renders an RFC 3339 reset time as "↻HH:MM" if it falls within
 // the next 24h, otherwise "↻MM/DD".
 func ResetShort(iso string, now time.Time) string {
@@ -103,11 +138,7 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 	if name == schema.ToolClaudeCode {
 		name = "claude"
 	}
-	marker := " "
-	if t.Stale {
-		marker = "⚠"
-	}
-	head := fmt.Sprintf("%-6s %-14s %s", name, ModelShort(t.Model), marker)
+	head := fmt.Sprintf("%-6s %-14s %-4s", name, ModelShort(t.Model), staleMark(t, now))
 
 	if !t.Available {
 		return head + st.dim(" (not found)")
@@ -116,10 +147,16 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 		return head + st.dim(" (error: "+t.Error.Code+")")
 	}
 
-	parts := []string{head, "ctx " + ctxPct(t.Session, st)}
+	// Stale lines are dimmed as a whole; per-part colors would reset the
+	// dim attribute mid-line, so suppress them.
+	inner := st
+	if t.Stale {
+		inner = Style{}
+	}
+	parts := []string{head, "ctx " + ctxPct(t.Session, inner)}
 	if t.Limits != nil {
 		for _, l := range t.Limits {
-			parts = append(parts, limitPart(l, now, st))
+			parts = append(parts, limitPart(l, now, inner))
 		}
 	} else if fb := t.Fallback; fb != nil && fb.SessionTokens != nil {
 		s := "tokens " + FormatTokens(*fb.SessionTokens)
@@ -128,7 +165,11 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 		}
 		parts = append(parts, s)
 	}
-	return strings.Join(parts, "  ")
+	line := strings.Join(parts, "  ")
+	if t.Stale {
+		line = st.dim(line)
+	}
+	return line
 }
 
 func ctxPct(s *schema.Session, st Style) string {
