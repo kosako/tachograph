@@ -39,22 +39,36 @@ func TestFormatTokens(t *testing.T) {
 	}
 }
 
+// hhmm / mmdd render expected values in the test runner's local timezone,
+// keeping assertions valid on any CI timezone.
+func hhmm(t *testing.T, iso string) string { return expect(t, iso, "↻15:04") }
+func mmdd(t *testing.T, iso string) string { return expect(t, iso, "↻01/02") }
+
+func expect(t *testing.T, iso, layout string) string {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ts.Local().Format(layout)
+}
+
 func TestResetShort(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	soon := "2026-06-13T02:00:58+09:00"
-	if got := ResetShort(soon, now); got != "↻02:00" {
-		t.Errorf("ResetShort(soon) = %q", got)
+	if got := ResetShort(soon, now); got != hhmm(t, soon) {
+		t.Errorf("ResetShort(soon) = %q, want %q", got, hhmm(t, soon))
 	}
 	far := "2026-06-15T10:30:00+09:00"
-	if got := ResetShort(far, now); got != "↻06/15" {
-		t.Errorf("ResetShort(far) = %q", got)
+	if got := ResetShort(far, now); got != mmdd(t, far) {
+		t.Errorf("ResetShort(far) = %q, want %q", got, mmdd(t, far))
 	}
 	if got := ResetShort("garbage", now); got != "↻--" {
 		t.Errorf("ResetShort(garbage) = %q", got)
 	}
 	past := "2026-06-08T10:30:00+09:00"
-	if got := ResetShort(past, now); got != "↻06/08" {
-		t.Errorf("ResetShort(past) = %q, want date form for expired resets", got)
+	if got := ResetShort(past, now); got != mmdd(t, past) {
+		t.Errorf("ResetShort(past) = %q, want date form %q for expired resets", got, mmdd(t, past))
 	}
 }
 
@@ -80,7 +94,7 @@ func limitsTool() schema.Tool {
 func TestToolLineWithLimits(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	got := ToolLine(limitsTool(), now, plain)
-	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "24%", "↻02:00", "wk", "41%", "↻06/15"} {
+	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "24%", hhmm(t, "2026-06-13T02:00:00+09:00"), "wk", "41%", mmdd(t, "2026-06-15T10:30:00+09:00")} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ToolLine = %q, missing %q", got, want)
 		}
