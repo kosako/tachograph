@@ -29,6 +29,13 @@ const (
 	colorGray   = "#8E8E93"
 )
 
+// Pill emoji prefixes — the sidebar shows only the value, so these are
+// what identifies the tool at a glance.
+const (
+	emojiClaude = "✳️"
+	emojiCodex  = "🤖"
+)
+
 // Detect reports whether we are running inside a cmux terminal.
 func Detect() bool {
 	return os.Getenv("CMUX_WORKSPACE_ID") != ""
@@ -63,12 +70,11 @@ func Pills(s schema.Status, now time.Time) []Pill {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		key := t.Tool
+		key, emoji := t.Tool, emojiCodex
 		if key == schema.ToolClaudeCode {
-			key = "claude"
+			key, emoji = "claude", emojiClaude
 		}
-		// The sidebar renders only the value, so the tool name leads it.
-		pills = append(pills, Pill{Key: key, Value: key + " " + pillValue(t, now), Color: pillColor(t)})
+		pills = append(pills, Pill{Key: key, Value: emoji + " " + pillValue(t, now), Color: pillColor(t)})
 	}
 	return pills
 }
