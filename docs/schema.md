@@ -82,11 +82,14 @@
 | フィールド | claude-code | codex |
 |---|---|---|
 | `model` | statusline stdin JSON / transcripts の `message.model` | sessions JSONL `turn_context.payload.model` |
-| `session.tokens` | transcripts の `message.usage` 集計 | `token_count.payload.info.total_token_usage` |
-| `session.context_window` | statusline stdin JSON | `token_count.payload.info.model_context_window` |
-| `limits` | スパイク中(取れなければ null 縮退) | `token_count.payload.rate_limits.primary/secondary` |
-| `plan` | OAuth情報(スパイク中) | `rate_limits.plan_type` |
+| `session.tokens` | statusline `context_window.total_*` / transcripts の `message.usage` 集計 | `token_count.payload.info.total_token_usage` |
+| `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
+| `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary` |
+| `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |
 | `credits` | —(null) | `rate_limits.credits` |
+
+Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`
+の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
 
 ## バージョニング
 
