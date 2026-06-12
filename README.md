@@ -102,11 +102,12 @@ Missing values render as `--`. Percentages and bars are colored by usage
 ### cmux sidebar
 
 Inside a [cmux](https://cmux.io) terminal, `tacho statusline` automatically
-mirrors the status to the workspace sidebar as colored pills (key `claude` /
-`codex`, e.g. `ctx24% 5h24% wk41%`, green/yellow/red by usage, gray when
-stale) — no extra setup beyond the status line. It detects cmux via
-`CMUX_WORKSPACE_ID` and talks through the bundled cmux CLI, fire-and-forget,
-so the status line latency is unaffected.
+mirrors the status to the workspace sidebar as colored pills —
+`✳️ ctx24% 5h24% wk41%` for Claude, `🤖 5h4% wk11%` for Codex, colored
+green/yellow/red by usage and gray when stale — with no extra setup beyond
+the status line. It detects cmux via `CMUX_WORKSPACE_ID` and talks through
+the bundled cmux CLI, fire-and-forget, so the status line latency is
+unaffected.
 
 Manual control:
 
