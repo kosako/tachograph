@@ -117,8 +117,11 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 		field = path[1]
 	}
 	if limit == nil || limit.UsedPct == nil {
-		if field == "bar" {
+		switch field {
+		case "bar":
 			return Bar(0, width) // keep alignment even when absent
+		case "dial":
+			return DialMissing
 		}
 		return Missing
 	}
@@ -128,6 +131,8 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 		return st.paintPct(pct, fmt.Sprintf("%.0f%%", pct))
 	case "bar":
 		return st.paintPct(pct, Bar(pct, width))
+	case "dial":
+		return st.paintPct(pct, Dial(pct))
 	case "resets":
 		if limit.ResetsAt == nil {
 			return Missing

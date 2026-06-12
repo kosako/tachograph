@@ -32,6 +32,9 @@ func TestTemplateBasics(t *testing.T) {
 		"{claude.5h}":        "24%", // bare window defaults to pct
 		"{claude.wk.pct}":    "41%",
 		"{claude.5h.bar:4}":  "█░░░",
+		"{claude.5h.dial}":   "◔", // 24% used
+		"{claude.wk.dial}":   "◑", // 41% used
+		"{codex.5h.dial}":    DialMissing,
 		"{claude.5h.resets}": hhmm(t, "2026-06-13T02:00:00+09:00"),
 		"{claude.tokens}":    "989k",
 		"{claude.cost}":      "$0.05",
