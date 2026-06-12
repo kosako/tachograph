@@ -29,11 +29,13 @@ const (
 	colorGray   = "#8E8E93"
 )
 
-// Pill emoji prefixes — the sidebar shows only the value, so these are
-// what identifies the tool at a glance.
+// SF Symbol icons, rendered natively by the sidebar next to the value.
+// No brand logos exist in SF Symbols, so these are the closest shapes:
+// Claude's logo is an asterisk-like starburst; OpenAI's knot resembles a
+// hexagonal grid of circles.
 const (
-	emojiClaude = "✳️"
-	emojiCodex  = "🤖"
+	iconClaude = "asterisk"
+	iconCodex  = "circle.hexagongrid.fill"
 )
 
 // Detect reports whether we are running inside a cmux terminal.
@@ -61,6 +63,7 @@ type Pill struct {
 	Key   string
 	Value string
 	Color string
+	Icon  string
 }
 
 // Pills builds one pill per available tool.
@@ -70,11 +73,11 @@ func Pills(s schema.Status, now time.Time) []Pill {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		key, emoji := t.Tool, emojiCodex
+		key, icon := t.Tool, iconCodex
 		if key == schema.ToolClaudeCode {
-			key, emoji = "claude", emojiClaude
+			key, icon = "claude", iconClaude
 		}
-		pills = append(pills, Pill{Key: key, Value: emoji + " " + pillValue(t, now), Color: pillColor(t)})
+		pills = append(pills, Pill{Key: key, Value: pillValue(t, now), Color: pillColor(t), Icon: icon})
 	}
 	return pills
 }
@@ -137,7 +140,7 @@ func pillColor(t schema.Tool) string {
 func Push(cli string, s schema.Status, now time.Time, wait bool) error {
 	var firstErr error
 	for _, p := range Pills(s, now) {
-		cmd := exec.Command(cli, "set-status", p.Key, p.Value, "--color", p.Color)
+		cmd := exec.Command(cli, "set-status", p.Key, p.Value, "--color", p.Color, "--icon", p.Icon)
 		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
 			firstErr = err
 		}

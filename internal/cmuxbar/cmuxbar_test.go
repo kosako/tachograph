@@ -48,13 +48,13 @@ func TestPills(t *testing.T) {
 		t.Fatalf("Pills = %+v, want 2", pills)
 	}
 	claude := pills[0]
-	if claude.Key != "claude" || claude.Value != "✳️ ctx24% 5h24% wk41%" {
+	if claude.Key != "claude" || claude.Value != "ctx24% 5h24% wk41%" {
 		t.Errorf("claude pill = %+v", claude)
 	}
-	if claude.Color != colorGreen {
-		t.Errorf("claude color = %s, want green", claude.Color)
+	if claude.Color != colorGreen || claude.Icon != iconClaude {
+		t.Errorf("claude color/icon = %s/%s", claude.Color, claude.Icon)
 	}
-	if pills[1].Key != "codex" || pills[1].Value != "🤖 4Mtok" {
+	if pills[1].Key != "codex" || pills[1].Value != "4Mtok" || pills[1].Icon != iconCodex {
 		t.Errorf("codex fallback pill = %+v", pills[1])
 	}
 }
@@ -84,8 +84,8 @@ func TestPillStaleAge(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00") // 1h after collected
 	s := schema.Status{Tools: []schema.Tool{limitsTool(true, 24, 41)}}
 	got := Pills(s, now)[0]
-	if !strings.HasPrefix(got.Value, "✳️ ⚠1h ") {
-		t.Errorf("stale pill = %q, want \"✳️ ⚠1h\" prefix", got.Value)
+	if !strings.HasPrefix(got.Value, "⚠1h ") {
+		t.Errorf("stale pill = %q, want \"⚠1h\" prefix", got.Value)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestPushAndClearExec(t *testing.T) {
 	if len(calls) != 3 {
 		t.Fatalf("calls = %q, want 3 (1 set + 2 clear)", calls)
 	}
-	if calls[0] != "set-status claude ✳️ ctx24% 5h24% wk41% --color "+colorGreen {
+	if calls[0] != "set-status claude ctx24% 5h24% wk41% --color "+colorGreen+" --icon "+iconClaude {
 		t.Errorf("set call = %q", calls[0])
 	}
 	if calls[1] != "clear-status claude" || calls[2] != "clear-status codex" {
