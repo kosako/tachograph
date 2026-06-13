@@ -133,7 +133,9 @@ For an always-visible gauge regardless of which agent is running, a
 [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin is bundled. The menu
 bar shows a tachometer per tool — the logo ringed by an iOS-app-download-style
 progress ring that fills clockwise with 5-hour usage; clicking reveals
-per-tool details, colored by usage and gray (with age) when stale. Set
+per-tool details. The ring is colored by usage (green/yellow/red, gray when
+stale) and the logo follows the system appearance (light/dark) so it stays
+legible — override with `TACHO_APPEARANCE=dark|light`. Set
 `TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text (`C🌒 X🌑`).
 
 ```sh

@@ -1,7 +1,9 @@
 // Package menubar renders the SwiftBar menu bar image: each tool's logo
 // ringed by an iOS-app-download-style progress ring whose fill tracks the
-// 5-hour rate-limit usage. Output is a monochrome PNG (template image) so
-// the menu bar tints it for light/dark automatically.
+// 5-hour rate-limit usage. The ring is colored by usage (green/yellow/red),
+// so the output is a full-color PNG. Because a colored image can't be tinted
+// by the menu bar, the logo and track follow the system appearance (white on
+// dark, near-black on light) to stay legible on both.
 package menubar
 
 import (
@@ -9,6 +11,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
 	"math"
@@ -50,26 +53,42 @@ const (
 	gap    = 2  // so this is roughly the on-screen size (menu-bar-icon sized)
 )
 
-// alpha levels in the supersampled buffer (averaged down to gray coverage).
-const (
-	aTrack = 55  // unfilled ring track
-	aFill  = 255 // filled ring portion
-	aStale = 150 // filled ring when data is stale
-	aLogo  = 235 // logo mark
-	aDim   = 80  // logo mark when the tool is unavailable
+// Ring pressure colors (match the CLI / dropdown palette).
+var (
+	cGreen  = color.NRGBA{52, 199, 89, 255}
+	cYellow = color.NRGBA{255, 204, 0, 255}
+	cRed    = color.NRGBA{255, 59, 48, 255}
+	cGray   = color.NRGBA{142, 142, 147, 255}
 )
 
-// PNGBase64 renders the gauges for the status and returns a base64 PNG plus
-// ok=false when there is nothing to draw.
-func PNGBase64(s schema.Status) (string, bool) {
+// palette holds the appearance-dependent inks for the logo and unfilled track.
+type palette struct {
+	logo  color.NRGBA
+	track color.NRGBA
+}
+
+func paletteFor(dark bool) palette {
+	if dark {
+		return palette{logo: color.NRGBA{255, 255, 255, 255}, track: color.NRGBA{255, 255, 255, 70}}
+	}
+	return palette{logo: color.NRGBA{40, 40, 42, 255}, track: color.NRGBA{50, 50, 50, 70}}
+}
+
+const aDimLogo = 90 // logo alpha when the tool is unavailable
+
+// PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
+// there is nothing to draw. dark selects the system appearance so the logo
+// and track stay legible on the menu bar.
+func PNGBase64(s schema.Status, dark bool) (string, bool) {
 	if len(s.Tools) == 0 {
 		return "", false
 	}
+	pal := paletteFor(dark)
 	n := len(s.Tools)
 	w := canvas*n + gap*(n-1)
-	big := image.NewAlpha(image.Rect(0, 0, w*ss, canvas*ss))
+	big := image.NewNRGBA(image.Rect(0, 0, w*ss, canvas*ss))
 	for i, t := range s.Tools {
-		drawGauge(big, (canvas+gap)*i*ss, t)
+		drawGauge(big, (canvas+gap)*i*ss, t, pal)
 	}
 	img := downsample(big, w, canvas)
 
@@ -80,25 +99,38 @@ func PNGBase64(s schema.Status) (string, bool) {
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), true
 }
 
+// ringColor is the fill color for the used portion: gray when stale,
+// otherwise green/yellow/red by 5h pressure.
+func ringColor(t schema.Tool, frac float64) color.NRGBA {
+	if t.Stale {
+		return cGray
+	}
+	switch {
+	case frac >= 0.8:
+		return cRed
+	case frac >= 0.5:
+		return cYellow
+	default:
+		return cGreen
+	}
+}
+
 // drawGauge renders one tool into a canvas*ss square at horizontal offset ox
 // (supersampled coordinates).
-func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
+func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette) {
 	c := float64(canvas * ss)
 	cx := float64(ox) + c/2
 	cy := c / 2
 
-	// Gauge fills ~80% of the (already small) canvas, leaving a little
+	// Gauge fills ~88% of the (already small) canvas, leaving a little
 	// margin so it sits like a normal menu bar glyph.
-	rOut := c * 0.40
-	thick := c * 0.06
+	rOut := c * 0.44
+	thick := c * 0.065
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
 	pct, hasPct := fiveHourFrac(t)
-	fillA := aFill
-	if t.Stale {
-		fillA = aStale
-	}
+	fill := ringColor(t, pct)
 
 	// Progress ring: full circle, starting at 12 o'clock, clockwise.
 	for py := 0; py < canvas*ss; py++ {
@@ -114,30 +146,28 @@ func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
 				a += 360
 			}
 			frac := math.Mod(a-270+360, 360) / 360 // 0 at top, clockwise
-			switch {
-			case hasPct && frac <= pct:
-				setMax(img, px, py, uint8(fillA))
-			default:
-				setMax(img, px, py, aTrack)
+			if hasPct && frac <= pct {
+				setPix(img, px, py, fill)
+			} else {
+				setPix(img, px, py, pal.track)
 			}
 		}
 	}
 
-	logoA := uint8(aLogo)
+	ink := pal.logo
 	if !t.Available || t.Error != nil {
-		logoA = aDim
+		ink.A = aDimLogo
 	}
 	logo := codexLogo
 	if t.Tool == schema.ToolClaudeCode {
 		logo = claudeLogo
 	}
-	drawLogo(img, cx, cy, rLogo*0.85, logo, logoA) // a little inset from the ring
+	drawLogo(img, cx, cy, rLogo*0.85, logo, ink) // a little inset from the ring
 }
 
 // drawLogo composites the embedded logo (centered, fit to a 2r box) into the
-// gauge using its alpha channel as coverage, bilinearly sampled and tinted to
-// the given intensity.
-func drawLogo(img *image.Alpha, cx, cy, r float64, logo *image.NRGBA, intensity uint8) {
+// gauge, bilinearly sampling its alpha as coverage and painting it in ink.
+func drawLogo(img *image.NRGBA, cx, cy, r float64, logo *image.NRGBA, ink color.NRGBA) {
 	side := 2 * r
 	x0 := cx - r
 	y0 := cy - r
@@ -152,8 +182,8 @@ func drawLogo(img *image.Alpha, cx, cy, r float64, logo *image.NRGBA, intensity 
 			if a == 0 {
 				continue
 			}
-			cov := uint8(float64(a) * float64(intensity) / 255)
-			setMax(img, int(x0)+dx, int(y0)+dy, cov)
+			cov := uint8(float64(a) * float64(ink.A) / 255)
+			setPix(img, int(x0)+dx, int(y0)+dy, color.NRGBA{ink.R, ink.G, ink.B, cov})
 		}
 	}
 }
@@ -196,30 +226,44 @@ func fiveHourFrac(t schema.Tool) (float64, bool) {
 	return 0, false
 }
 
-func setMax(img *image.Alpha, x, y int, a uint8) {
+// setPix overwrites a supersampled pixel. Gauge materials (ring band vs logo
+// region, fill vs track by angle) don't overlap, so plain assignment is fine;
+// anti-aliasing comes from supersampling + downsample.
+func setPix(img *image.NRGBA, x, y int, col color.NRGBA) {
 	if !(image.Pt(x, y).In(img.Bounds())) {
 		return
 	}
 	i := img.PixOffset(x, y)
-	if a > img.Pix[i] {
-		img.Pix[i] = a
-	}
+	img.Pix[i] = col.R
+	img.Pix[i+1] = col.G
+	img.Pix[i+2] = col.B
+	img.Pix[i+3] = col.A
 }
 
-// downsample box-averages the supersampled coverage buffer into a black
-// template image: RGB stays 0, the averaged coverage becomes alpha so the
-// menu bar can tint it for light/dark.
-func downsample(big *image.Alpha, w, h int) *image.NRGBA {
+// downsample box-averages the supersampled color buffer, premultiplying by
+// alpha so edge pixels blend without dark fringes.
+func downsample(big *image.NRGBA, w, h int) *image.NRGBA {
 	out := image.NewNRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			var sum int
+			var r, g, b, a int
 			for sy := 0; sy < ss; sy++ {
 				for sx := 0; sx < ss; sx++ {
-					sum += int(big.Pix[big.PixOffset(x*ss+sx, y*ss+sy)])
+					i := big.PixOffset(x*ss+sx, y*ss+sy)
+					A := int(big.Pix[i+3])
+					r += int(big.Pix[i]) * A
+					g += int(big.Pix[i+1]) * A
+					b += int(big.Pix[i+2]) * A
+					a += A
 				}
 			}
-			out.Pix[out.PixOffset(x, y)+3] = uint8(sum / (ss * ss)) // alpha only; RGB=0 (black)
+			o := out.PixOffset(x, y)
+			if a > 0 {
+				out.Pix[o] = uint8(r / a)
+				out.Pix[o+1] = uint8(g / a)
+				out.Pix[o+2] = uint8(b / a)
+				out.Pix[o+3] = uint8(a / (ss * ss))
+			}
 		}
 	}
 	return out
