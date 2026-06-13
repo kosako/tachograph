@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/core"
+	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 	"github.com/kosako/tachograph/internal/swiftbar"
@@ -49,8 +51,7 @@ func main() {
 	case "cmux":
 		os.Exit(runCmux(args))
 	case "swiftbar":
-		now := time.Now()
-		fmt.Print(swiftbar.Render(core.Status(core.Options{Now: now}), now))
+		os.Exit(runSwiftbar(args))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
 			fmt.Println("tacho " + version)
@@ -65,6 +66,30 @@ func main() {
 
 func style(noColor bool) render.Style {
 	return render.Style{Color: !noColor && os.Getenv("NO_COLOR") == ""}
+}
+
+func runSwiftbar(args []string) int {
+	fs := flag.NewFlagSet("swiftbar", flag.ExitOnError)
+	pngOut := fs.String("png", "", "write the menu bar gauge image to this PNG file (preview)")
+	fs.Parse(args)
+
+	now := time.Now()
+	s := core.Status(core.Options{Now: now})
+	if *pngOut != "" {
+		b64, ok := menubar.PNGBase64(s)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
+			return 1
+		}
+		data, _ := base64.StdEncoding.DecodeString(b64)
+		if err := os.WriteFile(*pngOut, data, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "tacho:", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(swiftbar.Render(s, now))
+	return 0
 }
 
 func runOnce(args []string) int {

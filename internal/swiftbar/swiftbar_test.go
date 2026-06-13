@@ -31,6 +31,7 @@ func tool(name string, stale bool, pct5, pctW float64) schema.Tool {
 }
 
 func TestRenderStructure(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1") // assert the text title fallback
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00")
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
@@ -85,7 +86,17 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	}
 }
 
+func TestRenderTitleImageByDefault(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	out := Render(s, now)
+	if !strings.HasPrefix(out, "| templateImage=") {
+		t.Errorf("default title should be a gauge image, got:\n%s", strings.SplitN(out, "\n", 2)[0])
+	}
+}
+
 func TestRenderTitleBothTools(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
@@ -110,6 +121,7 @@ func TestRenderStaleGray(t *testing.T) {
 }
 
 func TestRenderFallback(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
 	tokens := int64(3962991)
 	cost := 1.5
 	tl := schema.Tool{

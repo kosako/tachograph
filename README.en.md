@@ -131,8 +131,10 @@ tacho cmux clear   # remove tacho's pills
 
 For an always-visible gauge regardless of which agent is running, a
 [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin is bundled. The menu
-bar shows `C🌒 X🌑` (tool initial + 5-hour moon dial); clicking reveals
-per-tool details, colored by usage and gray (with age) when stale.
+bar shows a tachometer per tool — the logo ringed by an iOS-app-download-style
+progress ring that fills clockwise with 5-hour usage; clicking reveals
+per-tool details, colored by usage and gray (with age) when stale. Set
+`TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text (`C🌒 X🌑`).
 
 ```sh
 brew install swiftbar   # if you don't have it
