@@ -107,6 +107,18 @@ tacho cmux push    # ピルを一回push(cron等からも使える)
 tacho cmux clear   # tachoのピルを削除
 ```
 
+### macOSメニューバー(SwiftBar)
+
+どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーには `C🌒 X🌑`(ツール頭文字+5h枠の月齢)、クリックで各ツールの詳細(色は使用率連動、staleはグレー+経過時間)が出ます。
+
+```sh
+brew install swiftbar   # 未導入なら
+cp contrib/tacho.30s.sh <SwiftBarのプラグインフォルダ>/
+chmod +x <プラグインフォルダ>/tacho.30s.sh
+```
+
+ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけの2行なので、出力を変えたければ tacho 側のレンダラを直します。
+
 ### Codex TUI
 
 Codex自身のステータスラインはネイティブ設定です — TUIで `/statusline` を実行し、`model + five-hour-limit + weekly-limit` などを選んでください。tachographはCodex TUIの中には描画できません(する必要もありません)。Codexのセッションログを非侵襲に読んで、それ以外のあらゆる場所に表示します。

@@ -16,6 +16,7 @@ import (
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
+	"github.com/kosako/tachograph/internal/swiftbar"
 )
 
 const version = "0.0.1-dev"
@@ -27,6 +28,7 @@ const usage = `usage:
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
   tacho cmux push       push status pills to the cmux sidebar once
   tacho cmux clear      remove tacho's pills from the cmux sidebar
+  tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
 `
 
 func main() {
@@ -46,6 +48,9 @@ func main() {
 		os.Exit(runStatusline(args))
 	case "cmux":
 		os.Exit(runCmux(args))
+	case "swiftbar":
+		now := time.Now()
+		fmt.Print(swiftbar.Render(core.Status(core.Options{Now: now}), now))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
 			fmt.Println("tacho " + version)
