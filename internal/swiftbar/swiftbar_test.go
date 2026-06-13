@@ -1,6 +1,7 @@
 package swiftbar
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,11 @@ import (
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
+
+// row builds the expected per-tool metric row text (label-padded + bar).
+func barRow(label string, pct float64, suffix string) string {
+	return fmt.Sprintf("%-*s %s %.0f%%%s", labelW, label, lineBar(pct, barWidth), pct, suffix)
+}
 
 func tool(name string, stale bool, pct5, pctW float64) schema.Tool {
 	m5, mW := 300, 10080
@@ -56,9 +62,9 @@ func TestRenderStructure(t *testing.T) {
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5",
-		"context " + render.Bar(24, 8) + " 24%\n",         // normal pressure: no color
-		"5h " + render.Bar(24, 8) + " 24% " + resets + "\n",
-		"weekly " + render.Bar(41, 8) + " 41%\n",
+		barRow("context", 24, "") + " | font=" + dataFont + "\n",
+		barRow("5h", 24, " "+resets) + " | font=" + dataFont + "\n",
+		barRow("weekly", 41, "") + " | font=" + dataFont + "\n",
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
@@ -67,7 +73,7 @@ func TestRenderStructure(t *testing.T) {
 		}
 	}
 	// Normal rows must not carry a color parameter.
-	if strings.Contains(joined, "24% | color=") {
+	if strings.Contains(joined, "24% | font="+dataFont+" color=") {
 		t.Errorf("normal rows should be uncolored:\n%s", joined)
 	}
 }
@@ -77,13 +83,13 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
 	out := Render(s, now, true, config.Default())
-	if !strings.Contains(out, "5h "+render.Bar(85, 8)+" 85%") || !strings.Contains(out, "| color="+colorRed) {
+	if !strings.Contains(out, barRow("5h", 85, "")) || !strings.Contains(out, "| font="+dataFont+" color="+colorRed) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, "weekly "+render.Bar(60, 8)+" 60% | color="+colorYellow) {
+	if !strings.Contains(out, barRow("weekly", 60, "")+" | font="+dataFont+" color="+colorYellow) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
-	if strings.Contains(out, "context "+render.Bar(24, 8)+" 24% | color=") {
+	if strings.Contains(out, barRow("context", 24, "")+" | font="+dataFont+" color=") {
 		t.Errorf("normal context row should be uncolored:\n%s", out)
 	}
 }
@@ -194,10 +200,13 @@ func TestRenderFallback(t *testing.T) {
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
 	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default())
-	if !strings.Contains(out, "cost $1.50\n") || !strings.Contains(out, "tokens 4M\n") {
+	costRow := fmt.Sprintf("%-*s $1.50 | font=%s\n", labelW, "cost", dataFont)
+	tokRow := fmt.Sprintf("%-*s 4M | font=%s\n", labelW, "tokens", dataFont)
+	missRow := fmt.Sprintf("%-*s -- | font=%s\n", labelW, "5h", dataFont)
+	if !strings.Contains(out, costRow) || !strings.Contains(out, tokRow) {
 		t.Errorf("cost/tokens rows missing:\n%s", out)
 	}
-	if !strings.Contains(out, "5h --\n") {
+	if !strings.Contains(out, missRow) {
 		t.Errorf("absent limit should show --:\n%s", out)
 	}
 	if !strings.HasPrefix(out, "X◌\n") {

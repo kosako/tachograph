@@ -78,9 +78,9 @@ func TestSnapshot(t *testing.T) {
 		t.Error("ReadSnapshot returned a snapshot older than maxAge")
 	}
 
-	// Within maxAge but past the stale threshold? Not possible here since
-	// SnapshotMaxAge < stale threshold is false; verify recompute instead.
-	got, ok = ReadSnapshot(schema.ToolClaudeCode, time.Hour, now.Add(30*time.Minute))
+	// Returned within maxAge but past the stale threshold → Stale recomputed
+	// to true. Age here is ~92min (> 60min threshold) but under the 2h maxAge.
+	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute))
 	if !ok || !got.Stale {
 		t.Errorf("ReadSnapshot stale recompute: got %+v, %v", got, ok)
 	}

@@ -26,7 +26,9 @@ const (
 )
 
 // StaleAfterMinutes is the age of collected_at beyond which stale is set.
-const StaleAfterMinutes = 15
+// Rate-limit windows span hours, so a reading stays trustworthy for a while;
+// this is deliberately generous so brief idle gaps don't gray everything out.
+const StaleAfterMinutes = 60
 
 // Status is the top-level document.
 type Status struct {

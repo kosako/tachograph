@@ -229,22 +229,42 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 
 // barWidth is the gauge width for dropdown rows (space is not constrained
 // here, so a bar reads better than the compact moon dial).
-const barWidth = 8
+const barWidth = 10
+
+// dataFont renders the per-tool rows in a monospace font so the bars and
+// columns line up — the dropdown otherwise uses a proportional menu font.
+const dataFont = "Menlo"
+
+// lineBar is a thin-line gauge (━ filled, ─ empty) that looks cleaner than
+// block characters in the proportional-then-monospaced menu.
+func lineBar(pct float64, width int) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	filled := int(pct/100*float64(width) + 0.5)
+	return strings.Repeat("━", filled) + strings.Repeat("─", width-filled)
+}
+
+// labelW pads metric labels so the bars line up in the monospace font.
+const labelW = 7
 
 // limitRow renders a rate-limit window with a usage bar, reset time, and
 // pressure color (or "--" when the window is absent).
 func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
-			line := fmt.Sprintf("%s %s %.0f%%", label, render.Bar(*l.UsedPct, barWidth), *l.UsedPct)
+			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(*l.UsedPct, barWidth), *l.UsedPct)
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
-			writeLine(b, line, lineColor(t, *l.UsedPct))
+			dataRow(b, line, lineColor(t, *l.UsedPct))
 			return
 		}
 	}
-	writeLine(b, label+" "+render.Missing, staleOnly(t))
+	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, render.Missing), staleOnly(t))
 }
 
 // metricRow renders context/cost/tokens. Percentage metrics get a usage bar;
@@ -252,11 +272,21 @@ func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.
 func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
 	frac, text := render.Metric(t, metric)
 	if frac != nil { // percentage metric: bar + color by pressure
-		line := fmt.Sprintf("%s %s %s", label, render.Bar(*frac*100, barWidth), text)
-		writeLine(b, line, lineColor(t, *frac*100))
+		line := fmt.Sprintf("%-*s %s %s", labelW, label, lineBar(*frac*100, barWidth), text)
+		dataRow(b, line, lineColor(t, *frac*100))
 		return
 	}
-	writeLine(b, label+" "+text, staleOnly(t))
+	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, text), staleOnly(t))
+}
+
+// dataRow writes a per-tool metric row in the monospace data font, with the
+// SwiftBar color parameter only when set.
+func dataRow(b *strings.Builder, text, color string) {
+	fmt.Fprintf(b, "%s | font=%s", text, dataFont)
+	if color != "" {
+		fmt.Fprintf(b, " color=%s", color)
+	}
+	b.WriteByte('\n')
 }
 
 // staleOnly returns gray for stale tools, else no color.
@@ -265,17 +295,6 @@ func staleOnly(t schema.Tool) string {
 		return colorGray
 	}
 	return ""
-}
-
-// writeLine emits a dropdown row, attaching SwiftBar's color parameter only
-// when one is set. Normal-pressure rows stay uncolored so they follow the
-// menu's theme color and read on both light and dark backgrounds.
-func writeLine(b *strings.Builder, text, color string) {
-	if color == "" {
-		fmt.Fprintln(b, text)
-		return
-	}
-	fmt.Fprintf(b, "%s | color=%s\n", text, color)
 }
 
 // lineColor only colors rows that need attention: yellow/red by pressure,
