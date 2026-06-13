@@ -112,6 +112,28 @@ func TestRenderNumberStyle(t *testing.T) {
 	}
 }
 
+func TestRenderSettingsMenu(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	cfg := config.Default()
+	cfg.Tools = []string{schema.ToolClaudeCode} // codex disabled
+	out := Render(s, now, true, cfg)
+
+	for _, want := range []string{
+		"Settings\n",
+		"param2=\"cycle\" param3=\"menubar.style\"",
+		"param2=\"cycle\" param3=\"menubar.metric\"",
+		"--● Claude |", // enabled
+		"--○ Codex |",  // disabled
+		"param2=\"toggle-tool\" param3=\"codex\"",
+		"refresh=true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("settings menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderToolFilter(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{

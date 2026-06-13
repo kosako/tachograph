@@ -149,6 +149,24 @@ The `30s` in the filename is the refresh interval (rename to change). The
 script just execs `tacho swiftbar`, so display changes belong in the tacho
 renderer.
 
+#### Configuring what's shown
+
+The **Settings** submenu at the bottom of the dropdown toggles everything
+with a click:
+
+- **Display**: meter (gauge) or number
+- **Metric**: 5h limit / weekly limit / context / cost / tokens (pick one)
+- **● / ○ Claude · Codex**: which tools to show
+
+Or via the CLI (config lives in `~/.config/tachograph/config.json`):
+
+```sh
+tacho config show
+tacho config set menubar.style number   # meter → number
+tacho config set menubar.metric cost    # show spent cost instead of limits
+tacho config set tools codex            # show only Codex
+```
+
 ### Codex TUI
 
 Codex's own status line is configured natively — run `/statusline` in the

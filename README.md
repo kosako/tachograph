@@ -119,6 +119,23 @@ chmod +x <プラグインフォルダ>/tacho.30s.sh
 
 ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけの2行なので、出力を変えたければ tacho 側のレンダラを直します。
 
+#### 表示内容の設定
+
+ドロップダウン下部の **Settings** から、クリックだけで切り替えられます:
+
+- **表示**: メーター(ゲージ)/ 数字
+- **指標**: 5h limit / weekly limit / context / cost / tokens(1つ選択)
+- **● / ○ Claude・Codex**: 表示するツールの切り替え
+
+CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
+
+```sh
+tacho config show
+tacho config set menubar.style number      # メーター→数字
+tacho config set menubar.metric cost       # 使った金額を表示
+tacho config set tools codex               # Codexだけ表示
+```
+
 ### Codex TUI
 
 Codex自身のステータスラインはネイティブ設定です — TUIで `/statusline` を実行し、`model + five-hour-limit + weekly-limit` などを選んでください。tachographはCodex TUIの中には描画できません(する必要もありません)。Codexのセッションログを非侵襲に読んで、それ以外のあらゆる場所に表示します。
