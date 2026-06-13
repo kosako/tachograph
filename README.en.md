@@ -127,6 +127,23 @@ tacho cmux push    # push pills once (e.g. from cron or other hooks)
 tacho cmux clear   # remove tacho's pills
 ```
 
+### macOS menu bar (SwiftBar)
+
+For an always-visible gauge regardless of which agent is running, a
+[SwiftBar](https://github.com/swiftbar/SwiftBar) plugin is bundled. The menu
+bar shows `C🌒 X🌑` (tool initial + 5-hour moon dial); clicking reveals
+per-tool details, colored by usage and gray (with age) when stale.
+
+```sh
+brew install swiftbar   # if you don't have it
+cp contrib/tacho.30s.sh <your SwiftBar plugin folder>/
+chmod +x <plugin folder>/tacho.30s.sh
+```
+
+The `30s` in the filename is the refresh interval (rename to change). The
+script just execs `tacho swiftbar`, so display changes belong in the tacho
+renderer.
+
 ### Codex TUI
 
 Codex's own status line is configured natively — run `/statusline` in the
