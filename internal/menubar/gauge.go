@@ -16,6 +16,7 @@ import (
 	"image/png"
 	"math"
 
+	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -78,8 +79,8 @@ const aDimLogo = 90 // logo alpha when the tool is unavailable
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
 // there is nothing to draw. dark selects the system appearance so the logo
-// and track stay legible on the menu bar.
-func PNGBase64(s schema.Status, dark bool) (string, bool) {
+// and track stay legible; metric selects which value drives the ring.
+func PNGBase64(s schema.Status, dark bool, metric string) (string, bool) {
 	if len(s.Tools) == 0 {
 		return "", false
 	}
@@ -88,7 +89,7 @@ func PNGBase64(s schema.Status, dark bool) (string, bool) {
 	w := canvas*n + gap*(n-1)
 	big := image.NewNRGBA(image.Rect(0, 0, w*ss, canvas*ss))
 	for i, t := range s.Tools {
-		drawGauge(big, (canvas+gap)*i*ss, t, pal)
+		drawGauge(big, (canvas+gap)*i*ss, t, pal, metric)
 	}
 	img := downsample(big, w, canvas)
 
@@ -116,8 +117,8 @@ func ringColor(t schema.Tool, frac float64) color.NRGBA {
 }
 
 // drawGauge renders one tool into a canvas*ss square at horizontal offset ox
-// (supersampled coordinates).
-func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette) {
+// (supersampled coordinates). metric selects which value fills the ring.
+func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric string) {
 	c := float64(canvas * ss)
 	cx := float64(ox) + c/2
 	cy := c / 2
@@ -129,7 +130,12 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette) {
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
-	pct, hasPct := fiveHourFrac(t)
+	frac, _ := render.Metric(t, metric)
+	var pct float64
+	hasPct := frac != nil
+	if hasPct {
+		pct = *frac
+	}
 	fill := ringColor(t, pct)
 
 	// Progress ring: full circle, starting at 12 o'clock, clockwise.
@@ -205,25 +211,6 @@ func sampleAlpha(src *image.NRGBA, u, v float64) uint8 {
 	top := at(x0, y0)*(1-fx) + at(x0+1, y0)*fx
 	bot := at(x0, y0+1)*(1-fx) + at(x0+1, y0+1)*fx
 	return uint8(top*(1-fy) + bot*fy)
-}
-
-func fiveHourFrac(t schema.Tool) (float64, bool) {
-	if !t.Available || t.Error != nil {
-		return 0, false
-	}
-	for _, l := range t.Limits {
-		if l.Window == schema.WindowFiveHour && l.UsedPct != nil {
-			p := *l.UsedPct / 100
-			if p < 0 {
-				p = 0
-			}
-			if p > 1 {
-				p = 1
-			}
-			return p, true
-		}
-	}
-	return 0, false
 }
 
 // setPix overwrites a supersampled pixel. Gauge materials (ring band vs logo

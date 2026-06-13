@@ -80,9 +80,10 @@ func runSwiftbar(args []string) int {
 
 	now := time.Now()
 	dark := appearanceDark()
+	cfg := config.Load()
 	s := core.Status(core.Options{Now: now})
 	if *pngOut != "" {
-		b64, ok := menubar.PNGBase64(s, dark)
+		b64, ok := menubar.PNGBase64(s, dark, cfg.Menubar.Metric)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
@@ -94,7 +95,7 @@ func runSwiftbar(args []string) int {
 		}
 		return 0
 	}
-	fmt.Print(swiftbar.Render(s, now, dark))
+	fmt.Print(swiftbar.Render(s, now, dark, cfg))
 	return 0
 }
 
