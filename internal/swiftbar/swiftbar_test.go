@@ -56,9 +56,9 @@ func TestRenderStructure(t *testing.T) {
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5",
-		"ctx 24%\n",                  // normal pressure: no color
+		"context 24%\n",              // normal pressure: no color
 		"5h 🌒 24% " + resets + "\n", // normal pressure: no color
-		"wk 🌓 41%\n",
+		"weekly 🌓 41%\n",
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
@@ -67,8 +67,8 @@ func TestRenderStructure(t *testing.T) {
 		}
 	}
 	// Normal rows must not carry a color parameter.
-	if strings.Contains(joined, "ctx 24% | color=") {
-		t.Errorf("normal ctx row should be uncolored:\n%s", joined)
+	if strings.Contains(joined, "context 24% | color=") {
+		t.Errorf("normal context row should be uncolored:\n%s", joined)
 	}
 }
 
@@ -80,11 +80,11 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	if !strings.Contains(out, "5h 🌔 85%") || !strings.Contains(out, "| color="+colorRed) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, "wk 🌓 60% | color="+colorYellow) {
+	if !strings.Contains(out, "weekly 🌓 60% | color="+colorYellow) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
-	if strings.Contains(out, "ctx 24% | color=") {
-		t.Errorf("normal ctx row should be uncolored:\n%s", out)
+	if strings.Contains(out, "context 24% | color=") {
+		t.Errorf("normal context row should be uncolored:\n%s", out)
 	}
 }
 
@@ -121,10 +121,18 @@ func TestRenderSettingsMenu(t *testing.T) {
 
 	for _, want := range []string{
 		"Settings\n",
-		"param2=\"cycle\" param3=\"menubar.style\"",
-		"param2=\"cycle\" param3=\"menubar.metric\"",
-		"--● Claude |", // enabled
-		"--○ Codex |",  // disabled
+		"--表示形式\n",
+		"--指標\n",
+		"--表示するツール\n",
+		// style: meter selected (✓), set directly
+		"----✓ メーター | bash=",
+		"param3=\"menubar.style\" param4=\"meter\"",
+		// metric submenu lists all options
+		"param3=\"menubar.metric\" param4=\"cost\"",
+		"param3=\"menubar.metric\" param4=\"tokens\"",
+		// tools as checkboxes: Claude enabled, Codex disabled
+		"----☑ Claude | bash=",
+		"----☐ Codex | bash=",
 		"param2=\"toggle-tool\" param3=\"codex\"",
 		"refresh=true",
 	} {
@@ -186,8 +194,11 @@ func TestRenderFallback(t *testing.T) {
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
 	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default())
-	if !strings.Contains(out, "tokens 4M $1.50") {
-		t.Errorf("fallback line missing:\n%s", out)
+	if !strings.Contains(out, "cost $1.50\n") || !strings.Contains(out, "tokens 4M\n") {
+		t.Errorf("cost/tokens rows missing:\n%s", out)
+	}
+	if !strings.Contains(out, "5h --\n") {
+		t.Errorf("absent limit should show --:\n%s", out)
 	}
 	if !strings.HasPrefix(out, "X◌\n") {
 		t.Errorf("title = %q, want X◌ for tool without limits", strings.SplitN(out, "\n", 2)[0])
