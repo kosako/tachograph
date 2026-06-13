@@ -69,10 +69,12 @@ type palette struct {
 }
 
 func paletteFor(dark bool) palette {
+	// The track is kept very faint so a low-usage gauge reads as "white logo
+	// + a little colored arc", not a dominant gray ring.
 	if dark {
-		return palette{logo: color.NRGBA{255, 255, 255, 255}, track: color.NRGBA{255, 255, 255, 70}}
+		return palette{logo: color.NRGBA{255, 255, 255, 255}, track: color.NRGBA{255, 255, 255, 32}}
 	}
-	return palette{logo: color.NRGBA{40, 40, 42, 255}, track: color.NRGBA{50, 50, 50, 70}}
+	return palette{logo: color.NRGBA{40, 40, 42, 255}, track: color.NRGBA{40, 40, 40, 38}}
 }
 
 const aDimLogo = 90 // logo alpha when the tool is unavailable
