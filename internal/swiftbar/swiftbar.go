@@ -16,12 +16,23 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// Dropdown attention colors (SwiftBar `color=` parameter).
-const (
-	colorYellow = "#FFCC00"
-	colorRed    = "#FF3B30"
-	colorGray   = "#8E8E93"
-)
+// Dropdown attention colors. Yellow/red are appearance-aware: a bright yellow
+// is unreadable on the light menu, so light mode uses a darker amber/red.
+const colorGray = "#8E8E93"
+
+func attnYellow() string {
+	if MenuDark {
+		return "#FFD60A"
+	}
+	return "#B45309" // dark amber, readable on white
+}
+
+func attnRed() string {
+	if MenuDark {
+		return "#FF453A"
+	}
+	return "#D11507"
+}
 
 // Default text inks. Non-clickable info rows are auto-disabled (rendered
 // gray) by macOS, so we set an explicit color to make them legible. The
@@ -62,6 +73,7 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string
 		section(&b, t, now)
 	}
 	b.WriteString("---\n")
+	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
 	settings(&b, cfg)
 	b.WriteString("Refresh | refresh=true\n")
 	return b.String()
@@ -330,9 +342,9 @@ func lineColor(t schema.Tool, pct float64) string {
 	}
 	switch {
 	case pct >= 80:
-		return colorRed
+		return attnRed()
 	case pct >= 50:
-		return colorYellow
+		return attnYellow()
 	default:
 		return ink()
 	}

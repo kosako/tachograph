@@ -80,10 +80,10 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
 	out := Render(s, now, true, config.Default())
-	if !strings.Contains(out, barRow("5h", 85, "")) || !strings.Contains(out, "| font="+dataFont+" color="+colorRed) {
+	if !strings.Contains(out, barRow("5h", 85, "")) || !strings.Contains(out, "| font="+dataFont+" color="+attnRed()) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, barRow("weekly", 60, "")+" | font="+dataFont+" color="+colorYellow) {
+	if !strings.Contains(out, barRow("weekly", 60, "")+" | font="+dataFont+" color="+attnYellow()) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
 	// Normal context row uses the ink color, not an attention color.
@@ -184,7 +184,7 @@ func TestRenderStaleGray(t *testing.T) {
 	if !strings.Contains(out, "⚠2h") {
 		t.Errorf("stale age missing:\n%s", out)
 	}
-	if strings.Contains(out, colorYellow) || !strings.Contains(out, colorGray) {
+	if strings.Contains(out, attnYellow()) || !strings.Contains(out, colorGray) {
 		t.Errorf("stale lines should be gray, not pressure-colored:\n%s", out)
 	}
 }
