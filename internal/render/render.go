@@ -78,6 +78,24 @@ func Dial(pct float64) string {
 // DialMissing keeps single-character alignment when a dial has no data.
 const DialMissing = "◌"
 
+// Moon renders pct (0-100, used) as a moon-phase gauge: 🌑🌒🌓🌔🌕.
+// Emoji render larger than the ○◔◑◕● glyphs, at the cost of ANSI colors
+// (terminals draw emoji in their own colors).
+func Moon(pct float64) string {
+	switch {
+	case pct < 12.5:
+		return "🌑"
+	case pct < 37.5:
+		return "🌒"
+	case pct < 62.5:
+		return "🌓"
+	case pct < 87.5:
+		return "🌔"
+	default:
+		return "🌕"
+	}
+}
+
 // FormatTokens compacts a token count: 989120 → "989k", 12504028 → "12.5M".
 func FormatTokens(n int64) string {
 	switch {
