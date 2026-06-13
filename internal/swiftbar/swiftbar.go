@@ -13,9 +13,9 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// Menu bar / dropdown colors per pressure (SwiftBar `color=` parameter).
+// Dropdown attention colors (SwiftBar `color=` parameter). Normal-pressure
+// rows are left uncolored to follow the menu theme — see lineColor.
 const (
-	colorGreen  = "#34C759"
 	colorYellow = "#FFCC00"
 	colorRed    = "#FF3B30"
 	colorGray   = "#8E8E93"
@@ -98,7 +98,7 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 
 	if t.Session != nil && t.Session.ContextUsedPct != nil {
 		pct := *t.Session.ContextUsedPct
-		fmt.Fprintf(b, "ctx %.0f%% | color=%s\n", pct, lineColor(t, pct))
+		writeLine(b, fmt.Sprintf("ctx %.0f%%", pct), lineColor(t, pct))
 	}
 	if t.Limits != nil {
 		for _, l := range t.Limits {
@@ -113,18 +113,30 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
-			fmt.Fprintf(b, "%s | color=%s\n", line, lineColor(t, *l.UsedPct))
+			writeLine(b, line, lineColor(t, *l.UsedPct))
 		}
 	} else if t.Fallback != nil && t.Fallback.SessionTokens != nil {
 		line := "tokens " + render.FormatTokens(*t.Fallback.SessionTokens)
 		if t.Fallback.EstimatedCostUSD != nil {
 			line += fmt.Sprintf(" $%.2f", *t.Fallback.EstimatedCostUSD)
 		}
-		fmt.Fprintf(b, "%s | color=%s\n", line, lineColor(t, 0))
+		writeLine(b, line, lineColor(t, 0))
 	}
 }
 
-// lineColor follows the shared pressure palette; stale data is gray.
+// writeLine emits a dropdown row, attaching SwiftBar's color parameter only
+// when one is set. Normal-pressure rows stay uncolored so they follow the
+// menu's theme color and read on both light and dark backgrounds.
+func writeLine(b *strings.Builder, text, color string) {
+	if color == "" {
+		fmt.Fprintln(b, text)
+		return
+	}
+	fmt.Fprintf(b, "%s | color=%s\n", text, color)
+}
+
+// lineColor only colors rows that need attention: yellow/red by pressure,
+// gray when stale. Normal usage returns "" (no color, theme default).
 func lineColor(t schema.Tool, pct float64) string {
 	if t.Stale {
 		return colorGray
@@ -135,6 +147,6 @@ func lineColor(t schema.Tool, pct float64) string {
 	case pct >= 50:
 		return colorYellow
 	default:
-		return colorGreen
+		return ""
 	}
 }
