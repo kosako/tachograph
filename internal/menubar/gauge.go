@@ -6,13 +6,43 @@ package menubar
 
 import (
 	"bytes"
+	"embed"
 	"encoding/base64"
 	"image"
+	"image/draw"
 	"image/png"
 	"math"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
+
+// Logo marks, rasterized from assets/logos/*.svg to monochrome PNGs (see
+// the README's contributing notes). Embedded so the runtime stays
+// stdlib-only — no SVG rasterizer dependency.
+//
+//go:embed assets/claude.png assets/codex.png
+var assetFS embed.FS
+
+var (
+	claudeLogo = mustLoadLogo("assets/claude.png")
+	codexLogo  = mustLoadLogo("assets/codex.png")
+)
+
+func mustLoadLogo(name string) *image.NRGBA {
+	f, err := assetFS.Open(name)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	src, err := png.Decode(f)
+	if err != nil {
+		panic(err)
+	}
+	b := src.Bounds()
+	out := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(out, out.Bounds(), src, b.Min, draw.Src)
+	return out
+}
 
 const (
 	ss     = 4  // supersampling factor for anti-aliasing
@@ -97,11 +127,54 @@ func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
 	if !t.Available || t.Error != nil {
 		logoA = aDim
 	}
+	logo := codexLogo
 	if t.Tool == schema.ToolClaudeCode {
-		drawClaude(img, cx, cy, rLogo, logoA)
-	} else {
-		drawCodex(img, cx, cy, rLogo, logoA)
+		logo = claudeLogo
 	}
+	drawLogo(img, cx, cy, rLogo*0.85, logo, logoA) // a little inset from the ring
+}
+
+// drawLogo composites the embedded logo (centered, fit to a 2r box) into the
+// gauge using its alpha channel as coverage, bilinearly sampled and tinted to
+// the given intensity.
+func drawLogo(img *image.Alpha, cx, cy, r float64, logo *image.NRGBA, intensity uint8) {
+	side := 2 * r
+	x0 := cx - r
+	y0 := cy - r
+	sb := logo.Bounds()
+	sw, sh := float64(sb.Dx()), float64(sb.Dy())
+	n := int(math.Ceil(side))
+	for dy := 0; dy <= n; dy++ {
+		for dx := 0; dx <= n; dx++ {
+			u := (float64(dx) + 0.5) / side * sw
+			v := (float64(dy) + 0.5) / side * sh
+			a := sampleAlpha(logo, u, v)
+			if a == 0 {
+				continue
+			}
+			cov := uint8(float64(a) * float64(intensity) / 255)
+			setMax(img, int(x0)+dx, int(y0)+dy, cov)
+		}
+	}
+}
+
+// sampleAlpha bilinearly samples the alpha channel of src at (u,v) pixel
+// coordinates, returning 0 outside bounds.
+func sampleAlpha(src *image.NRGBA, u, v float64) uint8 {
+	b := src.Bounds()
+	x0 := int(math.Floor(u - 0.5))
+	y0 := int(math.Floor(v - 0.5))
+	fx := u - 0.5 - float64(x0)
+	fy := v - 0.5 - float64(y0)
+	at := func(x, y int) float64 {
+		if x < 0 || y < 0 || x >= b.Dx() || y >= b.Dy() {
+			return 0
+		}
+		return float64(src.Pix[src.PixOffset(b.Min.X+x, b.Min.Y+y)+3])
+	}
+	top := at(x0, y0)*(1-fx) + at(x0+1, y0)*fx
+	bot := at(x0, y0+1)*(1-fx) + at(x0+1, y0+1)*fx
+	return uint8(top*(1-fy) + bot*fy)
 }
 
 func fiveHourFrac(t schema.Tool) (float64, bool) {
@@ -121,74 +194,6 @@ func fiveHourFrac(t schema.Tool) (float64, bool) {
 		}
 	}
 	return 0, false
-}
-
-// drawClaude approximates the Claude/Anthropic sunburst: tapered radial spokes.
-func drawClaude(img *image.Alpha, cx, cy, r float64, a uint8) {
-	const spokes = 12
-	half := r * 0.085 // spoke half-width at the rim
-	for i := 0; i < spokes; i++ {
-		ang := float64(i) / spokes * 2 * math.Pi
-		x0 := cx + r*0.18*math.Cos(ang)
-		y0 := cy + r*0.18*math.Sin(ang)
-		x1 := cx + r*0.92*math.Cos(ang)
-		y1 := cy + r*0.92*math.Sin(ang)
-		drawTaperedLine(img, x0, y0, x1, y1, r*0.03, half, a)
-	}
-}
-
-// drawCodex approximates a hexagonal knot to distinguish Codex/OpenAI.
-func drawCodex(img *image.Alpha, cx, cy, r float64, a uint8) {
-	const sides = 6
-	rr := r * 0.82
-	half := r * 0.075
-	pt := func(i int) (float64, float64) {
-		ang := float64(i)/sides*2*math.Pi - math.Pi/2
-		return cx + rr*math.Cos(ang), cy + rr*math.Sin(ang)
-	}
-	for i := 0; i < sides; i++ {
-		x0, y0 := pt(i)
-		x1, y1 := pt((i + 1) % sides)
-		drawTaperedLine(img, x0, y0, x1, y1, half, half, a)
-	}
-	// inner spokes to every other vertex for a knotted look
-	for i := 0; i < sides; i += 2 {
-		x1, y1 := pt(i)
-		drawTaperedLine(img, cx, cy, x1, y1, half*0.7, half*0.7, a)
-	}
-}
-
-// drawTaperedLine fills a line whose half-width runs from h0 (at p0) to h1
-// (at p1), giving spokes that taper.
-func drawTaperedLine(img *image.Alpha, x0, y0, x1, y1, h0, h1 float64, a uint8) {
-	minX := int(math.Floor(math.Min(x0, x1) - math.Max(h0, h1) - 1))
-	maxX := int(math.Ceil(math.Max(x0, x1) + math.Max(h0, h1) + 1))
-	minY := int(math.Floor(math.Min(y0, y1) - math.Max(h0, h1) - 1))
-	maxY := int(math.Ceil(math.Max(y0, y1) + math.Max(h0, h1) + 1))
-	dx, dy := x1-x0, y1-y0
-	ll := dx*dx + dy*dy
-	for py := minY; py <= maxY; py++ {
-		for px := minX; px <= maxX; px++ {
-			fx := float64(px) + 0.5
-			fy := float64(py) + 0.5
-			var tt float64
-			if ll > 0 {
-				tt = ((fx-x0)*dx + (fy-y0)*dy) / ll
-			}
-			if tt < 0 {
-				tt = 0
-			}
-			if tt > 1 {
-				tt = 1
-			}
-			projX := x0 + tt*dx
-			projY := y0 + tt*dy
-			d := math.Hypot(fx-projX, fy-projY)
-			if d <= h0+(h1-h0)*tt {
-				setMax(img, px, py, a)
-			}
-		}
-	}
 }
 
 func setMax(img *image.Alpha, x, y int, a uint8) {
