@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
@@ -24,13 +25,15 @@ const (
 )
 
 // Render produces the full plugin output for one status document. dark
-// selects the menu bar appearance so the gauge logo/track stay legible.
-func Render(s schema.Status, now time.Time, dark bool) string {
-	var b strings.Builder
+// selects the menu bar appearance; cfg selects which tools, metric, and
+// display style to show.
+func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string {
+	shown := filterTools(s, cfg)
 
-	b.WriteString(titleLine(s, dark))
+	var b strings.Builder
+	b.WriteString(titleLine(shown, dark, cfg))
 	b.WriteString("\n---\n")
-	for i, t := range s.Tools {
+	for i, t := range shown.Tools {
 		if i > 0 {
 			b.WriteString("---\n")
 		}
@@ -41,18 +44,54 @@ func Render(s schema.Status, now time.Time, dark bool) string {
 	return b.String()
 }
 
-// titleLine is the menu bar representation: a tachometer gauge image per
-// tool (logo ringed by a usage-colored progress ring). The image is colored,
-// so it uses `image=` (not the tinted `templateImage=`). Falls back to the
-// moon-dial text when image generation is unavailable or TACHO_SWIFTBAR_TEXT
-// is set.
-func titleLine(s schema.Status, dark bool) string {
+// filterTools keeps only the configured tools, in configured order.
+func filterTools(s schema.Status, cfg config.Config) schema.Status {
+	out := s
+	out.Tools = nil
+	for _, name := range cfg.Tools {
+		for _, t := range s.Tools {
+			if t.Tool == name {
+				out.Tools = append(out.Tools, t)
+			}
+		}
+	}
+	return out
+}
+
+// titleLine is the menu bar representation. With the meter style it is a
+// tachometer gauge image (colored, so `image=` not the tinted
+// `templateImage=`) driven by cfg.Menubar.Metric; with the number style it
+// is the metric value as text. TACHO_SWIFTBAR_TEXT forces the moon-dial text.
+func titleLine(s schema.Status, dark bool, cfg config.Config) string {
+	if cfg.Menubar.Style == config.StyleNumber {
+		return numberTitle(s, cfg.Menubar.Metric)
+	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(s, dark); ok {
+		if b64, ok := menubar.PNGBase64(s, dark, cfg.Menubar.Metric); ok {
 			return "| image=" + b64
 		}
 	}
 	return title(s)
+}
+
+// numberTitle renders the chosen metric per tool as text, e.g. "C 24% X 7%".
+func numberTitle(s schema.Status, metric string) string {
+	var parts []string
+	for _, t := range s.Tools {
+		if !t.Available || t.Error != nil {
+			continue
+		}
+		initial := "X"
+		if t.Tool == schema.ToolClaudeCode {
+			initial = "C"
+		}
+		_, text := render.Metric(t, metric)
+		parts = append(parts, initial+" "+text)
+	}
+	if len(parts) == 0 {
+		return "tacho " + render.Missing
+	}
+	return strings.Join(parts, "  ")
 }
 
 // title is the menu bar text fallback: tool initial + 5h moon dial, "C🌒 X🌑".
