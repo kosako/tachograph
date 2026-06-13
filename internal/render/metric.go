@@ -15,8 +15,14 @@ const (
 	MetricTokens      = "tokens"       // session token count
 )
 
-// Metrics lists the selectable metrics in display order.
+// Metrics lists every metric (used for the dropdown's full readout and for
+// validation).
 var Metrics = []string{MetricLimit5h, MetricLimitWeekly, MetricContext, MetricCost, MetricTokens}
+
+// MenubarMetrics is the subset offered as the menu bar's single metric.
+// Context is excluded: it churns per session and isn't a useful at-a-glance
+// menu bar figure.
+var MenubarMetrics = []string{MetricLimit5h, MetricLimitWeekly, MetricCost, MetricTokens}
 
 // MetricLabel is a short human label for a metric id.
 func MetricLabel(metric string) string {

@@ -83,9 +83,9 @@ func settings(b *strings.Builder, cfg config.Config) {
 			"config", "set", "menubar.style", o.value)
 	}
 
-	// Metric (radio) — all selectable metrics listed.
+	// Metric (radio) — menu-bar-appropriate metrics (context excluded).
 	b.WriteString("--指標\n")
-	for _, m := range render.Metrics {
+	for _, m := range render.MenubarMetrics {
 		clickOption(b, 2, mark(cfg.Menubar.Metric == m)+render.MetricLabel(m),
 			"config", "set", "menubar.metric", m)
 	}
