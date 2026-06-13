@@ -45,9 +45,9 @@ func mustLoadLogo(name string) *image.NRGBA {
 }
 
 const (
-	ss     = 4  // supersampling factor for anti-aliasing
-	canvas = 44 // logical pixels per tool (square)
-	gap    = 2  // logical pixels between tools (gauges already carry margin)
+	ss     = 6  // supersampling factor for anti-aliasing
+	canvas = 22 // final pixels per tool — SwiftBar shows the image near 1:1,
+	gap    = 2  // so this is roughly the on-screen size (menu-bar-icon sized)
 )
 
 // alpha levels in the supersampled buffer (averaged down to gray coverage).
@@ -87,12 +87,12 @@ func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
 	cx := float64(ox) + c/2
 	cy := c / 2
 
-	// Generous transparent margin keeps the gauge from looking oversized
-	// next to system menu bar icons (~56% of the canvas).
-	rOut := c * 0.28
-	thick := c * 0.042
+	// Gauge fills ~80% of the (already small) canvas, leaving a little
+	// margin so it sits like a normal menu bar glyph.
+	rOut := c * 0.40
+	thick := c * 0.06
 	rIn := rOut - thick
-	rLogo := rIn - c*0.025
+	rLogo := rIn - c*0.03
 
 	pct, hasPct := fiveHourFrac(t)
 	fillA := aFill
