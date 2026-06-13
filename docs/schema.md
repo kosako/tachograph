@@ -61,6 +61,10 @@
   "fallback": {                       // limits が null のときレンダラが主表示に使う
     "session_tokens": 989120,
     "estimated_cost_usd": null
+  },
+  "daily": {                          // 当日(ローカル日付)の全セッション合計
+    "tokens": 12704565,               // 新規トークン(cache_read等の再読込は除外)
+    "cost_usd": null                  // 料金表ベースの推定コスト(未確定時null)
   }
 }
 ```

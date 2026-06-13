@@ -52,6 +52,13 @@ type Tool struct {
 	Limits      []Limit   `json:"limits"` // nil marshals to null
 	Credits     *float64  `json:"credits"`
 	Fallback    *Fallback `json:"fallback"`
+	Daily       *Daily    `json:"daily"` // today's totals across all sessions
+}
+
+// Daily holds today's aggregate usage across every session of a tool.
+type Daily struct {
+	Tokens  int64    `json:"tokens"`
+	CostUSD *float64 `json:"cost_usd"` // nil until pricing is known
 }
 
 type Error struct {
