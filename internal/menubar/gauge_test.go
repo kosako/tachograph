@@ -38,7 +38,7 @@ func TestPNGBase64Dimensions(t *testing.T) {
 		toolWith(schema.ToolClaudeCode, 34),
 		toolWith(schema.ToolCodex, 78),
 	}}
-	b64, ok := PNGBase64(s)
+	b64, ok := PNGBase64(s, true)
 	if !ok {
 		t.Fatal("PNGBase64 not ok")
 	}
@@ -52,7 +52,7 @@ func TestPNGBase64Dimensions(t *testing.T) {
 }
 
 func TestPNGBase64Empty(t *testing.T) {
-	if _, ok := PNGBase64(schema.Status{}); ok {
+	if _, ok := PNGBase64(schema.Status{}, true); ok {
 		t.Error("PNGBase64 should be !ok with no tools")
 	}
 }
@@ -61,7 +61,7 @@ func TestPNGBase64Empty(t *testing.T) {
 // higher-percentage gauge has strictly more ink than a lower one.
 func TestFillScalesWithUsage(t *testing.T) {
 	ink := func(pct float64) int {
-		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}})
+		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}}, true)
 		if !ok {
 			t.Fatal("not ok")
 		}
@@ -87,7 +87,7 @@ func TestUnavailableRendersTrackOnly(t *testing.T) {
 	// An unavailable tool still produces a gauge (dim track + dim logo),
 	// so the image dimensions stay stable.
 	s := schema.Status{Tools: []schema.Tool{schema.Unavailable(schema.ToolCodex)}}
-	b64, ok := PNGBase64(s)
+	b64, ok := PNGBase64(s, true)
 	if !ok {
 		t.Fatal("not ok")
 	}

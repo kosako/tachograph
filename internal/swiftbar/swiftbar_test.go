@@ -37,7 +37,7 @@ func TestRenderStructure(t *testing.T) {
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		schema.Unavailable(schema.ToolCodex),
 	}}
-	out := Render(s, now)
+	out := Render(s, now, true)
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 
 	if lines[0] != "C🌒" {
@@ -74,7 +74,7 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00")
 	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
-	out := Render(s, now)
+	out := Render(s, now, true)
 	if !strings.Contains(out, "5h 🌔 85%") || !strings.Contains(out, "| color="+colorRed) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
@@ -89,8 +89,8 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 func TestRenderTitleImageByDefault(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
-	out := Render(s, now)
-	if !strings.HasPrefix(out, "| templateImage=") {
+	out := Render(s, now, true)
+	if !strings.HasPrefix(out, "| image=") {
 		t.Errorf("default title should be a gauge image, got:\n%s", strings.SplitN(out, "\n", 2)[0])
 	}
 }
@@ -102,7 +102,7 @@ func TestRenderTitleBothTools(t *testing.T) {
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		tool(schema.ToolCodex, false, 90, 10),
 	}}
-	out := Render(s, now)
+	out := Render(s, now, true)
 	if !strings.HasPrefix(out, "C🌒 X🌕\n") {
 		t.Errorf("title = %q, want C🌒 X🌕", strings.SplitN(out, "\n", 2)[0])
 	}
@@ -111,7 +111,7 @@ func TestRenderTitleBothTools(t *testing.T) {
 func TestRenderStaleGray(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00") // 2h after collected
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolCodex, true, 70, 10)}}
-	out := Render(s, now)
+	out := Render(s, now, true)
 	if !strings.Contains(out, "⚠2h") {
 		t.Errorf("stale age missing:\n%s", out)
 	}
@@ -128,7 +128,7 @@ func TestRenderFallback(t *testing.T) {
 		Tool: schema.ToolCodex, Available: true, Backend: schema.BackendBedrock,
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
-	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now())
+	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true)
 	if !strings.Contains(out, "tokens 4M $1.50") {
 		t.Errorf("fallback line missing:\n%s", out)
 	}

@@ -23,11 +23,12 @@ const (
 	colorGray   = "#8E8E93"
 )
 
-// Render produces the full plugin output for one status document.
-func Render(s schema.Status, now time.Time) string {
+// Render produces the full plugin output for one status document. dark
+// selects the menu bar appearance so the gauge logo/track stay legible.
+func Render(s schema.Status, now time.Time, dark bool) string {
 	var b strings.Builder
 
-	b.WriteString(titleLine(s))
+	b.WriteString(titleLine(s, dark))
 	b.WriteString("\n---\n")
 	for i, t := range s.Tools {
 		if i > 0 {
@@ -41,13 +42,14 @@ func Render(s schema.Status, now time.Time) string {
 }
 
 // titleLine is the menu bar representation: a tachometer gauge image per
-// tool (logo ringed by a progress ring tracking 5h usage). Falls back to
-// the moon-dial text when image generation is unavailable or when
-// TACHO_SWIFTBAR_TEXT is set.
-func titleLine(s schema.Status) string {
+// tool (logo ringed by a usage-colored progress ring). The image is colored,
+// so it uses `image=` (not the tinted `templateImage=`). Falls back to the
+// moon-dial text when image generation is unavailable or TACHO_SWIFTBAR_TEXT
+// is set.
+func titleLine(s schema.Status, dark bool) string {
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(s); ok {
-			return "| templateImage=" + b64
+		if b64, ok := menubar.PNGBase64(s, dark); ok {
+			return "| image=" + b64
 		}
 	}
 	return title(s)

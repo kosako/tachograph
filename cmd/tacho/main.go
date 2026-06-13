@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -74,9 +75,10 @@ func runSwiftbar(args []string) int {
 	fs.Parse(args)
 
 	now := time.Now()
+	dark := appearanceDark()
 	s := core.Status(core.Options{Now: now})
 	if *pngOut != "" {
-		b64, ok := menubar.PNGBase64(s)
+		b64, ok := menubar.PNGBase64(s, dark)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
@@ -88,8 +90,22 @@ func runSwiftbar(args []string) int {
 		}
 		return 0
 	}
-	fmt.Print(swiftbar.Render(s, now))
+	fmt.Print(swiftbar.Render(s, now, dark))
 	return 0
+}
+
+// appearanceDark reports whether macOS is in dark mode, so the colored menu
+// bar gauge can ink its logo/track to stay legible. TACHO_APPEARANCE
+// (dark|light) overrides the detection.
+func appearanceDark() bool {
+	switch os.Getenv("TACHO_APPEARANCE") {
+	case "dark":
+		return true
+	case "light":
+		return false
+	}
+	out, _ := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
+	return strings.Contains(string(out), "Dark")
 }
 
 func runOnce(args []string) int {
