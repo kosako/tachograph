@@ -6,9 +6,11 @@ package swiftbar
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -25,7 +27,7 @@ const (
 func Render(s schema.Status, now time.Time) string {
 	var b strings.Builder
 
-	b.WriteString(title(s))
+	b.WriteString(titleLine(s))
 	b.WriteString("\n---\n")
 	for i, t := range s.Tools {
 		if i > 0 {
@@ -38,7 +40,20 @@ func Render(s schema.Status, now time.Time) string {
 	return b.String()
 }
 
-// title is the menu bar text: tool initial + 5h moon dial, e.g. "C🌒 X🌑".
+// titleLine is the menu bar representation: a tachometer gauge image per
+// tool (logo ringed by a progress ring tracking 5h usage). Falls back to
+// the moon-dial text when image generation is unavailable or when
+// TACHO_SWIFTBAR_TEXT is set.
+func titleLine(s schema.Status) string {
+	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
+		if b64, ok := menubar.PNGBase64(s); ok {
+			return "| templateImage=" + b64
+		}
+	}
+	return title(s)
+}
+
+// title is the menu bar text fallback: tool initial + 5h moon dial, "C🌒 X🌑".
 func title(s schema.Status) string {
 	var parts []string
 	for _, t := range s.Tools {
