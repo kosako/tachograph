@@ -121,11 +121,13 @@ chmod +x <プラグインフォルダ>/tacho.30s.sh
 
 #### 表示内容の設定
 
-ドロップダウン下部の **Settings** から、クリックだけで切り替えられます:
+ドロップダウンには各ツールの全メトリクス(5h / weekly / context / cost / tokens)が並びます。メニューバーはそのうち選んだ1つを表示します。
 
-- **表示**: メーター(ゲージ)/ 数字
-- **指標**: 5h limit / weekly limit / context / cost / tokens(1つ選択)
-- **● / ○ Claude・Codex**: 表示するツールの切り替え
+ドロップダウン下部の **Settings** サブメニューから、一覧から選ぶだけで切り替えられます(現在の選択に ✓ / ☑):
+
+- **表示形式**: メーター(ゲージ)/ 数字
+- **指標**: 5h limit / weekly limit / context / cost / tokens(ラジオ選択)
+- **表示するツール**: Claude / Codex(チェックボックス)
 
 CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
 

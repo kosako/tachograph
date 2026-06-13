@@ -151,12 +151,15 @@ renderer.
 
 #### Configuring what's shown
 
-The **Settings** submenu at the bottom of the dropdown toggles everything
-with a click:
+The dropdown lists every metric per tool (5h / weekly / context / cost /
+tokens); the menu bar shows the one you select.
+
+The **Settings** submenu at the bottom picks values from a list (the current
+choice is check-marked):
 
 - **Display**: meter (gauge) or number
-- **Metric**: 5h limit / weekly limit / context / cost / tokens (pick one)
-- **● / ○ Claude · Codex**: which tools to show
+- **Metric**: 5h limit / weekly limit / context / cost / tokens (radio)
+- **Tools**: Claude / Codex (checkboxes)
 
 Or via the CLI (config lives in `~/.config/tachograph/config.json`):
 

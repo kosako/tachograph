@@ -49,34 +49,60 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string
 	return b.String()
 }
 
-// settings renders the clickable "Settings" submenu — each item runs a
-// `tacho config ...` command and refreshes, so the menu bar dropdown doubles
-// as the settings screen.
+// settings renders the "Settings" menu with nested submenus. Each option is
+// listed with the current selection check-marked; clicking an option sets it
+// directly (radio for style/metric, checkbox toggle for tools) and refreshes.
 func settings(b *strings.Builder, cfg config.Config) {
 	b.WriteString("Settings\n")
 
-	styleLabel := "メーター"
-	if cfg.Menubar.Style == config.StyleNumber {
-		styleLabel = "数字"
+	// Display style (radio).
+	b.WriteString("--表示形式\n")
+	for _, o := range []struct{ value, label string }{
+		{config.StyleMeter, "メーター"},
+		{config.StyleNumber, "数字"},
+	} {
+		clickOption(b, 2, mark(cfg.Menubar.Style == o.value)+o.label,
+			"config", "set", "menubar.style", o.value)
 	}
-	clickItem(b, "--表示: "+styleLabel, "config", "cycle", "menubar.style")
-	clickItem(b, "--指標: "+render.MetricLabel(cfg.Menubar.Metric), "config", "cycle", "menubar.metric")
 
+	// Metric (radio) — all selectable metrics listed.
+	b.WriteString("--指標\n")
+	for _, m := range render.Metrics {
+		clickOption(b, 2, mark(cfg.Menubar.Metric == m)+render.MetricLabel(m),
+			"config", "set", "menubar.metric", m)
+	}
+
+	// Tools (checkbox).
+	b.WriteString("--表示するツール\n")
 	for _, tl := range []struct{ name, label string }{
 		{schema.ToolClaudeCode, "Claude"},
 		{schema.ToolCodex, "Codex"},
 	} {
-		mark := "○"
-		if cfg.ToolEnabled(tl.name) {
-			mark = "●"
-		}
-		clickItem(b, "--"+mark+" "+tl.label, "config", "toggle-tool", tl.name)
+		clickOption(b, 2, checkbox(cfg.ToolEnabled(tl.name))+tl.label,
+			"config", "toggle-tool", tl.name)
 	}
 }
 
-// clickItem writes a SwiftBar menu item that runs `BinPath params...` on click
-// and refreshes the plugin afterward.
-func clickItem(b *strings.Builder, label string, params ...string) {
+// mark prefixes the selected radio option with a check.
+func mark(selected bool) string {
+	if selected {
+		return "✓ "
+	}
+	return "    "
+}
+
+// checkbox prefixes an enabled tool with a filled box.
+func checkbox(on bool) string {
+	if on {
+		return "☑ "
+	}
+	return "☐ "
+}
+
+// clickOption writes a SwiftBar submenu item at the given nesting depth that
+// runs `BinPath params...` on click and refreshes.
+func clickOption(b *strings.Builder, depth int, label string, params ...string) {
+	b.WriteString(strings.Repeat("--", depth))
 	fmt.Fprintf(b, "%s | bash=%q terminal=false refresh=true", label, BinPath)
 	for i, p := range params {
 		fmt.Fprintf(b, " param%d=%q", i+1, p)
@@ -192,32 +218,47 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 	}
 	fmt.Fprintln(b, header)
 
-	if t.Session != nil && t.Session.ContextUsedPct != nil {
-		pct := *t.Session.ContextUsedPct
-		writeLine(b, fmt.Sprintf("ctx %.0f%%", pct), lineColor(t, pct))
-	}
-	if t.Limits != nil {
-		for _, l := range t.Limits {
-			if l.UsedPct == nil {
-				continue
-			}
-			label := l.Window
-			if label == schema.WindowWeekly {
-				label = "wk"
-			}
+	// Show every metric in the dropdown — the menu bar shows one, the
+	// dropdown is the full readout. Limits carry a moon + reset time.
+	limitRow(b, t, schema.WindowFiveHour, "5h", now)
+	limitRow(b, t, schema.WindowWeekly, "weekly", now)
+	metricRow(b, t, render.MetricContext, "context")
+	metricRow(b, t, render.MetricCost, "cost")
+	metricRow(b, t, render.MetricTokens, "tokens")
+}
+
+// limitRow renders a rate-limit window with its moon dial, reset time, and
+// pressure color (or "--" when the window is absent).
+func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time) {
+	for _, l := range t.Limits {
+		if l.Window == window && l.UsedPct != nil {
 			line := fmt.Sprintf("%s %s %.0f%%", label, render.Moon(*l.UsedPct), *l.UsedPct)
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
 			writeLine(b, line, lineColor(t, *l.UsedPct))
+			return
 		}
-	} else if t.Fallback != nil && t.Fallback.SessionTokens != nil {
-		line := "tokens " + render.FormatTokens(*t.Fallback.SessionTokens)
-		if t.Fallback.EstimatedCostUSD != nil {
-			line += fmt.Sprintf(" $%.2f", *t.Fallback.EstimatedCostUSD)
-		}
-		writeLine(b, line, lineColor(t, 0))
 	}
+	writeLine(b, label+" "+render.Missing, staleOnly(t))
+}
+
+// metricRow renders a non-limit metric (context/cost/tokens) as "label value".
+func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
+	frac, text := render.Metric(t, metric)
+	color := staleOnly(t)
+	if frac != nil { // percentage metric: color by pressure
+		color = lineColor(t, *frac*100)
+	}
+	writeLine(b, label+" "+text, color)
+}
+
+// staleOnly returns gray for stale tools, else no color.
+func staleOnly(t schema.Tool) string {
+	if t.Stale {
+		return colorGray
+	}
+	return ""
 }
 
 // writeLine emits a dropdown row, attaching SwiftBar's color parameter only
