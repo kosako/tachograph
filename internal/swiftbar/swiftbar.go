@@ -24,6 +24,10 @@ const (
 	colorGray   = "#8E8E93"
 )
 
+// BinPath is the tacho executable invoked by the clickable dropdown settings.
+// cmd sets it to the running binary; tests keep the default.
+var BinPath = "tacho"
+
 // Render produces the full plugin output for one status document. dark
 // selects the menu bar appearance; cfg selects which tools, metric, and
 // display style to show.
@@ -40,8 +44,44 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string
 		section(&b, t, now)
 	}
 	b.WriteString("---\n")
+	settings(&b, cfg)
 	b.WriteString("Refresh | refresh=true\n")
 	return b.String()
+}
+
+// settings renders the clickable "Settings" submenu — each item runs a
+// `tacho config ...` command and refreshes, so the menu bar dropdown doubles
+// as the settings screen.
+func settings(b *strings.Builder, cfg config.Config) {
+	b.WriteString("Settings\n")
+
+	styleLabel := "メーター"
+	if cfg.Menubar.Style == config.StyleNumber {
+		styleLabel = "数字"
+	}
+	clickItem(b, "--表示: "+styleLabel, "config", "cycle", "menubar.style")
+	clickItem(b, "--指標: "+render.MetricLabel(cfg.Menubar.Metric), "config", "cycle", "menubar.metric")
+
+	for _, tl := range []struct{ name, label string }{
+		{schema.ToolClaudeCode, "Claude"},
+		{schema.ToolCodex, "Codex"},
+	} {
+		mark := "○"
+		if cfg.ToolEnabled(tl.name) {
+			mark = "●"
+		}
+		clickItem(b, "--"+mark+" "+tl.label, "config", "toggle-tool", tl.name)
+	}
+}
+
+// clickItem writes a SwiftBar menu item that runs `BinPath params...` on click
+// and refreshes the plugin afterward.
+func clickItem(b *strings.Builder, label string, params ...string) {
+	fmt.Fprintf(b, "%s | bash=%q terminal=false refresh=true", label, BinPath)
+	for i, p := range params {
+		fmt.Fprintf(b, " param%d=%q", i+1, p)
+	}
+	b.WriteByte('\n')
 }
 
 // filterTools keeps only the configured tools, in configured order.

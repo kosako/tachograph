@@ -81,6 +81,9 @@ func runSwiftbar(args []string) int {
 	now := time.Now()
 	dark := appearanceDark()
 	cfg := config.Load()
+	if exe, err := os.Executable(); err == nil {
+		swiftbar.BinPath = exe // so dropdown settings click the same binary
+	}
 	s := core.Status(core.Options{Now: now})
 	if *pngOut != "" {
 		b64, ok := menubar.PNGBase64(s, dark, cfg.Menubar.Metric)
@@ -129,10 +132,78 @@ func runConfig(args []string) int {
 			return 2
 		}
 		return configSet(args[0], args[1])
+	case "cycle":
+		if len(args) != 1 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
+		return configCycle(args[0])
+	case "toggle-tool":
+		if len(args) != 1 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
+		return configToggleTool(args[0])
 	default:
 		fmt.Fprint(os.Stderr, configUsage)
 		return 2
 	}
+}
+
+// configCycle advances an enum-valued key to its next option (wrapping). Used
+// by the one-click SwiftBar dropdown settings.
+func configCycle(key string) int {
+	c := config.Load()
+	switch key {
+	case "menubar.style":
+		c.Menubar.Style = nextIn([]string{config.StyleMeter, config.StyleNumber}, c.Menubar.Style)
+	case "menubar.metric":
+		c.Menubar.Metric = nextIn(render.Metrics, c.Menubar.Metric)
+	default:
+		fmt.Fprintf(os.Stderr, "tacho: cannot cycle %q\n", key)
+		return 2
+	}
+	if err := config.Save(c); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	return 0
+}
+
+// configToggleTool adds or removes a tool, keeping canonical order.
+func configToggleTool(name string) int {
+	if name != schema.ToolClaudeCode && name != schema.ToolCodex {
+		fmt.Fprintf(os.Stderr, "tacho: unknown tool %q\n", name)
+		return 2
+	}
+	c := config.Load()
+	enabled := map[string]bool{}
+	for _, t := range c.Tools {
+		enabled[t] = true
+	}
+	enabled[name] = !enabled[name]
+	c.Tools = nil
+	for _, t := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
+		if enabled[t] {
+			c.Tools = append(c.Tools, t)
+		}
+	}
+	if err := config.Save(c); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	return 0
+}
+
+// nextIn returns the element after cur in list (wrapping); the first element
+// when cur is absent.
+func nextIn(list []string, cur string) string {
+	for i, v := range list {
+		if v == cur {
+			return list[(i+1)%len(list)]
+		}
+	}
+	return list[0]
 }
 
 func configSet(key, val string) int {
