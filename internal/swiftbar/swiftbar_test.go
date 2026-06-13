@@ -56,9 +56,9 @@ func TestRenderStructure(t *testing.T) {
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5",
-		"context 24%\n",              // normal pressure: no color
-		"5h 🌒 24% " + resets + "\n", // normal pressure: no color
-		"weekly 🌓 41%\n",
+		"context " + render.Bar(24, 8) + " 24%\n",         // normal pressure: no color
+		"5h " + render.Bar(24, 8) + " 24% " + resets + "\n",
+		"weekly " + render.Bar(41, 8) + " 41%\n",
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
@@ -67,8 +67,8 @@ func TestRenderStructure(t *testing.T) {
 		}
 	}
 	// Normal rows must not carry a color parameter.
-	if strings.Contains(joined, "context 24% | color=") {
-		t.Errorf("normal context row should be uncolored:\n%s", joined)
+	if strings.Contains(joined, "24% | color=") {
+		t.Errorf("normal rows should be uncolored:\n%s", joined)
 	}
 }
 
@@ -77,13 +77,13 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
 	out := Render(s, now, true, config.Default())
-	if !strings.Contains(out, "5h 🌔 85%") || !strings.Contains(out, "| color="+colorRed) {
+	if !strings.Contains(out, "5h "+render.Bar(85, 8)+" 85%") || !strings.Contains(out, "| color="+colorRed) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, "weekly 🌓 60% | color="+colorYellow) {
+	if !strings.Contains(out, "weekly "+render.Bar(60, 8)+" 60% | color="+colorYellow) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
-	if strings.Contains(out, "context 24% | color=") {
+	if strings.Contains(out, "context "+render.Bar(24, 8)+" 24% | color=") {
 		t.Errorf("normal context row should be uncolored:\n%s", out)
 	}
 }
