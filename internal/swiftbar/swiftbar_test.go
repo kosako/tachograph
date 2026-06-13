@@ -53,15 +53,35 @@ func TestRenderStructure(t *testing.T) {
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5",
-		"ctx 24% | color=" + colorGreen,
-		"5h 🌒 24% " + resets + " | color=" + colorGreen,
-		"wk 🌓 41% | color=" + colorGreen,
+		"ctx 24%\n",                  // normal pressure: no color
+		"5h 🌒 24% " + resets + "\n", // normal pressure: no color
+		"wk 🌓 41%\n",
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("output missing %q:\n%s", want, joined)
 		}
+	}
+	// Normal rows must not carry a color parameter.
+	if strings.Contains(joined, "ctx 24% | color=") {
+		t.Errorf("normal ctx row should be uncolored:\n%s", joined)
+	}
+}
+
+func TestRenderColorsOnlyAttention(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00")
+	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
+	out := Render(s, now)
+	if !strings.Contains(out, "5h 🌔 85%") || !strings.Contains(out, "| color="+colorRed) {
+		t.Errorf("expected red 5h row:\n%s", out)
+	}
+	if !strings.Contains(out, "wk 🌓 60% | color="+colorYellow) {
+		t.Errorf("expected yellow weekly row:\n%s", out)
+	}
+	if strings.Contains(out, "ctx 24% | color=") {
+		t.Errorf("normal ctx row should be uncolored:\n%s", out)
 	}
 }
 
