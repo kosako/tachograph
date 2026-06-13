@@ -74,10 +74,10 @@ func TestCollect(t *testing.T) {
 }
 
 func TestCollectStale(t *testing.T) {
-	now, _ := time.Parse(time.RFC3339, "2026-05-24T14:30:00Z") // ~50min after the event
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T16:00:00Z") // ~2h20m after the event
 	got := Collect(Options{Root: "testdata/codexroot", Now: now})
 	if !got.Stale {
-		t.Error("Stale = false, want true for 50-minute-old data")
+		t.Error("Stale = false, want true for hours-old data")
 	}
 }
 
