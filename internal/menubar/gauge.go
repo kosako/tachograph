@@ -87,12 +87,12 @@ func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
 	cx := float64(ox) + c/2
 	cy := c / 2
 
-	// Keep the gauge to ~72% of the canvas so transparent margin leaves it
-	// the same visual weight as a normal menu bar glyph (~16pt in a 22pt bar).
-	rOut := c * 0.36
-	thick := c * 0.05
+	// Generous transparent margin keeps the gauge from looking oversized
+	// next to system menu bar icons (~56% of the canvas).
+	rOut := c * 0.28
+	thick := c * 0.042
 	rIn := rOut - thick
-	rLogo := rIn - c*0.03
+	rLogo := rIn - c*0.025
 
 	pct, hasPct := fiveHourFrac(t)
 	fillA := aFill
