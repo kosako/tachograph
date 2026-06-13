@@ -14,6 +14,7 @@ import (
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/collector/claude"
+	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
@@ -31,6 +32,8 @@ const usage = `usage:
   tacho cmux push       push status pills to the cmux sidebar once
   tacho cmux clear      remove tacho's pills from the cmux sidebar
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
+  tacho config show     print the current configuration
+  tacho config set K V  set a config value (e.g. menubar.metric cost)
 `
 
 func main() {
@@ -52,6 +55,8 @@ func main() {
 		os.Exit(runCmux(args))
 	case "swiftbar":
 		os.Exit(runSwiftbar(args))
+	case "config":
+		os.Exit(runConfig(args))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
 			fmt.Println("tacho " + version)
@@ -90,6 +95,83 @@ func runSwiftbar(args []string) int {
 		return 0
 	}
 	fmt.Print(swiftbar.Render(s, now, dark))
+	return 0
+}
+
+const configUsage = `usage:
+  tacho config show              print the current configuration
+  tacho config path              print the config file path
+  tacho config set <key> <val>   set a value and save
+
+keys:
+  tools           comma-separated: claude-code,codex  (which tools to show)
+  menubar.style   meter | number
+  menubar.metric  ` + "limit_5h | limit_weekly | context | cost | tokens" + `
+`
+
+func runConfig(args []string) int {
+	sub := "show"
+	if len(args) > 0 {
+		sub, args = args[0], args[1:]
+	}
+	switch sub {
+	case "show":
+		b, _ := json.MarshalIndent(config.Load(), "", "  ")
+		fmt.Println(string(b))
+		return 0
+	case "path":
+		fmt.Println(config.Path())
+		return 0
+	case "set":
+		if len(args) != 2 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
+		return configSet(args[0], args[1])
+	default:
+		fmt.Fprint(os.Stderr, configUsage)
+		return 2
+	}
+}
+
+func configSet(key, val string) int {
+	c := config.Load()
+	switch key {
+	case "tools":
+		var tools []string
+		for _, t := range strings.Split(val, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			if t != schema.ToolClaudeCode && t != schema.ToolCodex {
+				fmt.Fprintf(os.Stderr, "tacho: unknown tool %q (want claude-code or codex)\n", t)
+				return 2
+			}
+			tools = append(tools, t)
+		}
+		c.Tools = tools
+	case "menubar.style":
+		if val != config.StyleMeter && val != config.StyleNumber {
+			fmt.Fprintf(os.Stderr, "tacho: invalid style %q (want meter or number)\n", val)
+			return 2
+		}
+		c.Menubar.Style = val
+	case "menubar.metric":
+		if !render.ValidMetric(val) {
+			fmt.Fprintf(os.Stderr, "tacho: invalid metric %q\n", val)
+			return 2
+		}
+		c.Menubar.Metric = val
+	default:
+		fmt.Fprintf(os.Stderr, "tacho: unknown key %q\n", key)
+		fmt.Fprint(os.Stderr, configUsage)
+		return 2
+	}
+	if err := config.Save(c); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
 	return 0
 }
 
