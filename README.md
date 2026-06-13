@@ -88,7 +88,7 @@ Claude CodeはセッションJSON(モデル・コンテキスト・レートリ�
 | `5h.moon` / `wk.moon` | 大きめの月齢ダイヤル、`🌑🌒🌓🌔🌕`(絵文字のため色分け対象外) |
 | `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(当日)または `↻06/15` |
 | `tokens` | 当日の全セッション合計トークン(新規分、cache_read除く)、`12.7M` |
-| `cost` | 推定セッションコスト、`$0.05` |
+| `cost` | 当日の全セッション推定コスト(料金表ベース・概算)、`$1.20` |
 | `plan` | プラン名(`prolite` 等) |
 | `cwd` | 作業ディレクトリ(basename) |
 | `stale` | 15分超で `⚠1h `(印+経過時間)、それ以外は空 |
@@ -137,6 +137,19 @@ tacho config set menubar.style number      # メーター→数字
 tacho config set menubar.metric cost       # 使った金額を表示
 tacho config set tools codex               # Codexだけ表示
 ```
+
+#### コスト料金表(概算・上書き可)
+
+`cost` / `tokens` は**当日の全セッション合計**です。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):
+
+```json
+{
+  "claude-fable": { "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
+  "gpt-5":        { "input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 1.25 }
+}
+```
+
+キーはモデルIDの前方一致(`claude-fable` は `claude-fable-5` 等にマッチ)。料金が無いモデルはコスト0として扱われます。
 
 ### Codex TUI
 

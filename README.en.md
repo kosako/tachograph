@@ -102,7 +102,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` | today's total new tokens across all sessions, `12.7M` |
-| `cost` | estimated session cost, `$0.05` |
+| `cost` | today's estimated cost across all sessions (price-table based, approximate), `$1.20` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
 | `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |
@@ -169,6 +169,23 @@ tacho config set menubar.style number   # meter → number
 tacho config set menubar.metric cost    # show spent cost instead of limits
 tacho config set tools codex            # show only Codex
 ```
+
+#### Cost price table (approximate, overridable)
+
+`cost` and `tokens` are **today's totals across all sessions**. Cost is
+estimated from a per-model price table (tokens × rate). Prices are rough, not
+exact, so override or extend them in `~/.config/tachograph/pricing.json` (USD
+per million tokens):
+
+```json
+{
+  "claude-fable": { "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
+  "gpt-5":        { "input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 1.25 }
+}
+```
+
+Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`).
+Models without a price contribute zero cost.
 
 ### Codex TUI
 

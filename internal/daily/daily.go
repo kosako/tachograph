@@ -9,25 +9,33 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/kosako/tachograph/internal/pricing"
 )
 
-// ClaudeTokens sums total tokens across today's Claude transcript messages
-// in every project under <root>/projects. root defaults to ~/.claude.
-func ClaudeTokens(root string, now time.Time) int64 {
+// Totals is today's aggregate for one tool.
+type Totals struct {
+	Tokens int64
+	Cost   float64
+}
+
+// ClaudeTotals sums today's new tokens and estimated cost across every Claude
+// transcript message under <root>/projects. root defaults to ~/.claude.
+func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return 0
+			return Totals{}
 		}
 		root = filepath.Join(home, ".claude")
 	}
 	day := now.Local().Format("2006-01-02")
-	var total int64
+	var out Totals
 
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
 	if err != nil {
-		return 0
+		return Totals{}
 	}
 	for _, d := range dirs {
 		if !d.IsDir() {
@@ -45,15 +53,18 @@ func ClaudeTokens(root string, now time.Time) int64 {
 			if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
 				continue // only files touched today can hold today's messages
 			}
-			total += claudeFileTokens(filepath.Join(projects, d.Name(), f.Name()), day)
+			ft := claudeFileTotals(filepath.Join(projects, d.Name(), f.Name()), day, prices)
+			out.Tokens += ft.Tokens
+			out.Cost += ft.Cost
 		}
 	}
-	return total
+	return out
 }
 
 type claudeLine struct {
 	Timestamp string `json:"timestamp"`
 	Message   *struct {
+		Model string `json:"model"`
 		Usage *struct {
 			InputTokens              int64 `json:"input_tokens"`
 			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -63,12 +74,12 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
-func claudeFileTokens(path, day string) int64 {
+func claudeFileTotals(path, day string, prices pricing.Table) Totals {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return 0
+		return Totals{}
 	}
-	var total int64
+	var out Totals
 	for _, raw := range bytes.Split(b, []byte("\n")) {
 		raw = bytes.TrimSpace(raw)
 		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
@@ -81,37 +92,42 @@ func claudeFileTokens(path, day string) int64 {
 		if !sameDay(line.Timestamp, day) {
 			continue
 		}
-		// Exclude cache reads: they re-read the same context every message and
-		// would dwarf the figure. This is "new" tokens processed today.
 		u := line.Message.Usage
-		total += u.InputTokens + u.CacheCreationInputTokens + u.OutputTokens
+		// New tokens exclude cache reads (same context re-read each message).
+		out.Tokens += u.InputTokens + u.CacheCreationInputTokens + u.OutputTokens
+		if r, ok := prices.For(line.Message.Model); ok {
+			out.Cost += r.Cost(u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens)
+		}
 	}
-	return total
+	return out
 }
 
-// CodexTokens sums total tokens across today's Codex sessions. root defaults
-// to ~/.codex; today's sessions live under sessions/YYYY/MM/DD.
-func CodexTokens(root string, now time.Time) int64 {
+// CodexTotals sums today's new tokens and estimated cost across Codex
+// sessions. root defaults to ~/.codex; today's sessions live under
+// sessions/YYYY/MM/DD.
+func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return 0
+			return Totals{}
 		}
 		root = filepath.Join(home, ".codex")
 	}
 	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
 	entries, err := os.ReadDir(dayDir)
 	if err != nil {
-		return 0
+		return Totals{}
 	}
-	var total int64
+	var out Totals
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
-		total += codexSessionTokens(filepath.Join(dayDir, e.Name()))
+		st := codexSessionTotals(filepath.Join(dayDir, e.Name()), prices)
+		out.Tokens += st.Tokens
+		out.Cost += st.Cost
 	}
-	return total
+	return out
 }
 
 type codexEvent struct {
@@ -123,20 +139,41 @@ type codexTokenCount struct {
 	Type string `json:"type"`
 	Info *struct {
 		TotalTokenUsage *struct {
-			TotalTokens       int64 `json:"total_tokens"`
+			InputTokens       int64 `json:"input_tokens"`
 			CachedInputTokens int64 `json:"cached_input_tokens"`
+			OutputTokens      int64 `json:"output_tokens"`
+			TotalTokens       int64 `json:"total_tokens"`
 		} `json:"total_token_usage"`
 	} `json:"info"`
 }
 
-// codexSessionTokens returns the session's new tokens (final cumulative total
-// minus cached input, to match Claude's cache-read exclusion).
-func codexSessionTokens(path string) int64 {
+// codexSessionTotals returns the session's new tokens (cumulative total minus
+// cached input) and estimated cost, priced with the session's model.
+func codexSessionTotals(path string, prices pricing.Table) Totals {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return 0
+		return Totals{}
 	}
 	lines := bytes.Split(b, []byte("\n"))
+
+	model := ""
+	for i := len(lines) - 1; i >= 0 && model == ""; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if !bytes.Contains(line, []byte("turn_context")) {
+			continue
+		}
+		var ev codexEvent
+		if json.Unmarshal(line, &ev) != nil || ev.Type != "turn_context" {
+			continue
+		}
+		var p struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(ev.Payload, &p) == nil {
+			model = p.Model
+		}
+	}
+
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := bytes.TrimSpace(lines[i])
 		if len(line) == 0 || !bytes.Contains(line, []byte("token_count")) {
@@ -150,14 +187,21 @@ func codexSessionTokens(path string) int64 {
 		if json.Unmarshal(ev.Payload, &tc) == nil && tc.Type == "token_count" &&
 			tc.Info != nil && tc.Info.TotalTokenUsage != nil {
 			u := tc.Info.TotalTokenUsage
-			n := u.TotalTokens - u.CachedInputTokens
-			if n < 0 {
-				n = 0
+			out := Totals{Tokens: u.TotalTokens - u.CachedInputTokens}
+			if out.Tokens < 0 {
+				out.Tokens = 0
 			}
-			return n
+			if r, ok := prices.For(model); ok {
+				nonCached := u.InputTokens - u.CachedInputTokens
+				if nonCached < 0 {
+					nonCached = 0
+				}
+				out.Cost = r.Cost(nonCached, 0, u.CachedInputTokens, u.OutputTokens)
+			}
+			return out
 		}
 	}
-	return 0
+	return Totals{}
 }
 
 // sameDay reports whether an RFC 3339 timestamp falls on the given local day.
