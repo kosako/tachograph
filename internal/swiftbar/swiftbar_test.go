@@ -59,12 +59,13 @@ func TestRenderStructure(t *testing.T) {
 	r5, _ := time.Parse(time.RFC3339, "2026-06-13T14:00:00+09:00")
 	resets := r5.Local().Format("↻15:04")
 
+	suffix := " " + enableParams + "\n"
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5 | color=" + inkLight,
-		barRow("context", 24, "") + " | font=" + dataFont + " color=" + inkLight + "\n",
-		barRow("5h", 24, " "+resets) + " | font=" + dataFont + " color=" + inkLight + "\n",
-		barRow("weekly", 41, "") + " | font=" + dataFont + " color=" + inkLight + "\n",
+		barRow("context", 24, "") + " | font=" + dataFont + " color=" + inkLight + suffix,
+		barRow("5h", 24, " "+resets) + " | font=" + dataFont + " color=" + inkLight + suffix,
+		barRow("weekly", 41, "") + " | font=" + dataFont + " color=" + inkLight + suffix,
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
@@ -197,9 +198,9 @@ func TestRenderFallback(t *testing.T) {
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
 	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default())
-	costRow := fmt.Sprintf("%-*s $1.50 | font=%s color=%s\n", labelW, "cost", dataFont, inkLight)
-	tokRow := fmt.Sprintf("%-*s 4M | font=%s color=%s\n", labelW, "tokens", dataFont, inkLight)
-	missRow := fmt.Sprintf("%-*s -- | font=%s color=%s\n", labelW, "5h", dataFont, inkLight)
+	costRow := fmt.Sprintf("%-*s $1.50 | font=%s color=%s %s\n", labelW, "cost", dataFont, inkLight, enableParams)
+	tokRow := fmt.Sprintf("%-*s 4M | font=%s color=%s %s\n", labelW, "tokens", dataFont, inkLight, enableParams)
+	missRow := fmt.Sprintf("%-*s -- | font=%s color=%s %s\n", labelW, "5h", dataFont, inkLight, enableParams)
 	if !strings.Contains(out, costRow) || !strings.Contains(out, tokRow) {
 		t.Errorf("cost/tokens rows missing:\n%s", out)
 	}
