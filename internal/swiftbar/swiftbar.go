@@ -227,12 +227,16 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 	metricRow(b, t, render.MetricTokens, "tokens")
 }
 
-// limitRow renders a rate-limit window with its moon dial, reset time, and
+// barWidth is the gauge width for dropdown rows (space is not constrained
+// here, so a bar reads better than the compact moon dial).
+const barWidth = 8
+
+// limitRow renders a rate-limit window with a usage bar, reset time, and
 // pressure color (or "--" when the window is absent).
 func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
-			line := fmt.Sprintf("%s %s %.0f%%", label, render.Moon(*l.UsedPct), *l.UsedPct)
+			line := fmt.Sprintf("%s %s %.0f%%", label, render.Bar(*l.UsedPct, barWidth), *l.UsedPct)
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
@@ -243,14 +247,16 @@ func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.
 	writeLine(b, label+" "+render.Missing, staleOnly(t))
 }
 
-// metricRow renders a non-limit metric (context/cost/tokens) as "label value".
+// metricRow renders context/cost/tokens. Percentage metrics get a usage bar;
+// non-percentage ones (cost/tokens) are shown as plain text.
 func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
 	frac, text := render.Metric(t, metric)
-	color := staleOnly(t)
-	if frac != nil { // percentage metric: color by pressure
-		color = lineColor(t, *frac*100)
+	if frac != nil { // percentage metric: bar + color by pressure
+		line := fmt.Sprintf("%s %s %s", label, render.Bar(*frac*100, barWidth), text)
+		writeLine(b, line, lineColor(t, *frac*100))
+		return
 	}
-	writeLine(b, label+" "+text, color)
+	writeLine(b, label+" "+text, staleOnly(t))
 }
 
 // staleOnly returns gray for stale tools, else no color.
