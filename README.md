@@ -155,6 +155,19 @@ tacho config set tools codex               # Codexだけ表示
 
 Codex自身のステータスラインはネイティブ設定です — TUIで `/statusline` を実行し、`model + five-hour-limit + weekly-limit` などを選んでください。tachographはCodex TUIの中には描画できません(する必要もありません)。Codexのセッションログを非侵襲に読んで、それ以外のあらゆる場所に表示します。
 
+## どの版が反映される?
+
+tachograph はローカルのログ(`~/.claude/projects`、`~/.codex/sessions`)を読みます。ターミナル/デスクトップ/IDE のどの版でも、そこに書き込むものは集計対象です。
+
+| | トークン / コスト(当日) | レートリミット / コンテキスト |
+|---|---|---|
+| **Codex**(TUI / Desktop) | ✅ | ✅ |
+| **Claude Code**(CLI / IDE) | ✅ | ✅ |
+| **Claude Desktop** | ✅ | ⚠️ ターミナル併用が必要 |
+
+- **Codex Desktop** は `~/.codex/sessions` に書くため、リミットも含めて完全に反映されます。
+- **Claude Desktop** のトークン/コストは transcript に記録されるため当日合計に含まれます。ただし 5h/週次リミットとコンテキスト% は**ターミナル版の statusLine からのみ**取得できます(transcript にリミット情報が無いため)。レートリミットはアカウント共通なので、ターミナル版 Claude Code を時々でも使っていれば、デスクトップ分も合算された残量が表示されます。ターミナルを一切使わない場合、リミットは `--` になります(消費はされていても tacho からは見えない)。
+
 ## ライセンス
 
 [MIT](LICENSE)

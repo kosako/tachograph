@@ -194,6 +194,26 @@ TUI and pick e.g. `model + five-hour-limit + weekly-limit`. tachograph
 does not (and cannot) draw inside the Codex TUI; it reads Codex session
 logs non-invasively for display everywhere else.
 
+## Which variants are covered?
+
+tachograph reads local logs (`~/.claude/projects`, `~/.codex/sessions`).
+Anything that writes there — terminal, desktop, or IDE — is counted.
+
+| | Tokens / cost (today) | Rate limits / context |
+|---|---|---|
+| **Codex** (TUI / Desktop) | ✅ | ✅ |
+| **Claude Code** (CLI / IDE) | ✅ | ✅ |
+| **Claude Desktop** | ✅ | ⚠️ needs the terminal too |
+
+- **Codex Desktop** writes to `~/.codex/sessions`, so everything (including
+  rate limits) is reflected.
+- **Claude Desktop** usage is recorded in the transcripts, so its tokens/cost
+  are included in the daily totals. But the 5-hour/weekly limits and context %
+  come **only from the terminal statusLine** (transcripts carry no limit data).
+  Rate limits are account-wide, so as long as you use terminal Claude Code now
+  and then, the displayed headroom reflects desktop usage too. With no terminal
+  use at all, limits show `--` (consumed but invisible to tacho).
+
 ## License
 
 [MIT](LICENSE)
