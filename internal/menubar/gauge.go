@@ -17,7 +17,7 @@ import (
 const (
 	ss     = 4  // supersampling factor for anti-aliasing
 	canvas = 44 // logical pixels per tool (square)
-	gap    = 8  // logical pixels between tools
+	gap    = 2  // logical pixels between tools (gauges already carry margin)
 )
 
 // alpha levels in the supersampled buffer (averaged down to gray coverage).
@@ -57,10 +57,12 @@ func drawGauge(img *image.Alpha, ox int, t schema.Tool) {
 	cx := float64(ox) + c/2
 	cy := c / 2
 
-	rOut := c * 0.47
-	thick := c * 0.085
+	// Keep the gauge to ~72% of the canvas so transparent margin leaves it
+	// the same visual weight as a normal menu bar glyph (~16pt in a 22pt bar).
+	rOut := c * 0.36
+	thick := c * 0.05
 	rIn := rOut - thick
-	rLogo := rIn - c*0.045
+	rLogo := rIn - c*0.03
 
 	pct, hasPct := fiveHourFrac(t)
 	fillA := aFill
