@@ -45,11 +45,16 @@ func TestRenderStructure(t *testing.T) {
 	if lines[1] != "---" {
 		t.Errorf("line 2 = %q, want ---", lines[1])
 	}
+	// Reset time is rendered in the runner's local zone; compute the
+	// expected "↻HH:MM" the same way to stay valid on any CI timezone.
+	r5, _ := time.Parse(time.RFC3339, "2026-06-13T14:00:00+09:00")
+	resets := r5.Local().Format("↻15:04")
+
 	joined := out
 	for _, want := range []string{
 		"Claude — Fable 5",
 		"ctx 24% | color=" + colorGreen,
-		"5h 🌒 24% ↻14:00 | color=" + colorGreen,
+		"5h 🌒 24% " + resets + " | color=" + colorGreen,
 		"wk 🌓 41% | color=" + colorGreen,
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
