@@ -61,20 +61,16 @@ func TestRenderStructure(t *testing.T) {
 
 	joined := out
 	for _, want := range []string{
-		"Claude — Fable 5",
-		barRow("context", 24, "") + " | font=" + dataFont + "\n",
-		barRow("5h", 24, " "+resets) + " | font=" + dataFont + "\n",
-		barRow("weekly", 41, "") + " | font=" + dataFont + "\n",
+		"Claude — Fable 5 | color=" + inkLight,
+		barRow("context", 24, "") + " | font=" + dataFont + " color=" + inkLight + "\n",
+		barRow("5h", 24, " "+resets) + " | font=" + dataFont + " color=" + inkLight + "\n",
+		barRow("weekly", 41, "") + " | font=" + dataFont + " color=" + inkLight + "\n",
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("output missing %q:\n%s", want, joined)
 		}
-	}
-	// Normal rows must not carry a color parameter.
-	if strings.Contains(joined, "24% | font="+dataFont+" color=") {
-		t.Errorf("normal rows should be uncolored:\n%s", joined)
 	}
 }
 
@@ -89,8 +85,9 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	if !strings.Contains(out, barRow("weekly", 60, "")+" | font="+dataFont+" color="+colorYellow) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
-	if strings.Contains(out, barRow("context", 24, "")+" | font="+dataFont+" color=") {
-		t.Errorf("normal context row should be uncolored:\n%s", out)
+	// Normal context row uses the ink color, not an attention color.
+	if !strings.Contains(out, barRow("context", 24, "")+" | font="+dataFont+" color="+inkLight) {
+		t.Errorf("normal context row should use ink color:\n%s", out)
 	}
 }
 
@@ -200,9 +197,9 @@ func TestRenderFallback(t *testing.T) {
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
 	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default())
-	costRow := fmt.Sprintf("%-*s $1.50 | font=%s\n", labelW, "cost", dataFont)
-	tokRow := fmt.Sprintf("%-*s 4M | font=%s\n", labelW, "tokens", dataFont)
-	missRow := fmt.Sprintf("%-*s -- | font=%s\n", labelW, "5h", dataFont)
+	costRow := fmt.Sprintf("%-*s $1.50 | font=%s color=%s\n", labelW, "cost", dataFont, inkLight)
+	tokRow := fmt.Sprintf("%-*s 4M | font=%s color=%s\n", labelW, "tokens", dataFont, inkLight)
+	missRow := fmt.Sprintf("%-*s -- | font=%s color=%s\n", labelW, "5h", dataFont, inkLight)
 	if !strings.Contains(out, costRow) || !strings.Contains(out, tokRow) {
 		t.Errorf("cost/tokens rows missing:\n%s", out)
 	}

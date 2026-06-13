@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -81,6 +82,7 @@ func runSwiftbar(args []string) int {
 	now := time.Now()
 	dark := appearanceDark()
 	cfg := config.Load()
+	swiftbar.MenuDark = systemDark() // dropdown follows the system appearance
 	if exe, err := os.Executable(); err == nil {
 		swiftbar.BinPath = exe // so dropdown settings click the same binary
 	}
@@ -255,6 +257,14 @@ func configSet(key, val string) int {
 // TACHO_APPEARANCE=light.
 func appearanceDark() bool {
 	return os.Getenv("TACHO_APPEARANCE") != "light"
+}
+
+// systemDark reports macOS dark mode. Unlike the menu bar (which follows the
+// wallpaper), the dropdown menu follows the system appearance, so this is the
+// right signal for the dropdown text color.
+func systemDark() bool {
+	out, _ := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
+	return strings.Contains(string(out), "Dark")
 }
 
 func runOnce(args []string) int {

@@ -14,9 +14,10 @@ import (
 // StatusTTL is how long an assembled status document stays fresh.
 const StatusTTL = 30 * time.Second
 
-// SnapshotMaxAge is how long a statusline-derived snapshot is preferred
-// over the transcript route (it carries rate limits the latter cannot see).
-const SnapshotMaxAge = 10 * time.Minute
+// SnapshotMaxAge is how long a statusline-derived snapshot is preferred over
+// the transcript route (it carries rate limits and context the latter cannot
+// see). Generous so brief idles don't drop the dropdown to "--" everywhere.
+const SnapshotMaxAge = 60 * time.Minute
 
 // Dir returns the cache directory, honoring TACHO_CACHE_DIR for tests
 // and non-standard setups.

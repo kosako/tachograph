@@ -74,7 +74,7 @@ func TestSnapshot(t *testing.T) {
 		t.Error("Stale = true for 2-minute-old snapshot")
 	}
 
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(20*time.Minute)); ok {
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(SnapshotMaxAge+time.Minute)); ok {
 		t.Error("ReadSnapshot returned a snapshot older than maxAge")
 	}
 

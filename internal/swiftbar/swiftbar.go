@@ -16,13 +16,31 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// Dropdown attention colors (SwiftBar `color=` parameter). Normal-pressure
-// rows are left uncolored to follow the menu theme — see lineColor.
+// Dropdown attention colors (SwiftBar `color=` parameter).
 const (
 	colorYellow = "#FFCC00"
 	colorRed    = "#FF3B30"
 	colorGray   = "#8E8E93"
 )
+
+// Default text inks. Non-clickable info rows are auto-disabled (rendered
+// gray) by macOS, so we set an explicit color to make them legible. The
+// dropdown menu follows the system appearance, so MenuDark picks white/black.
+const (
+	inkLight = "#1A1A1A"
+	inkDark  = "#F0F0F0"
+)
+
+// MenuDark is true when macOS is in dark mode (set by cmd from
+// AppleInterfaceStyle), so dropdown text uses a light ink.
+var MenuDark = false
+
+func ink() string {
+	if MenuDark {
+		return inkDark
+	}
+	return inkLight
+}
 
 // BinPath is the tacho executable invoked by the clickable dropdown settings.
 // cmd sets it to the running binary; tests keep the default.
@@ -213,10 +231,12 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 	if t.Plan != nil {
 		header += " (" + *t.Plan + ")"
 	}
+	headerColor := ink()
 	if t.Stale && t.CollectedAt != nil {
 		header += " ⚠" + render.Age(*t.CollectedAt, now)
+		headerColor = colorGray
 	}
-	fmt.Fprintln(b, header)
+	fmt.Fprintf(b, "%s | color=%s\n", header, headerColor)
 
 	// Show every metric in the dropdown — the menu bar shows one, the
 	// dropdown is the full readout. Limits carry a moon + reset time.
@@ -279,26 +299,26 @@ func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
 	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, text), staleOnly(t))
 }
 
-// dataRow writes a per-tool metric row in the monospace data font, with the
-// SwiftBar color parameter only when set.
+// dataRow writes a per-tool metric row in the monospace data font. An
+// explicit color is always set: non-clickable rows are otherwise rendered
+// gray (disabled) by macOS.
 func dataRow(b *strings.Builder, text, color string) {
-	fmt.Fprintf(b, "%s | font=%s", text, dataFont)
-	if color != "" {
-		fmt.Fprintf(b, " color=%s", color)
+	if color == "" {
+		color = ink()
 	}
-	b.WriteByte('\n')
+	fmt.Fprintf(b, "%s | font=%s color=%s\n", text, dataFont, color)
 }
 
-// staleOnly returns gray for stale tools, else no color.
+// staleOnly returns gray for stale tools, else the normal ink.
 func staleOnly(t schema.Tool) string {
 	if t.Stale {
 		return colorGray
 	}
-	return ""
+	return ink()
 }
 
-// lineColor only colors rows that need attention: yellow/red by pressure,
-// gray when stale. Normal usage returns "" (no color, theme default).
+// lineColor colors rows that need attention (yellow/red by pressure), gray
+// when stale, otherwise the normal ink.
 func lineColor(t schema.Tool, pct float64) string {
 	if t.Stale {
 		return colorGray
@@ -309,6 +329,6 @@ func lineColor(t schema.Tool, pct float64) string {
 	case pct >= 50:
 		return colorYellow
 	default:
-		return ""
+		return ink()
 	}
 }
