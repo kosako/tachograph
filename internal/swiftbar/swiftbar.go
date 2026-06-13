@@ -210,17 +210,22 @@ func fiveHourPct(t schema.Tool) *float64 {
 	return nil
 }
 
+// enableParams attach a harmless no-op action so the menu item is "enabled":
+// macOS dims action-less items (rendering even an explicit color as gray), so
+// this keeps the info rows at full opacity. Clicking runs /usr/bin/true.
+const enableParams = "bash=/usr/bin/true terminal=false refresh=false"
+
 func section(b *strings.Builder, t schema.Tool, now time.Time) {
 	name := "Codex"
 	if t.Tool == schema.ToolClaudeCode {
 		name = "Claude"
 	}
 	if !t.Available {
-		fmt.Fprintf(b, "%s — not found | color=%s\n", name, colorGray)
+		fmt.Fprintf(b, "%s — not found | color=%s %s\n", name, colorGray, enableParams)
 		return
 	}
 	if t.Error != nil {
-		fmt.Fprintf(b, "%s — error: %s | color=%s\n", name, t.Error.Code, colorGray)
+		fmt.Fprintf(b, "%s — error: %s | color=%s %s\n", name, t.Error.Code, colorGray, enableParams)
 		return
 	}
 
@@ -236,7 +241,7 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 		header += " ⚠" + render.Age(*t.CollectedAt, now)
 		headerColor = colorGray
 	}
-	fmt.Fprintf(b, "%s | color=%s\n", header, headerColor)
+	fmt.Fprintf(b, "%s | color=%s %s\n", header, headerColor, enableParams)
 
 	// Show every metric in the dropdown — the menu bar shows one, the
 	// dropdown is the full readout. Limits carry a moon + reset time.
@@ -306,7 +311,7 @@ func dataRow(b *strings.Builder, text, color string) {
 	if color == "" {
 		color = ink()
 	}
-	fmt.Fprintf(b, "%s | font=%s color=%s\n", text, dataFont, color)
+	fmt.Fprintf(b, "%s | font=%s color=%s %s\n", text, dataFont, color, enableParams)
 }
 
 // staleOnly returns gray for stale tools, else the normal ink.
