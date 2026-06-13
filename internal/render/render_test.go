@@ -39,6 +39,15 @@ func TestDial(t *testing.T) {
 	}
 }
 
+func TestMoon(t *testing.T) {
+	cases := map[float64]string{0: "🌑", 24: "🌒", 50: "🌓", 75: "🌔", 95: "🌕"}
+	for pct, want := range cases {
+		if got := Moon(pct); got != want {
+			t.Errorf("Moon(%v) = %q, want %q", pct, got, want)
+		}
+	}
+}
+
 func TestFormatTokens(t *testing.T) {
 	cases := map[int64]string{42: "42", 989120: "989k", 12504028: "12.5M", 3000000: "3M"}
 	for n, want := range cases {
