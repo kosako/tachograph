@@ -134,9 +134,10 @@ For an always-visible gauge regardless of which agent is running, a
 bar shows a tachometer per tool — the logo ringed by an iOS-app-download-style
 progress ring that fills clockwise with 5-hour usage; clicking reveals
 per-tool details. The ring is colored by usage (green/yellow/red, gray when
-stale) and the logo follows the system appearance (light/dark) so it stays
-legible — override with `TACHO_APPEARANCE=dark|light`. Set
-`TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text (`C🌒 X🌑`).
+stale). The logo and track are white by default (for Dark mode or a
+wallpaper-darkened menu bar); set `TACHO_APPEARANCE=light` if your menu bar
+is light. Set `TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text
+(`C🌒 X🌑`).
 
 ```sh
 brew install swiftbar   # if you don't have it

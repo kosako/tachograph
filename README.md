@@ -109,7 +109,7 @@ tacho cmux clear   # tachoのピルを削除
 
 ### macOSメニューバー(SwiftBar)
 
-どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りをiOSのDL中のようなリングが5h使用率で時計回りに埋まる)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)、ロゴはmacOSの外観(ライト/ダーク)を検出して白黒を出し分けます(`TACHO_APPEARANCE=dark|light` で上書き可)。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌒 X🌑`)にフォールバックできます。
+どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りをiOSのDL中のようなリングが5h使用率で時計回りに埋まる)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌒 X🌑`)にフォールバックできます。
 
 ```sh
 brew install swiftbar   # 未導入なら

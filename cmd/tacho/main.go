@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -94,18 +93,14 @@ func runSwiftbar(args []string) int {
 	return 0
 }
 
-// appearanceDark reports whether macOS is in dark mode, so the colored menu
-// bar gauge can ink its logo/track to stay legible. TACHO_APPEARANCE
-// (dark|light) overrides the detection.
+// appearanceDark decides the logo/track ink for the colored menu bar gauge.
+// The menu bar's light/dark look follows the wallpaper, not the Light/Dark
+// mode setting, and there's no reliable CLI signal for it — so we default to
+// a dark menu bar (white ink), which is correct for Dark mode and for the
+// common case of a wallpaper-tinted bar. Users with a light menu bar set
+// TACHO_APPEARANCE=light.
 func appearanceDark() bool {
-	switch os.Getenv("TACHO_APPEARANCE") {
-	case "dark":
-		return true
-	case "light":
-		return false
-	}
-	out, _ := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
-	return strings.Contains(string(out), "Dark")
+	return os.Getenv("TACHO_APPEARANCE") != "light"
 }
 
 func runOnce(args []string) int {
