@@ -68,10 +68,19 @@ func Metric(t schema.Tool, metric string) (frac *float64, text string) {
 			return pctMetric(*t.Session.ContextUsedPct)
 		}
 	case MetricCost:
+		// Today's total across all sessions (pricing-based); falls back to
+		// the current session's cost until daily cost is available.
+		if t.Daily != nil && t.Daily.CostUSD != nil {
+			return nil, fmt.Sprintf("$%.2f", *t.Daily.CostUSD)
+		}
 		if t.Fallback != nil && t.Fallback.EstimatedCostUSD != nil {
 			return nil, fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD)
 		}
 	case MetricTokens:
+		// Today's total across all sessions.
+		if t.Daily != nil {
+			return nil, FormatTokens(t.Daily.Tokens)
+		}
 		if t.Fallback != nil && t.Fallback.SessionTokens != nil {
 			return nil, FormatTokens(*t.Fallback.SessionTokens)
 		}

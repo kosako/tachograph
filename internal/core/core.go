@@ -7,6 +7,7 @@ import (
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/collector/codex"
+	"github.com/kosako/tachograph/internal/daily"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -35,14 +36,23 @@ func Status(opts Options) schema.Status {
 }
 
 func assemble(opts Options) schema.Status {
+	claudeT := claudeTool(opts)
+	codexT := codex.Collect(codex.Options{Root: opts.CodexRoot, Now: opts.Now})
+	addDaily(&claudeT, daily.ClaudeTokens(opts.ClaudeRoot, opts.Now))
+	addDaily(&codexT, daily.CodexTokens(opts.CodexRoot, opts.Now))
 	return schema.Status{
 		SchemaVersion: schema.Version,
 		GeneratedAt:   opts.Now.Local().Format(time.RFC3339),
-		Tools: []schema.Tool{
-			claudeTool(opts),
-			codex.Collect(codex.Options{Root: opts.CodexRoot, Now: opts.Now}),
-		},
+		Tools:         []schema.Tool{claudeT, codexT},
 	}
+}
+
+// addDaily attaches today's aggregate to an available tool.
+func addDaily(t *schema.Tool, tokens int64) {
+	if !t.Available || t.Error != nil {
+		return
+	}
+	t.Daily = &schema.Daily{Tokens: tokens}
 }
 
 // claudeTool prefers a recent statusline snapshot (which carries rate
