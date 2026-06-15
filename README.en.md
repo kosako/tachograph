@@ -32,8 +32,13 @@ window you have burned, when it resets, and what is currently running.
 ## Install
 
 ```sh
+npm install -g tachograph        # npm (downloads the prebuilt binary for your platform)
+# or from Go (see PATH note below)
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
+
+The npm package downloads the matching binary from the GitHub release in its
+postinstall step. If no prebuilt binary fits your platform, use `go install`.
 
 ### Put it on your PATH
 
