@@ -25,15 +25,23 @@ import (
 	"github.com/kosako/tachograph/internal/swiftbar"
 )
 
-// fallbackVersion is reported when build info carries no module version —
-// local `go build` / `go run`. Installed builds (`go install ...@vX.Y.Z`)
-// report their real tag via runtime/debug.ReadBuildInfo; see buildVersion.
+// version is injected at release-build time via -ldflags "-X main.version=…"
+// (GoReleaser). It's empty for `go install` and local builds, which fall back
+// to build info — GoReleaser uses plain `go build`, so its binaries carry no
+// module version and need this explicit injection.
+var version string
+
+// fallbackVersion is reported when neither an injected version nor a build-info
+// module version is available — local `go build` / `go run`.
 const fallbackVersion = "dev"
 
-// buildVersion resolves the version to display. The module version is embedded
-// by the Go toolchain at install time, so `go install ...@v0.1.0` reports
-// "v0.1.0" with no manual bumping.
+// buildVersion resolves the version to display, preferring the injected value,
+// then the module version the Go toolchain embeds at install time (so
+// `go install ...@v0.1.0` reports "v0.1.0"), then the fallback.
 func buildVersion() string {
+	if version != "" {
+		return version
+	}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		return normalizeVersion(info.Main.Version)
 	}
