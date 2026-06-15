@@ -35,6 +35,29 @@ window you have burned, when it resets, and what is currently running.
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
+### Put it on your PATH
+
+`go install` drops the binary in `$(go env GOPATH)/bin` (`~/go/bin` by
+default). If that directory isn't on your PATH you can't run `tacho` (and
+Claude Code's statusLine can't launch it — it fails silently).
+
+```sh
+command -v tacho            # prints a path if it's on PATH; nothing means it isn't
+go env GOPATH               # where it landed (install dir is /bin under this)
+```
+
+If it isn't on your PATH, add it in your shell config:
+
+```sh
+# zsh (macOS default)
+echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+# for bash, append the same line to ~/.bashrc / ~/.bash_profile
+```
+
+If you'd rather not touch your PATH, call `tacho` by absolute path (e.g.
+`~/go/bin/tacho`) — including in the Claude Code settings below. `tacho
+setup claude` prints a snippet with the correct absolute path baked in.
+
 ## Usage
 
 ```sh
