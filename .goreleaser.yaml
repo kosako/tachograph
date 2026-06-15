@@ -1,0 +1,56 @@
+# GoReleaser v2 — cross-compiles `tacho` on tag push and attaches archives to
+# the GitHub release. The npm wrapper downloads these by version + platform.
+version: 2
+
+project_name: tachograph
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: tacho
+    main: ./cmd/tacho
+    binary: tacho
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Inject the tag (e.g. v0.1.1) so `tacho version` matches the release;
+    # build info alone can't see it under GoReleaser's plain `go build`.
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+
+archives:
+  - id: tacho
+    # Name matches what the npm installer expects: tachograph_<os>_<arch>.<ext>
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+release:
+  github:
+    owner: kosako
+    name: tachograph
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
