@@ -29,6 +29,25 @@
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
+### PATHを通す
+
+`go install` はバイナリを `$(go env GOPATH)/bin`(既定 `~/go/bin`)に置きます。ここがPATHに通っていないと `tacho` で実行できません(Claude CodeのstatusLineも起動できず無言で失敗します)。
+
+```sh
+command -v tacho            # 出れば通っている。何も出なければ未通
+go env GOPATH               # 入った場所(/bin がインストール先)
+```
+
+未通なら、シェルの設定に追記して通します:
+
+```sh
+# zsh(macOSの既定)
+echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+# bash の場合は ~/.bashrc / ~/.bash_profile に同様に追記
+```
+
+PATHを通したくない場合は、`tacho` を絶対パス(例 `~/go/bin/tacho`)で呼べばそのまま使えます。Claude Codeの設定でも絶対パスを書けます(後述の `tacho setup claude` が正しい絶対パス入りのスニペットを出力します)。
+
 ## 使い方
 
 ```sh
