@@ -26,8 +26,12 @@
 ## インストール
 
 ```sh
+npm install -g tachograph        # npm(各OS向けの事前ビルドバイナリを取得)
+# または Go から(PATHは下記参照)
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
+
+npm 版は postinstall でGitHubリリースから該当プラットフォームのバイナリを取得します。対応バイナリが無い環境では `go install` を使ってください。
 
 ### PATHを通す
 

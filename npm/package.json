@@ -1,0 +1,36 @@
+{
+  "name": "tachograph",
+  "version": "0.1.1",
+  "description": "A compact instrument cluster for your coding agents (Claude Code / Codex). Shows model, rate-limit usage, and context at a glance.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "statusline",
+    "rate-limit",
+    "cli"
+  ],
+  "homepage": "https://github.com/kosako/tachograph#readme",
+  "bugs": "https://github.com/kosako/tachograph/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kosako/tachograph.git",
+    "directory": "npm"
+  },
+  "license": "MIT",
+  "author": "kosako",
+  "bin": {
+    "tacho": "bin/tacho.js"
+  },
+  "files": [
+    "bin/tacho.js",
+    "install.js",
+    "asset.js"
+  ],
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

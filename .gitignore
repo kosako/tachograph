@@ -3,6 +3,12 @@
 dist/
 *.test
 
+# npm wrapper: downloaded binary (postinstall) and pack output
+/npm/bin/tacho
+/npm/bin/tacho.exe
+/npm/*.tgz
+/npm/node_modules/
+
 # OS
 .DS_Store
 
