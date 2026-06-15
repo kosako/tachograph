@@ -2,6 +2,10 @@
 
 日本語 | [English](README.en.md)
 
+[![npm](https://img.shields.io/npm/v/tachograph)](https://www.npmjs.com/package/tachograph)
+[![release](https://img.shields.io/github/v/release/kosako/tachograph)](https://github.com/kosako/tachograph/releases)
+[![license](https://img.shields.io/github/license/kosako/tachograph)](LICENSE)
+
 > コーディングエージェントのためのコンパクトな計器盤。
 
 `tacho` は、AIコーディングエージェントの稼働状況と残り枠を「パッと見」で把握するためのCLIです:
@@ -25,15 +29,21 @@
 
 ## インストール
 
+一番簡単なのは **npm** です(Go不要。各OS向けの事前ビルドバイナリを取得し、`tacho` は自動でPATHに通ります):
+
 ```sh
-npm install -g tachograph        # npm(各OS向けの事前ビルドバイナリを取得)
-# または Go から(PATHは下記参照)
+npm install -g tachograph
+```
+
+postinstall でGitHubリリースから該当プラットフォームのバイナリを取得します。対応バイナリが無い環境や、Goユーザは `go install` でもどうぞ:
+
+```sh
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
-npm 版は postinstall でGitHubリリースから該当プラットフォームのバイナリを取得します。対応バイナリが無い環境では `go install` を使ってください。
+### PATHを通す(go install の場合)
 
-### PATHを通す
+> npm で入れた場合は不要です(`tacho` は自動でPATHに入ります)。
 
 `go install` はバイナリを `$(go env GOPATH)/bin`(既定 `~/go/bin`)に置きます。ここがPATHに通っていないと `tacho` で実行できません(Claude CodeのstatusLineも起動できず無言で失敗します)。
 
