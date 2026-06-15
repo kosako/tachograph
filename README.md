@@ -94,17 +94,29 @@ Claude CodeはセッションJSON(モデル・コンテキスト・レートリ�
 
 ### ステータスラインのカスタマイズ
 
-`~/.config/tachograph/statusline.tmpl` にテンプレートを置きます(または `--template`)。デフォルト:
+`~/.config/tachograph/statusline.tmpl` にテンプレート1行を置きます(または `--template`)。
 
-```
-{claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
+#### プリセット(まずはここから)
+
+「こうしたい」に合う**プリセット**を選ぶだけでも始められます:
+
+```sh
+tacho config statusline-preset --list   # 一覧(名前 + テンプレ文字列)
+tacho config statusline-preset moon      # 選んで statusline.tmpl に書き込み
 ```
 
-ダイヤル版の例:
+| プリセット | 用途 | 例 |
+|---|---|---|
+| `bar` | デフォルト。コンテキスト+5hゲージ+週次 | `Fable 5 ctx 8% · 5h █░░░░░ 24% ↻06/12 · wk 41% · …` |
+| `minimal` | モデル+5h/週次の%だけ | `Fable 5 5h 24% · wk 41%` |
+| `dial` | 1文字ダイヤルでコンパクト(`○◔◑◕●`) | `Fable 5 ctx 8% · 5h ◔ 24% ↻06/12 · wk ◑ · codex ◔◑` |
+| `moon` | 月齢ダイヤル(`🌑🌒🌓🌔🌕`) | `Fable 5 5h 🌒 24% · wk 🌓 · codex 🌒🌓` |
+| `cost` | モデル+コンテキスト+5h+現セッションのトークン/コスト | `Fable 5 ctx 8% · 5h 24% · 989k $0.05` |
+| `cwd` | 作業ディレクトリ+モデル+コンテキスト+5hゲージ | `myproj · Fable 5 ctx 8% · 5h █░░░░░ 24%` |
 
-```
-{claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
-```
+手で組みたい場合は [`contrib/statusline.tmpl.example`](contrib/statusline.tmpl.example) を `~/.config/tachograph/statusline.tmpl` にコピーし、好きな1行のコメントを外してください(`#` で始まる行と空行は無視され、最初の有効行がテンプレートになります)。
+
+#### プレースホルダ
 
 プレースホルダは `{tool.field}` 形式(`tool` = `claude` | `codex`):
 

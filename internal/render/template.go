@@ -18,6 +18,21 @@ const DefaultTemplate = "{claude.model} {claude.stale}ctx {claude.ctx} · 5h {cl
 // Missing is rendered for placeholders whose value is absent.
 const Missing = "--"
 
+// FirstTemplateLine returns the first usable line of a statusline.tmpl file:
+// the first line that is non-empty after trimming and does not start with '#'.
+// This lets the shipped example file carry several commented presets so users
+// pick one by uncommenting it. Returns "" when there's no usable line.
+func FirstTemplateLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
 var placeholderRe = regexp.MustCompile(`\{([a-z0-9.]+)(?::([0-9]+))?\}`)
 
 // Template expands the simple {tool.field[:width]} placeholder syntax
