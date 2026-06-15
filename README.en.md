@@ -153,8 +153,10 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `5h.dial` / `wk.dial` | single-character dial, `○◔◑◕●` (`◌` when no data) |
 | `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
-| `tokens` | **current session** tokens, `989k` (today's all-session total is SwiftBar only) |
-| `cost` | **current session** estimated cost (price-table based, approximate), `$0.05` |
+| `tokens` / `tokens.session` | **current session** tokens, `989k` |
+| `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
+| `cost` / `cost.session` | **current session** estimated cost, `$0.05` (Claude's own figure in the status line) |
+| `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
 | `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |

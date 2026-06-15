@@ -364,6 +364,9 @@ func runStatusline(args []string) int {
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
 	for i := range s.Tools {
 		if s.Tools[i].Tool == schema.ToolClaudeCode {
+			// Keep today's all-session aggregate that core attached; the
+			// statusline payload only knows the current session.
+			claudeTool.Daily = s.Tools[i].Daily
 			s.Tools[i] = claudeTool
 		}
 	}

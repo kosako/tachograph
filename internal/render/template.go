@@ -41,6 +41,9 @@ var placeholderRe = regexp.MustCompile(`\{([a-z0-9.]+)(?::([0-9]+))?\}`)
 //	{claude.model} {claude.ctx} {claude.tokens} {claude.cost} {claude.plan}
 //	{claude.cwd} {claude.stale} {claude.5h.pct} {claude.5h.bar:8}
 //	{claude.5h.resets} {claude.wk...} — same fields under codex.*
+//
+// tokens/cost take an optional scope: bare or .session = current session,
+// .all = today's all-session total (rendered with a /d marker).
 func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 	tools := map[string]*schema.Tool{}
 	for i := range s.Tools {
@@ -90,15 +93,9 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		}
 		return st.paintPct(*t.Session.ContextUsedPct, fmt.Sprintf("%.0f%%", *t.Session.ContextUsedPct))
 	case "tokens":
-		if t.Session == nil || t.Session.Tokens == nil {
-			return Missing
-		}
-		return FormatTokens(t.Session.Tokens.Total)
+		return resolveTokens(t, path[1:])
 	case "cost":
-		if t.Fallback == nil || t.Fallback.EstimatedCostUSD == nil {
-			return Missing
-		}
-		return fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD)
+		return resolveCost(t, path[1:])
 	case "plan":
 		if t.Plan == nil {
 			return Missing
@@ -111,6 +108,53 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		return filepath.Base(*t.Session.CWD)
 	case "5h", "wk":
 		return resolveLimit(t, path, width, now, st)
+	}
+	return Missing
+}
+
+// tokensScope / costScope choose between the current session and today's
+// all-session total. The bare {tool.tokens} / {tool.cost} and the explicit
+// .session form both mean the current session (back-compat); .all means
+// today's total across every session, rendered with a "/d" marker so it reads
+// as a daily figure. .session.today is reserved for a later change.
+func scopeName(scope []string) string {
+	if len(scope) == 0 || (len(scope) == 1 && scope[0] == "session") {
+		return "session"
+	}
+	if len(scope) == 1 && scope[0] == "all" {
+		return "all"
+	}
+	return ""
+}
+
+func resolveTokens(t *schema.Tool, scope []string) string {
+	switch scopeName(scope) {
+	case "session":
+		if t.Session == nil || t.Session.Tokens == nil {
+			return Missing
+		}
+		return FormatTokens(t.Session.Tokens.Total)
+	case "all":
+		if t.Daily == nil {
+			return Missing
+		}
+		return FormatTokens(t.Daily.Tokens) + "/d"
+	}
+	return Missing
+}
+
+func resolveCost(t *schema.Tool, scope []string) string {
+	switch scopeName(scope) {
+	case "session":
+		if t.Fallback == nil || t.Fallback.EstimatedCostUSD == nil {
+			return Missing
+		}
+		return fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD)
+	case "all":
+		if t.Daily == nil || t.Daily.CostUSD == nil {
+			return Missing
+		}
+		return fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD)
 	}
 	return Missing
 }
