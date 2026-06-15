@@ -35,6 +35,8 @@ const usage = `usage:
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
   tacho config show     print the current configuration
   tacho config set K V  set a config value (e.g. menubar.metric cost)
+  tacho setup claude    print/install the Claude Code statusLine config
+  tacho doctor          diagnose install path, PATH, and statusLine setup
 `
 
 func main() {
@@ -58,6 +60,10 @@ func main() {
 		os.Exit(runSwiftbar(args))
 	case "config":
 		os.Exit(runConfig(args))
+	case "setup":
+		os.Exit(runSetup(args))
+	case "doctor":
+		os.Exit(runDoctor(args))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
 			fmt.Println("tacho " + version)
