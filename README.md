@@ -130,13 +130,17 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `5h.moon` / `wk.moon` | 大きめの月齢ダイヤル、`🌑🌒🌓🌔🌕`(絵文字のため色分け対象外) |
 | `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(当日)または `↻06/15` |
 | `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
+| `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
 | `tokens.all` | **当日の全セッション合計**トークン、`12.7M/d`(`/d`=当日合計) |
 | `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(statuslineではClaude実値) |
+| `cost.session.today` | **現セッションの当日分**推定コスト(Claudeのみ)、`$1.84` |
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
 | `plan` | プラン名(`prolite` 等) |
 | `cwd` | 作業ディレクトリ(basename) |
 | `stale` | 15分超で `⚠1h `(印+経過時間)、それ以外は空 |
 | `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
+
+`*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
 
 欠損値は `--` で表示されます。パーセントとゲージは使用率で色分け(<50% 緑 / ≥50% 黄 / ≥80% 赤)。`--no-color` または `NO_COLOR` で無効化できます。
 

@@ -131,6 +131,10 @@ func fromStatusline(opts Options) schema.Tool {
 	if in.SessionID != "" {
 		sess.ID = &in.SessionID
 	}
+	if in.TranscriptPath != "" {
+		tp := in.TranscriptPath
+		sess.TranscriptPath = &tp
+	}
 	cwd := in.CWD
 	if cwd == "" {
 		cwd = in.Workspace.CurrentDir
@@ -215,6 +219,8 @@ func fromTranscripts(opts Options) schema.Tool {
 		Backend:   detectBackend(opts.Getenv),
 	}
 	sess := &schema.Session{}
+	tp := path
+	sess.TranscriptPath = &tp
 	totals := schema.Tokens{}
 	var last *transcriptLine
 	for _, raw := range bytes.Split(b, []byte("\n")) {

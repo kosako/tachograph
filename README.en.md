@@ -154,13 +154,18 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
+| `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
 | `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
 | `cost` / `cost.session` | **current session** estimated cost, `$0.05` (Claude's own figure in the status line) |
+| `cost.session.today` | **current session, today only** estimated cost (Claude only), `$1.84` |
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
 | `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
+
+`*.session.today` is Claude only — Codex's token counts are cumulative and
+can't be sliced to a single day, so it renders `--`.
 
 Missing values render as `--`. Percentages and bars are colored by usage
 (<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.

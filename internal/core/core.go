@@ -42,6 +42,7 @@ func assemble(opts Options) schema.Status {
 	codexT := codex.Collect(codex.Options{Root: opts.CodexRoot, Now: opts.Now})
 	addDaily(&claudeT, daily.ClaudeTotals(opts.ClaudeRoot, opts.Now, prices))
 	addDaily(&codexT, daily.CodexTotals(opts.CodexRoot, opts.Now, prices))
+	AddSessionToday(&claudeT, opts.Now, prices)
 	return schema.Status{
 		SchemaVersion: schema.Version,
 		GeneratedAt:   opts.Now.Local().Format(time.RFC3339),
@@ -55,12 +56,17 @@ func addDaily(t *schema.Tool, tot daily.Totals) {
 	if !t.Available || t.Error != nil {
 		return
 	}
-	d := &schema.Daily{Tokens: tot.Tokens}
-	if tot.Cost > 0 {
-		c := tot.Cost
-		d.CostUSD = &c
+	t.Daily = tot.Schema()
+}
+
+// AddSessionToday attaches the current session's today-only totals, computed
+// from its transcript. Claude only — Codex's cumulative token_count can't be
+// sliced to a single day. No-op when there's no transcript path.
+func AddSessionToday(t *schema.Tool, now time.Time, prices pricing.Table) {
+	if !t.Available || t.Error != nil || t.Session == nil || t.Session.TranscriptPath == nil {
+		return
 	}
-	t.Daily = d
+	t.SessionToday = daily.ClaudeSessionToday(*t.Session.TranscriptPath, now, prices).Schema()
 }
 
 // claudeTool prefers a recent statusline snapshot (which carries rate

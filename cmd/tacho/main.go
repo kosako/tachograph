@@ -1,10 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"encoding/base64"
 	"io"
 	"os"
 	"os/exec"
@@ -18,6 +18,7 @@ import (
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/menubar"
+	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 	"github.com/kosako/tachograph/internal/swiftbar"
@@ -358,6 +359,9 @@ func runStatusline(args []string) int {
 	now := time.Now()
 
 	claudeTool := claude.Collect(claude.Options{Now: now, StatuslineInput: stdin})
+	// The live payload knows only the current session; total today's portion of
+	// it from the transcript so {claude.*.session.today} works.
+	core.AddSessionToday(&claudeTool, now, pricing.Load())
 	if claudeTool.Available && claudeTool.Error == nil {
 		_ = cache.WriteSnapshot(claudeTool)
 	}

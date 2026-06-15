@@ -43,6 +43,7 @@ var placeholderRe = regexp.MustCompile(`\{([a-z0-9.]+)(?::([0-9]+))?\}`)
 //	{claude.5h.resets} {claude.wk...} — same fields under codex.*
 //
 // tokens/cost take an optional scope: bare or .session = current session,
+// .session.today = current session's today-only portion (Claude only),
 // .all = today's all-session total (rendered with a /d marker).
 func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 	tools := map[string]*schema.Tool{}
@@ -118,11 +119,13 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 // today's total across every session, rendered with a "/d" marker so it reads
 // as a daily figure. .session.today is reserved for a later change.
 func scopeName(scope []string) string {
-	if len(scope) == 0 || (len(scope) == 1 && scope[0] == "session") {
+	switch {
+	case len(scope) == 0, len(scope) == 1 && scope[0] == "session":
 		return "session"
-	}
-	if len(scope) == 1 && scope[0] == "all" {
+	case len(scope) == 1 && scope[0] == "all":
 		return "all"
+	case len(scope) == 2 && scope[0] == "session" && scope[1] == "today":
+		return "session.today"
 	}
 	return ""
 }
@@ -134,6 +137,11 @@ func resolveTokens(t *schema.Tool, scope []string) string {
 			return Missing
 		}
 		return FormatTokens(t.Session.Tokens.Total)
+	case "session.today":
+		if t.SessionToday == nil {
+			return Missing
+		}
+		return FormatTokens(t.SessionToday.Tokens)
 	case "all":
 		if t.Daily == nil {
 			return Missing
@@ -150,6 +158,11 @@ func resolveCost(t *schema.Tool, scope []string) string {
 			return Missing
 		}
 		return fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD)
+	case "session.today":
+		if t.SessionToday == nil || t.SessionToday.CostUSD == nil {
+			return Missing
+		}
+		return fmt.Sprintf("$%.2f", *t.SessionToday.CostUSD)
 	case "all":
 		if t.Daily == nil || t.Daily.CostUSD == nil {
 			return Missing

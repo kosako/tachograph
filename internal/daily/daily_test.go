@@ -63,6 +63,31 @@ func TestClaudeTokens(t *testing.T) {
 	}
 }
 
+func TestClaudeSessionToday(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+
+	// One session file with today's two messages + one from yesterday (excluded).
+	// New tokens exclude cache reads: 100+5000+400=5500, 2+673+481=1156.
+	path := filepath.Join(root, "sess.jsonl")
+	content := claudeMsg(now, 100, 5000, 30000, 400) + "\n" +
+		claudeMsg(now, 2, 673, 39451, 481) + "\n" +
+		claudeMsg(yesterday, 9999, 0, 0, 9999) + "\n"
+	writeFile(t, path, content, now)
+
+	if got := ClaudeSessionToday(path, now, noPrices).Tokens; got != int64(5500+1156) {
+		t.Errorf("ClaudeSessionToday.Tokens = %d, want %d", got, 5500+1156)
+	}
+	// Empty path and missing file are both zero, not a crash.
+	if got := ClaudeSessionToday("", now, noPrices); got.Tokens != 0 {
+		t.Errorf("empty path = %+v, want zero", got)
+	}
+	if got := ClaudeSessionToday(filepath.Join(root, "nope.jsonl"), now, noPrices); got.Tokens != 0 {
+		t.Errorf("missing file = %+v, want zero", got)
+	}
+}
+
 func codexSession(total int64) string {
 	return fmt.Sprintf(`{"type":"turn_context","payload":{"model":"gpt-5.5"}}`+"\n"+
 		`{"timestamp":"x","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":0,"total_tokens":%d}}}}`+"\n", total, total)

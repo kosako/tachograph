@@ -11,12 +11,36 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/pricing"
+	"github.com/kosako/tachograph/internal/schema"
 )
 
 // Totals is today's aggregate for one tool.
 type Totals struct {
 	Tokens int64
 	Cost   float64
+}
+
+// Schema packs Totals into the wire type. Cost is set only when non-zero (a
+// priced model was seen), so an unpriced model reads as "tokens known, cost
+// unknown" rather than "$0.00".
+func (t Totals) Schema() *schema.Daily {
+	d := &schema.Daily{Tokens: t.Tokens}
+	if t.Cost > 0 {
+		c := t.Cost
+		d.CostUSD = &c
+	}
+	return d
+}
+
+// ClaudeSessionToday totals today's new tokens and estimated cost for a single
+// Claude session transcript (used for the {tool.*.session.today} scope). It
+// reuses the same per-message accounting as ClaudeTotals, restricted to one
+// file.
+func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Table) Totals {
+	if transcriptPath == "" {
+		return Totals{}
+	}
+	return claudeFileTotals(transcriptPath, now.Local().Format("2006-01-02"), prices)
 }
 
 // ClaudeTotals sums today's new tokens and estimated cost across every Claude
