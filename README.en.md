@@ -70,7 +70,8 @@ tacho version    # check the current version (also shown at the top of tacho doc
 ```
 
 `@latest` fetches the newest tagged release; pin a specific one with a tag
-like `@v0.1.0`.
+like `@v0.1.0`. `tacho version` reports the version Go embeds at install time
+(the tag) — an untagged local build shows a commit-based pseudo-version.
 
 ## Usage
 

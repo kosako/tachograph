@@ -57,7 +57,7 @@ go install github.com/kosako/tachograph/cmd/tacho@latest
 tacho version    # 現在の版を確認(tacho doctor でも先頭に表示)
 ```
 
-`@latest` は最新のタグ付きリリースを取得します。特定バージョンに固定したい場合は `@v0.1.0` のようにタグを指定します。
+`@latest` は最新のタグ付きリリースを取得します。特定バージョンに固定したい場合は `@v0.1.0` のようにタグを指定します。`tacho version` はインストール時にGoが埋め込んだ版(タグ)を表示します — タグ無しのローカルビルドはコミットベースの擬似バージョンになります。
 
 ## 使い方
 

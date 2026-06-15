@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -24,7 +25,29 @@ import (
 	"github.com/kosako/tachograph/internal/swiftbar"
 )
 
-const version = "0.0.1-dev"
+// fallbackVersion is reported when build info carries no module version —
+// local `go build` / `go run`. Installed builds (`go install ...@vX.Y.Z`)
+// report their real tag via runtime/debug.ReadBuildInfo; see buildVersion.
+const fallbackVersion = "dev"
+
+// buildVersion resolves the version to display. The module version is embedded
+// by the Go toolchain at install time, so `go install ...@v0.1.0` reports
+// "v0.1.0" with no manual bumping.
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return normalizeVersion(info.Main.Version)
+	}
+	return fallbackVersion
+}
+
+// normalizeVersion maps the build-info main module version to what we print:
+// an empty or "(devel)" value (local builds) becomes fallbackVersion.
+func normalizeVersion(v string) string {
+	if v == "" || v == "(devel)" {
+		return fallbackVersion
+	}
+	return v
+}
 
 const usage = `usage:
   tacho                 one-shot compact status
@@ -48,7 +71,7 @@ func main() {
 	}
 	switch cmd {
 	case "version":
-		fmt.Println("tacho " + version)
+		fmt.Println("tacho " + buildVersion())
 	case "status":
 		os.Exit(runStatus(args))
 	case "watch":
@@ -67,7 +90,7 @@ func main() {
 		os.Exit(runDoctor(args))
 	case "":
 		if len(args) > 0 && args[0] == "--version" {
-			fmt.Println("tacho " + version)
+			fmt.Println("tacho " + buildVersion())
 			return
 		}
 		os.Exit(runOnce(args))
