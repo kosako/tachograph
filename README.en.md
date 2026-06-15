@@ -2,6 +2,10 @@
 
 [日本語](README.md) | English
 
+[![npm](https://img.shields.io/npm/v/tachograph)](https://www.npmjs.com/package/tachograph)
+[![release](https://img.shields.io/github/v/release/kosako/tachograph)](https://github.com/kosako/tachograph/releases)
+[![license](https://img.shields.io/github/license/kosako/tachograph)](LICENSE)
+
 > A compact instrument cluster for your coding agents.
 
 `tacho` shows, at a glance, what your AI coding agents are doing and how much
@@ -31,16 +35,23 @@ window you have burned, when it resets, and what is currently running.
 
 ## Install
 
+The easiest way is **npm** (no Go required; it downloads the prebuilt binary
+for your platform and puts `tacho` on your PATH automatically):
+
 ```sh
-npm install -g tachograph        # npm (downloads the prebuilt binary for your platform)
-# or from Go (see PATH note below)
+npm install -g tachograph
+```
+
+It fetches the matching binary from the GitHub release in its postinstall step.
+If no prebuilt binary fits your platform, or you prefer Go, use `go install`:
+
+```sh
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
-The npm package downloads the matching binary from the GitHub release in its
-postinstall step. If no prebuilt binary fits your platform, use `go install`.
+### Put it on your PATH (go install only)
 
-### Put it on your PATH
+> Not needed when installed via npm — `tacho` is already on your PATH.
 
 `go install` drops the binary in `$(go env GOPATH)/bin` (`~/go/bin` by
 default). If that directory isn't on your PATH you can't run `tacho` (and
