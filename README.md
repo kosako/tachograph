@@ -48,6 +48,17 @@ echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 
 PATHを通したくない場合は、`tacho` を絶対パス(例 `~/go/bin/tacho`)で呼べばそのまま使えます。Claude Codeの設定でも絶対パスを書けます(後述の `tacho setup claude` が正しい絶対パス入りのスニペットを出力します)。
 
+### アップデート
+
+同じ `go install` を再実行すると最新版に入れ替わります(`$GOPATH/bin` の同じパスを上書きするため、statusLineやSwiftBarの設定はそのままでOK):
+
+```sh
+go install github.com/kosako/tachograph/cmd/tacho@latest
+tacho version    # 現在の版を確認(tacho doctor でも先頭に表示)
+```
+
+`@latest` は最新のタグ付きリリースを取得します。特定バージョンに固定したい場合は `@v0.1.0` のようにタグを指定します。
+
 ## 使い方
 
 ```sh

@@ -89,6 +89,7 @@ func runDoctor(args []string) int {
 	fmt.Println()
 
 	fmt.Println("binary:")
+	fmt.Println("  version:   " + version)
 	if exe != "" {
 		fmt.Println("  running:   " + exe)
 	} else {
