@@ -17,6 +17,9 @@ func testStatus() schema.Status {
 	dailyTokens := int64(12_700_000)
 	dailyCost := 1.2
 	claude.Daily = &schema.Daily{Tokens: dailyTokens, CostUSD: &dailyCost}
+	todayTokens := int64(120_000)
+	todayCost := 0.03
+	claude.SessionToday = &schema.Daily{Tokens: todayTokens, CostUSD: &todayCost}
 	cwd := "/Users/example/dev/project"
 	claude.Session.CWD = &cwd
 
@@ -29,34 +32,36 @@ func TestTemplateBasics(t *testing.T) {
 	s := testStatus()
 
 	cases := map[string]string{
-		"{claude.model}":     "Fable 5",
-		"{claude.ctx}":       "8%",
-		"{claude.5h.pct}":    "24%",
-		"{claude.5h}":        "24%", // bare window defaults to pct
-		"{claude.wk.pct}":    "41%",
-		"{claude.5h.bar:4}":  "█░░░",
-		"{claude.5h.dial}":   "◔", // 24% used
-		"{claude.wk.dial}":   "◑", // 41% used
-		"{codex.5h.dial}":    DialMissing,
-		"{claude.5h.moon}":   "🌒", // 24% used
-		"{codex.5h.moon}":    DialMissing,
-		"{claude.5h.resets}": hhmm(t, "2026-06-13T02:00:00+09:00"),
-		"{claude.tokens}":             "989k",
-		"{claude.tokens.session}":     "989k",
-		"{claude.tokens.all}":         "12.7M/d",
-		"{claude.cost}":               "$0.05",
-		"{claude.cost.session}":       "$0.05",
-		"{claude.cost.all}":           "$1.20/d",
-		"{claude.cost.session.today}": Missing, // reserved scope, not yet wired
-		"{codex.tokens.all}":          Missing, // codex unavailable
-		"{claude.cwd}":                "project",
-		"{claude.stale}":     "",
-		"{codex.model}":      Missing, // unavailable tool
-		"{codex.5h.pct}":     Missing,
-		"{codex.5h.bar:4}":   "░░░░", // bars keep their width when absent
-		"{claude.plan}":      Missing,
-		"{claude.nope}":      Missing,
-		"{nope.model}":       Missing,
+		"{claude.model}":                "Fable 5",
+		"{claude.ctx}":                  "8%",
+		"{claude.5h.pct}":               "24%",
+		"{claude.5h}":                   "24%", // bare window defaults to pct
+		"{claude.wk.pct}":               "41%",
+		"{claude.5h.bar:4}":             "█░░░",
+		"{claude.5h.dial}":              "◔", // 24% used
+		"{claude.wk.dial}":              "◑", // 41% used
+		"{codex.5h.dial}":               DialMissing,
+		"{claude.5h.moon}":              "🌒", // 24% used
+		"{codex.5h.moon}":               DialMissing,
+		"{claude.5h.resets}":            hhmm(t, "2026-06-13T02:00:00+09:00"),
+		"{claude.tokens}":               "989k",
+		"{claude.tokens.session}":       "989k",
+		"{claude.tokens.session.today}": "120k",
+		"{claude.tokens.all}":           "12.7M/d",
+		"{claude.cost}":                 "$0.05",
+		"{claude.cost.session}":         "$0.05",
+		"{claude.cost.session.today}":   "$0.03",
+		"{claude.cost.all}":             "$1.20/d",
+		"{codex.tokens.all}":            Missing, // codex unavailable
+		"{codex.cost.session.today}":    Missing, // codex has no session.today
+		"{claude.cwd}":                  "project",
+		"{claude.stale}":                "",
+		"{codex.model}":                 Missing, // unavailable tool
+		"{codex.5h.pct}":                Missing,
+		"{codex.5h.bar:4}":              "░░░░", // bars keep their width when absent
+		"{claude.plan}":                 Missing,
+		"{claude.nope}":                 Missing,
+		"{nope.model}":                  Missing,
 	}
 	for tmpl, want := range cases {
 		if got := Template(tmpl, s, now, plain); got != want {

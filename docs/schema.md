@@ -46,7 +46,8 @@
       "cached_input": 803712,
       "output": 2207,
       "total": 989120
-    }
+    },
+    "transcript_path": "/Users/.../<session>.jsonl"  // 任意。session_today算出に使用
   },
   "limits": [                         // レートリミット枠。概念が存在しない場合は null
     {
@@ -65,6 +66,10 @@
   "daily": {                          // 当日(ローカル日付)の全セッション合計
     "tokens": 12704565,               // 新規トークン(cache_read等の再読込は除外)
     "cost_usd": null                  // 料金表ベースの推定コスト(未確定時null)
+  },
+  "session_today": {                  // 現セッションの当日分のみ。Claudeのみ(Codexは累積記録のためnull)
+    "tokens": 68000,
+    "cost_usd": 1.84
   }
 }
 ```

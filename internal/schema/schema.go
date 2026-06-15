@@ -40,19 +40,20 @@ type Status struct {
 // Tool is one entry per supported agent CLI. Fields that cannot be
 // determined are explicit nulls, never omitted (see docs/schema.md).
 type Tool struct {
-	Tool        string    `json:"tool"`
-	Available   bool      `json:"available"`
-	Error       *Error    `json:"error"`
-	Stale       bool      `json:"stale"`
-	CollectedAt *string   `json:"collected_at"` // RFC 3339
-	Backend     string    `json:"backend"`
-	Plan        *string   `json:"plan"`
-	Model       *Model    `json:"model"`
-	Session     *Session  `json:"session"`
-	Limits      []Limit   `json:"limits"` // nil marshals to null
-	Credits     *float64  `json:"credits"`
-	Fallback    *Fallback `json:"fallback"`
-	Daily       *Daily    `json:"daily"` // today's totals across all sessions
+	Tool         string    `json:"tool"`
+	Available    bool      `json:"available"`
+	Error        *Error    `json:"error"`
+	Stale        bool      `json:"stale"`
+	CollectedAt  *string   `json:"collected_at"` // RFC 3339
+	Backend      string    `json:"backend"`
+	Plan         *string   `json:"plan"`
+	Model        *Model    `json:"model"`
+	Session      *Session  `json:"session"`
+	Limits       []Limit   `json:"limits"` // nil marshals to null
+	Credits      *float64  `json:"credits"`
+	Fallback     *Fallback `json:"fallback"`
+	Daily        *Daily    `json:"daily"`         // today's totals across all sessions
+	SessionToday *Daily    `json:"session_today"` // current session's totals, today only (Claude only)
 }
 
 // Daily holds today's aggregate usage across every session of a tool.
@@ -77,6 +78,7 @@ type Session struct {
 	ContextWindow  *int64   `json:"context_window"`
 	ContextUsedPct *float64 `json:"context_used_pct"`
 	Tokens         *Tokens  `json:"tokens"`
+	TranscriptPath *string  `json:"transcript_path,omitempty"` // local jsonl; used to total today's session usage
 }
 
 type Tokens struct {
