@@ -58,6 +58,20 @@ If you'd rather not touch your PATH, call `tacho` by absolute path (e.g.
 `~/go/bin/tacho`) — including in the Claude Code settings below. `tacho
 setup claude` prints a snippet with the correct absolute path baked in.
 
+### Updating
+
+Re-run the same `go install` to upgrade to the latest version. It overwrites
+the same path under `$GOPATH/bin`, so your statusLine / SwiftBar config keeps
+working unchanged:
+
+```sh
+go install github.com/kosako/tachograph/cmd/tacho@latest
+tacho version    # check the current version (also shown at the top of tacho doctor)
+```
+
+`@latest` fetches the newest tagged release; pin a specific one with a tag
+like `@v0.1.0`.
+
 ## Usage
 
 ```sh
