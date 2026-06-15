@@ -114,6 +114,8 @@ const configUsage = `usage:
   tacho config show              print the current configuration
   tacho config path              print the config file path
   tacho config set <key> <val>   set a value and save
+  tacho config statusline-preset <name>  write a preset to statusline.tmpl
+  tacho config statusline-preset --list  list available presets
 
 keys:
   tools           comma-separated: claude-code,codex  (which tools to show)
@@ -152,6 +154,8 @@ func runConfig(args []string) int {
 			return 2
 		}
 		return configToggleTool(args[0])
+	case "statusline-preset":
+		return configStatuslinePreset(args)
 	default:
 		fmt.Fprint(os.Stderr, configUsage)
 		return 2
@@ -200,6 +204,41 @@ func configToggleTool(name string) int {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
+	return 0
+}
+
+// configStatuslinePreset lists the preset catalog or writes a chosen preset to
+// ~/.config/tachograph/statusline.tmpl so `tacho statusline` picks it up.
+func configStatuslinePreset(args []string) int {
+	if len(args) == 0 || args[0] == "--list" || args[0] == "-l" {
+		for _, p := range render.Presets {
+			fmt.Printf("%-9s %s\n", p.Name, p.Desc)
+			fmt.Printf("          %s\n", p.Template)
+		}
+		return 0
+	}
+	name := args[0]
+	tmpl, ok := render.PresetTemplate(name)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "tacho: unknown preset %q (want one of: %s)\n", name, strings.Join(render.PresetNames(), ", "))
+		return 2
+	}
+	dir := config.Dir()
+	if dir == "" {
+		fmt.Fprintln(os.Stderr, "tacho: cannot locate the config directory")
+		return 1
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	path := filepath.Join(dir, "statusline.tmpl")
+	if err := os.WriteFile(path, []byte(tmpl+"\n"), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	fmt.Println("Wrote preset " + name + " to " + path)
+	fmt.Println(tmpl)
 	return 0
 }
 
@@ -382,7 +421,7 @@ func loadTemplate() string {
 	}
 	if dir != "" {
 		if b, err := os.ReadFile(filepath.Join(dir, "statusline.tmpl")); err == nil {
-			if t := strings.TrimSpace(string(b)); t != "" {
+			if t := render.FirstTemplateLine(string(b)); t != "" {
 				return t
 			}
 		}

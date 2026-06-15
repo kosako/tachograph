@@ -114,18 +114,33 @@ As a side effect each invocation snapshots the Claude rate limits, so bare
 
 ### Customizing the status line
 
-Put a template in `~/.config/tachograph/statusline.tmpl` (or pass
-`--template`). Default:
+Put a one-line template in `~/.config/tachograph/statusline.tmpl` (or pass
+`--template`).
 
-```
-{claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
+#### Presets (start here)
+
+Pick a **preset** that matches what you want, no placeholder assembly required:
+
+```sh
+tacho config statusline-preset --list   # list presets (name + template)
+tacho config statusline-preset moon      # pick one; writes statusline.tmpl
 ```
 
-Or a dial-style variant:
+| Preset | For | Example |
+|---|---|---|
+| `bar` | default — context + 5h gauge + weekly | `Fable 5 ctx 8% · 5h █░░░░░ 24% ↻06/12 · wk 41% · …` |
+| `minimal` | model + 5h/weekly percentages only | `Fable 5 5h 24% · wk 41%` |
+| `dial` | compact single-char dials (`○◔◑◕●`) | `Fable 5 ctx 8% · 5h ◔ 24% ↻06/12 · wk ◑ · codex ◔◑` |
+| `moon` | moon-phase dials (`🌑🌒🌓🌔🌕`) | `Fable 5 5h 🌒 24% · wk 🌓 · codex 🌒🌓` |
+| `cost` | model + context + 5h + this session's tokens/cost | `Fable 5 ctx 8% · 5h 24% · 989k $0.05` |
+| `cwd` | working dir + model + context + 5h gauge | `myproj · Fable 5 ctx 8% · 5h █░░░░░ 24%` |
 
-```
-{claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
-```
+To hand-roll one, copy [`contrib/statusline.tmpl.example`](contrib/statusline.tmpl.example)
+to `~/.config/tachograph/statusline.tmpl` and uncomment the line you want
+(lines starting with `#` and blank lines are ignored; the first usable line
+becomes the template).
+
+#### Placeholders
 
 Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 
