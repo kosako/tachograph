@@ -14,6 +14,9 @@ func testStatus() schema.Status {
 	cost := 0.05
 	claude.Session.Tokens = &schema.Tokens{Total: tokens}
 	claude.Fallback = &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost}
+	dailyTokens := int64(12_700_000)
+	dailyCost := 1.2
+	claude.Daily = &schema.Daily{Tokens: dailyTokens, CostUSD: &dailyCost}
 	cwd := "/Users/example/dev/project"
 	claude.Session.CWD = &cwd
 
@@ -38,9 +41,15 @@ func TestTemplateBasics(t *testing.T) {
 		"{claude.5h.moon}":   "🌒", // 24% used
 		"{codex.5h.moon}":    DialMissing,
 		"{claude.5h.resets}": hhmm(t, "2026-06-13T02:00:00+09:00"),
-		"{claude.tokens}":    "989k",
-		"{claude.cost}":      "$0.05",
-		"{claude.cwd}":       "project",
+		"{claude.tokens}":             "989k",
+		"{claude.tokens.session}":     "989k",
+		"{claude.tokens.all}":         "12.7M/d",
+		"{claude.cost}":               "$0.05",
+		"{claude.cost.session}":       "$0.05",
+		"{claude.cost.all}":           "$1.20/d",
+		"{claude.cost.session.today}": Missing, // reserved scope, not yet wired
+		"{codex.tokens.all}":          Missing, // codex unavailable
+		"{claude.cwd}":                "project",
 		"{claude.stale}":     "",
 		"{codex.model}":      Missing, // unavailable tool
 		"{codex.5h.pct}":     Missing,
