@@ -56,6 +56,8 @@ tacho watch -n 5       # 定期再描画
 tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
 tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
+tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
+tacho doctor           # インストール先・PATH・設定の診断
 ```
 
 ```
@@ -67,7 +69,14 @@ codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13 
 
 ### Claude Code ステータスライン
 
-`~/.claude/settings.json` に追加:
+一番簡単なのは tacho に設定させることです:
+
+```sh
+tacho setup claude --write   # ~/.claude/settings.json にマージ(既存設定は保持・.bakを作成)
+tacho setup claude           # 貼り付け用スニペットを表示するだけ(自動編集しない)
+```
+
+PATHが通っていれば `tacho statusline`、通っていなければ解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json` に追加:
 
 ```json
 {
@@ -78,6 +87,8 @@ codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13 
   }
 }
 ```
+
+うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・statusLineの設定状況を診断します。
 
 Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも(最大10分間)リミットが表示できます。
 

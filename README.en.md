@@ -66,6 +66,8 @@ tacho watch -n 5       # refresh continuously
 tacho status --json    # unified schema JSON (see docs/schema.md)
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
 tacho cmux push|clear  # manage cmux sidebar pills manually
+tacho setup claude     # print/install the Claude Code statusLine config (--write)
+tacho doctor           # diagnose install path, PATH, and config
 ```
 
 ```
@@ -80,7 +82,16 @@ Code on Bedrock) fall back to session tokens and estimated cost.
 
 ### Claude Code status line
 
-Add to `~/.claude/settings.json`:
+The easiest way is to let tacho do it:
+
+```sh
+tacho setup claude --write   # merge into ~/.claude/settings.json (keeps existing keys, writes a .bak)
+tacho setup claude           # just print the snippet to paste (no file edits)
+```
+
+It uses a bare `tacho statusline` when tacho is on your PATH, or bakes in the
+resolved absolute path when it isn't. To edit by hand, add to
+`~/.claude/settings.json`:
 
 ```json
 {
@@ -91,6 +102,9 @@ Add to `~/.claude/settings.json`:
   }
 }
 ```
+
+If something isn't working, `tacho doctor` reports the real binary path, PATH
+status, config files, and whether the statusLine is configured.
 
 Claude Code pipes its session JSON (model, context, rate limits) to
 `tacho statusline`, which prints one line combining it with Codex usage.
