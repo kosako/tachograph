@@ -32,6 +32,54 @@ func TestOverrideFromFile(t *testing.T) {
 	}
 }
 
+// A partial override must keep the other prices at their built-in defaults
+// rather than zeroing them (which would silently undercount cost).
+func TestPartialOverrideMergesOverDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"claude-opus":{"input":20}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := Load().For("claude-opus-4-8")
+	if !ok {
+		t.Fatal("claude-opus should be priced")
+	}
+	// input overridden; output / cache_read / cache_write keep defaults.
+	if r.In != 20 || r.Out != 75 || r.CacheRead != 1.5 || r.CacheWrite != 18.75 {
+		t.Errorf("partial override = %+v, want In=20 with default Out/CacheRead/CacheWrite", r)
+	}
+}
+
+// An explicit 0 must be honored (distinct from an omitted field).
+func TestExplicitZeroOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"claude-opus":{"cache_read":0}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := Load().For("claude-opus-4-8")
+	if r.CacheRead != 0 || r.In != 15 {
+		t.Errorf("explicit zero override = %+v, want CacheRead=0 with default In=15", r)
+	}
+}
+
+// A brand-new model id (not in defaults) takes only the fields given; the rest
+// are 0, since there's no default to fall back to.
+func TestNewModelOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"my-model":{"input":5,"output":10}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := Load().For("my-model-x")
+	if !ok || r.In != 5 || r.Out != 10 || r.CacheRead != 0 {
+		t.Errorf("new model override = %+v %v, want In=5 Out=10 CacheRead=0", r, ok)
+	}
+}
+
 func TestCost(t *testing.T) {
 	r := Rate{In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}
 	// (1_000_000*15 + 0 + 0 + 1_000_000*75) / 1e6 = 90
