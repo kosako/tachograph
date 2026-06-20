@@ -28,7 +28,7 @@
   "tool": "codex",                    // "claude-code" | "codex"
   "available": true,                  // データソース(セッションファイル等)が見つかったか
   "error": null,                      // 取得失敗時 {"code": "...", "message": "..."}
-  "stale": false,                     // 最終観測データが古い(15分超)とき true
+  "stale": false,                     // 最終観測データが古い(60分超、StaleAfterMinutes)とき true
   "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(イベントのtimestamp)
   "backend": "subscription",          // "subscription" | "api" | "bedrock" | "vertex" | "unknown"
   "plan": "prolite",                  // プラン名。不明なら null
@@ -81,8 +81,9 @@
 |---|---|
 | `available` | データソース自体の有無。`false` のとき他フィールドはすべて null |
 | `error` | 取得を試みて失敗したときのみ非null。`available:false`(未インストール等)はエラーではない |
-| `stale` | `collected_at` が現在時刻から15分超過。レンダラは灰色表示などに使う |
+| `stale` | `collected_at` が現在時刻から60分超過(`StaleAfterMinutes`)。レンダラは灰色表示などに使う |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
+| `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
 | `limits` | nullable。配列のときは `window_minutes` 昇順 |
 | `used_pct` | 0–100。「使った割合」。残量表示はレンダラ側で `100 - used_pct` |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト) |

@@ -90,7 +90,7 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠6h` は15分より古いデータの印(数値は経過時間)で、その行は全体が薄く表示されます — エージェントがアイドルの間は消費が増えないため、staleな値は「上限値」として読めます。レートリミット枠が存在しないバックエンド(Bedrock上のClaude Code等)では、セッショントークン数と推定コストの表示に自動で切り替わります。
+`⚠6h` は60分(約1時間)より古いデータの印(数値は経過時間)で、その行は全体が薄く表示されます — エージェントがアイドルの間は消費が増えないため、staleな値は「上限値」として読めます。レートリミット枠が存在しないバックエンド(Bedrock上のClaude Code等)では、セッショントークン数と推定コストの表示に自動で切り替わります。
 
 ### Claude Code ステータスライン
 
@@ -115,7 +115,7 @@ PATHが通っていれば `tacho statusline`、通っていなければ解決済
 
 うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・statusLineの設定状況を診断します。
 
-Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも(最大10分間)リミットが表示できます。
+Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります)。
 
 ### ステータスラインのカスタマイズ
 
@@ -153,7 +153,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `5h.pct` / `wk.pct` | 5時間枠 / 週次枠のリミット使用率 |
 | `5h.bar:8` / `wk.bar:8` | 指定幅のゲージ、`██░░░░░░` |
 | `5h.dial` / `wk.dial` | 1文字ダイヤル、`○◔◑◕●`(データ無しは `◌`) |
-| `5h.moon` / `wk.moon` | 大きめの月齢ダイヤル、`🌑🌒🌓🌔🌕`(絵文字のため色分け対象外) |
+| `5h.moon` / `wk.moon` | 大きめの月齢ダイヤル、`🌑🌒🌓🌔🌕`(絵文字のため色分け対象外。データ無しは `◌`) |
 | `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(当日)または `↻06/15` |
 | `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
 | `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
@@ -163,7 +163,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
 | `plan` | プラン名(`prolite` 等) |
 | `cwd` | 作業ディレクトリ(basename) |
-| `stale` | 15分超で `⚠1h `(印+経過時間)、それ以外は空 |
+| `stale` | 60分超で `⚠1h `(印+経過時間)、それ以外は空 |
 | `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
 
 `*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
@@ -200,7 +200,7 @@ chmod +x <プラグインフォルダ>/tacho.30s.sh
 ドロップダウン下部の **Settings** サブメニューから、一覧から選ぶだけで切り替えられます(現在の選択に ✓ / ☑):
 
 - **表示形式**: メーター(ゲージ)/ 数字
-- **指標**: 5h limit / weekly limit / context / cost / tokens(ラジオ選択)
+- **指標**: 5h limit / weekly limit / cost / tokens(ラジオ選択。contextはセッションごとに変動が大きくメニューバー向きでないため除外)
 - **表示するツール**: Claude / Codex(チェックボックス)
 
 CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
@@ -223,7 +223,7 @@ tacho config set tools codex               # Codexだけ表示
 }
 ```
 
-キーはモデルIDの前方一致(`claude-fable` は `claude-fable-5` 等にマッチ)。料金が無いモデルはコスト0として扱われます。
+キーはモデルIDの前方一致(`claude-fable` は `claude-fable-5` 等にマッチ)。料金表に無いモデルはコスト計算から除外され、その分は合計に含まれません(当日に価格付きモデルが一つも無ければコストは「不明」= `--` 表示)。
 
 ### Codex TUI
 

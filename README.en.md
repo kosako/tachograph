@@ -106,9 +106,9 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠1h` marks data older than 15 minutes with its age, and the whole line is
-dimmed — usage can only go down while an agent is idle, so a stale value
-reads as an upper bound. Agents without rate-limit windows (e.g. Claude
+`⚠6h` marks data older than 60 minutes (about an hour) with its age, and the
+whole line is dimmed — usage can only go down while an agent is idle, so a
+stale value reads as an upper bound. Agents without rate-limit windows (e.g. Claude
 Code on Bedrock) fall back to session tokens and estimated cost.
 
 ### Claude Code status line
@@ -140,8 +140,8 @@ status, config files, and whether the statusLine is configured.
 Claude Code pipes its session JSON (model, context, rate limits) to
 `tacho statusline`, which prints one line combining it with Codex usage.
 As a side effect each invocation snapshots the Claude rate limits, so bare
-`tacho` / `tacho watch` in other terminals can show them too (for up to
-10 minutes).
+`tacho` / `tacho watch` in other terminals can show them too (kept as a
+last-known value for up to 30 days, shown as stale after 60 minutes).
 
 ### Customizing the status line
 
@@ -183,7 +183,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
 | `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |
 | `5h.dial` / `wk.dial` | single-character dial, `○◔◑◕●` (`◌` when no data) |
-| `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors) |
+| `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors; `◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
@@ -193,7 +193,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
-| `stale` | `⚠1h ` (marker + data age) when older than 15 minutes, else empty |
+| `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
 
 `*.session.today` is Claude only — Codex's token counts are cumulative and
@@ -249,7 +249,7 @@ The **Settings** submenu at the bottom picks values from a list (the current
 choice is check-marked):
 
 - **Display**: meter (gauge) or number
-- **Metric**: 5h limit / weekly limit / context / cost / tokens (radio)
+- **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure)
 - **Tools**: Claude / Codex (checkboxes)
 
 Or via the CLI (config lives in `~/.config/tachograph/config.json`):
@@ -276,7 +276,9 @@ per million tokens):
 ```
 
 Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`).
-Models without a price contribute zero cost.
+Models not in the price table are excluded from the cost calculation and don't
+count toward the total (if no priced model ran that day, cost shows as unknown,
+`--`).
 
 ### Codex TUI
 

@@ -18,6 +18,7 @@ func TestToolMarshalsAllKeysWithNulls(t *testing.T) {
 	keys := []string{
 		"tool", "available", "error", "stale", "collected_at", "backend",
 		"plan", "model", "session", "limits", "credits", "fallback",
+		"daily", "session_today",
 	}
 	for _, k := range keys {
 		v, ok := m[k]
