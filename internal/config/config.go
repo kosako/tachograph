@@ -75,17 +75,13 @@ func Load() Config {
 	if err != nil {
 		return c
 	}
-	// Unmarshal onto the defaults: absent keys keep their default values.
+	// Unmarshal onto the defaults: absent keys keep their default values. A
+	// JSON array (including an explicit empty []) replaces Tools, so "show
+	// nothing" is honored; only an absent/null tools key leaves it nil and
+	// falls back to defaults. The writers persist [] (not null) for an empty
+	// selection so that distinction survives a round-trip.
 	_ = json.Unmarshal(b, &c)
-	// Distinguish an explicit tools selection (honor it, even when empty) from
-	// an absent/null key (fall back to defaults). Without this, disabling the
-	// last tool persists "tools": null and silently restores both on reload.
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(b, &raw) == nil {
-		if tv, ok := raw["tools"]; !ok || string(tv) == "null" {
-			c.Tools = Default().Tools
-		}
-	} else if c.Tools == nil {
+	if c.Tools == nil {
 		c.Tools = Default().Tools
 	}
 	if c.Menubar.Style == "" {
