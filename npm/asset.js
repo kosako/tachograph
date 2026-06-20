@@ -23,10 +23,29 @@ function assetFor(platform, arch) {
   };
 }
 
-// downloadURL builds the GitHub release download URL for a version + asset.
-function downloadURL(version, asset) {
-  const tag = version.startsWith("v") ? version : `v${version}`;
-  return `https://github.com/kosako/tachograph/releases/download/${tag}/${asset}`;
+// tagFor normalizes a package version to its release tag (v-prefixed).
+function tagFor(version) {
+  return version.startsWith("v") ? version : `v${version}`;
 }
 
-module.exports = { assetFor, downloadURL, PLATFORMS, ARCHES };
+// downloadURL builds the GitHub release download URL for a version + asset.
+function downloadURL(version, asset) {
+  return `https://github.com/kosako/tachograph/releases/download/${tagFor(version)}/${asset}`;
+}
+
+// checksumsURL is the GoReleaser checksums.txt for the matching release.
+function checksumsURL(version) {
+  return `https://github.com/kosako/tachograph/releases/download/${tagFor(version)}/checksums.txt`;
+}
+
+// checksumFor parses GoReleaser's "<sha256>  <filename>" lines and returns the
+// hex digest for asset, or null when it isn't listed.
+function checksumFor(text, asset) {
+  for (const line of text.split("\n")) {
+    const [hash, name] = line.trim().split(/\s+/);
+    if (name === asset && hash) return hash;
+  }
+  return null;
+}
+
+module.exports = { assetFor, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES };
