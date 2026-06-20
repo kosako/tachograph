@@ -16,3 +16,17 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test ./...
+      # The npm wrapper carries the release-delivery logic (platform→asset
+      # mapping, tag normalization). Run its suite so a drift fails on PR, not
+      # on a release tag that's already public.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: node test.js
+        working-directory: npm
+      # Validate the GoReleaser config too, so a malformed v2 key is caught
+      # before the tag push (not after the tag is already public).
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
