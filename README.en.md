@@ -276,8 +276,9 @@ per million tokens):
 ```
 
 Only the fields you set override the built-in defaults (e.g. set just `input`
-and the other rates stay at their defaults — partial overrides merge). Keys
-match model ids by prefix (`claude-fable` matches `claude-fable-5`). Models not
+and the other rates stay at their defaults — partial overrides merge). A **new
+model id** not in the table has no defaults, so any rate you leave out is `0`.
+Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`). Models not
 in the price table are excluded from the cost calculation and don't count toward
 the total (if no priced model ran that day, cost shows as unknown, `--`).
 
