@@ -47,8 +47,11 @@ func Collect(opts Options) schema.Tool {
 		return errTool("read_error", err.Error())
 	}
 	tc, turn, ok := lastEvents(lines)
-	if !ok {
-		// Tail missed the events (very long turns); scan the whole file.
+	if !ok || turn == nil {
+		// Tail missed token_count or turn_context. turn_context is emitted at
+		// the start of a turn and token_count at the end, so a single turn
+		// longer than the tail can leave turn_context out of reach (model/cwd
+		// would silently go null). Scan the whole file before giving up.
 		if lines, err = allLines(path); err != nil {
 			return errTool("read_error", err.Error())
 		}
@@ -69,18 +72,45 @@ func errTool(code, msg string) schema.Tool {
 
 // latestSessionFile prunes by the YYYY/MM/DD layout: it walks date
 // directories in descending name order and returns the newest *.jsonl by
-// mtime within the first day that has any.
+// mtime within the first day that has any, backtracking past empty branches
+// (e.g. a freshly-rolled-over but still-empty newest day/month/year).
 func latestSessionFile(sessions string) string {
-	day := latestDir(latestDir(latestDir(sessions)))
-	if day == "" {
+	return descendForJSONL(sessions, 3) // year / month / day
+}
+
+// descendForJSONL walks the date tree in descending name order with
+// backtracking: it tries the newest subdirectory first and falls back to
+// older siblings whenever a branch yields no .jsonl, so an empty newest
+// day/month/year doesn't hide real sessions in an older one. depth is the
+// remaining directory levels before the .jsonl files.
+func descendForJSONL(dir string, depth int) string {
+	if depth == 0 {
+		return newestJSONL(dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		return ""
 	}
-	var best string
-	var bestMod time.Time
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() {
+			continue
+		}
+		if found := descendForJSONL(filepath.Join(dir, entries[i].Name()), depth-1); found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
+// newestJSONL returns the newest *.jsonl by mtime directly inside day, or ""
+// when the directory holds none.
+func newestJSONL(day string) string {
 	entries, err := os.ReadDir(day)
 	if err != nil {
 		return ""
 	}
+	var best string
+	var bestMod time.Time
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
@@ -94,24 +124,6 @@ func latestSessionFile(sessions string) string {
 		}
 	}
 	return best
-}
-
-// latestDir returns the lexicographically last subdirectory (dates sort
-// naturally in YYYY/MM/DD layout), skipping empty branches.
-func latestDir(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].IsDir() {
-			return filepath.Join(dir, entries[i].Name())
-		}
-	}
-	return ""
 }
 
 func tailLines(path string) ([][]byte, error) {
@@ -295,13 +307,18 @@ func build(path string, tc *tokenCount, turn *turnContext, now time.Time) schema
 func toLimit(w *rlWindow) schema.Limit {
 	mins := w.WindowMinutes
 	pct := w.UsedPercent
-	resets := time.Unix(w.ResetsAt, 0).Local().Format(time.RFC3339)
-	return schema.Limit{
+	l := schema.Limit{
 		Window:        windowName(mins),
 		WindowMinutes: &mins,
 		UsedPct:       &pct,
-		ResetsAt:      &resets,
 	}
+	// resets_at is nullable: an absent/zero epoch must stay null, not format
+	// as 1970-01-01 (which would render as a reset far in the past).
+	if w.ResetsAt > 0 {
+		resets := time.Unix(w.ResetsAt, 0).Local().Format(time.RFC3339)
+		l.ResetsAt = &resets
+	}
+	return l
 }
 
 func windowName(mins int) string {

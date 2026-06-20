@@ -189,13 +189,18 @@ func fromStatusline(opts Options) schema.Tool {
 
 func toLimit(window string, mins int, w *slWindow) schema.Limit {
 	pct := w.UsedPercentage
-	resets := time.Unix(w.ResetsAt, 0).Local().Format(time.RFC3339)
-	return schema.Limit{
+	l := schema.Limit{
 		Window:        window,
 		WindowMinutes: &mins,
 		UsedPct:       &pct,
-		ResetsAt:      &resets,
 	}
+	// resets_at is nullable: keep an absent/zero epoch as null rather than
+	// formatting it as 1970-01-01.
+	if w.ResetsAt > 0 {
+		resets := time.Unix(w.ResetsAt, 0).Local().Format(time.RFC3339)
+		l.ResetsAt = &resets
+	}
+	return l
 }
 
 // ---- transcript route (no statusline stdin available) ----
