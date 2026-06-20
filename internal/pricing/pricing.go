@@ -50,13 +50,38 @@ func Load() Table {
 	if err != nil {
 		return t
 	}
-	var over map[string]Rate
+	// Merge field-by-field over the existing rate so a partial override
+	// (e.g. {"claude-opus":{"input":20}}) tweaks one price without zeroing the
+	// others. Pointer fields distinguish an explicit 0 from an omitted field.
+	var over map[string]rateOverride
 	if json.Unmarshal(b, &over) == nil {
-		for k, v := range over {
-			t[k] = v
+		for k, o := range over {
+			r := t[k] // existing default, or zero Rate for a brand-new model id
+			if o.In != nil {
+				r.In = *o.In
+			}
+			if o.Out != nil {
+				r.Out = *o.Out
+			}
+			if o.CacheRead != nil {
+				r.CacheRead = *o.CacheRead
+			}
+			if o.CacheWrite != nil {
+				r.CacheWrite = *o.CacheWrite
+			}
+			t[k] = r
 		}
 	}
 	return t
+}
+
+// rateOverride mirrors Rate with pointer fields so an omitted price keeps the
+// built-in default instead of becoming 0.
+type rateOverride struct {
+	In         *float64 `json:"input"`
+	Out        *float64 `json:"output"`
+	CacheRead  *float64 `json:"cache_read"`
+	CacheWrite *float64 `json:"cache_write"`
 }
 
 // For returns the rate for a model id by longest-prefix match, and whether a
