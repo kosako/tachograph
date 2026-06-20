@@ -65,12 +65,17 @@ func runSetup(args []string) int {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
-	if len(existing) > 0 {
-		if err := os.WriteFile(path+".bak", existing, 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
-			return 1
+	// Back up only once: the merge is idempotent, so re-running --write would
+	// otherwise overwrite the original backup with tacho's own merged output and
+	// lose the user's pre-tacho statusLine. Keep the first .bak.
+	if bak := path + ".bak"; len(existing) > 0 {
+		if _, err := os.Stat(bak); os.IsNotExist(err) {
+			if err := os.WriteFile(bak, existing, 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
+				return 1
+			}
+			fmt.Println("Backed up existing settings to " + bak)
 		}
-		fmt.Println("Backed up existing settings to " + path + ".bak")
 	}
 	if err := os.WriteFile(path, merged, 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)

@@ -152,7 +152,7 @@ const configUsage = `usage:
 keys:
   tools           comma-separated: claude-code,codex  (which tools to show)
   menubar.style   meter | number
-  menubar.metric  ` + "limit_5h | limit_weekly | context | cost | tokens" + `
+  menubar.metric  ` + "limit_5h | limit_weekly | cost | tokens" + `
 `
 
 func runConfig(args []string) int {
@@ -202,7 +202,7 @@ func configCycle(key string) int {
 	case "menubar.style":
 		c.Menubar.Style = nextIn([]string{config.StyleMeter, config.StyleNumber}, c.Menubar.Style)
 	case "menubar.metric":
-		c.Menubar.Metric = nextIn(render.Metrics, c.Menubar.Metric)
+		c.Menubar.Metric = nextIn(render.MenubarMetrics, c.Menubar.Metric)
 	default:
 		fmt.Fprintf(os.Stderr, "tacho: cannot cycle %q\n", key)
 		return 2
@@ -226,7 +226,9 @@ func configToggleTool(name string) int {
 		enabled[t] = true
 	}
 	enabled[name] = !enabled[name]
-	c.Tools = nil
+	// Non-nil empty slice so an all-off selection persists as "tools": [] (an
+	// explicit "show nothing"), not "tools": null (which reloads as defaults).
+	c.Tools = []string{}
 	for _, t := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
 		if enabled[t] {
 			c.Tools = append(c.Tools, t)
@@ -289,7 +291,7 @@ func configSet(key, val string) int {
 	c := config.Load()
 	switch key {
 	case "tools":
-		var tools []string
+		tools := []string{} // non-nil so an empty selection persists as [] (not null → defaults)
 		for _, t := range strings.Split(val, ",") {
 			t = strings.TrimSpace(t)
 			if t == "" {
@@ -309,8 +311,8 @@ func configSet(key, val string) int {
 		}
 		c.Menubar.Style = val
 	case "menubar.metric":
-		if !render.ValidMetric(val) {
-			fmt.Fprintf(os.Stderr, "tacho: invalid metric %q\n", val)
+		if !render.ValidMenubarMetric(val) {
+			fmt.Fprintf(os.Stderr, "tacho: invalid menu bar metric %q (want one of: %s)\n", val, strings.Join(render.MenubarMetrics, ", "))
 			return 2
 		}
 		c.Menubar.Metric = val

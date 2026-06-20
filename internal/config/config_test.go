@@ -51,6 +51,43 @@ func TestLoadPartialFileKeepsDefaults(t *testing.T) {
 	}
 }
 
+// An explicit empty tools array means "show nothing" and must be honored, not
+// silently restored to both tools (the disable-the-last-tool case).
+func TestLoadHonorsExplicitEmptyTools(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tools":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := Load(); len(c.Tools) != 0 {
+		t.Errorf("Tools = %v, want empty (explicit [] must be honored, not reset to defaults)", c.Tools)
+	}
+}
+
+// A null tools key (manual edit / older config) is ambiguous and falls back to
+// defaults; only an explicit [] means empty.
+func TestLoadNullToolsFallsBackToDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tools":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := Load(); len(c.Tools) != 2 {
+		t.Errorf("Tools = %v, want both defaults for null", c.Tools)
+	}
+}
+
+// Saving an empty selection must round-trip as empty, not reload as defaults.
+func TestSaveEmptyToolsRoundTrips(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if err := Save(Config{Tools: []string{}, Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := Load(); len(c.Tools) != 0 {
+		t.Errorf("Tools = %v, want empty after saving an empty selection", c.Tools)
+	}
+}
+
 func TestLoadInvalidFileYieldsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
