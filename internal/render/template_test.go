@@ -111,3 +111,20 @@ func TestDefaultTemplateRenders(t *testing.T) {
 		t.Errorf("DefaultTemplate left unexpanded placeholders: %q", got)
 	}
 }
+
+// {effort} must slot in cleanly: a marker with trailing space when present,
+// and nothing (no "--", no double space) when the model reports no effort.
+func TestTemplateEffort(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	tmpl := "{claude.model} {claude.effort}ctx {claude.ctx}"
+
+	s := testStatus() // limitsTool() sets effort "xhigh"
+	if got, want := Template(tmpl, s, now, plain), "Fable 5 ⚡xhi ctx 8%"; got != want {
+		t.Errorf("effort present: Template = %q, want %q", got, want)
+	}
+
+	s.Tools[0].Model.Effort = nil
+	if got, want := Template(tmpl, s, now, plain), "Fable 5 ctx 8%"; got != want {
+		t.Errorf("effort absent: Template = %q, want %q", got, want)
+	}
+}
