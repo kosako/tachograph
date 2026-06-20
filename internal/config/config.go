@@ -28,7 +28,7 @@ type Config struct {
 
 type Menubar struct {
 	Style  string `json:"style"`  // StyleMeter | StyleNumber
-	Metric string `json:"metric"` // see render.Metrics
+	Metric string `json:"metric"` // see render.MenubarMetrics
 }
 
 // Default is the configuration applied when no file exists — it preserves the
