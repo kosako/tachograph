@@ -51,6 +51,18 @@ func ValidMetric(metric string) bool {
 	return false
 }
 
+// ValidMenubarMetric reports whether metric is offered as the menu bar's single
+// metric (the MenubarMetrics subset — context is excluded as it churns per
+// session and isn't a useful at-a-glance menu bar figure).
+func ValidMenubarMetric(metric string) bool {
+	for _, m := range MenubarMetrics {
+		if m == metric {
+			return true
+		}
+	}
+	return false
+}
+
 // Metric extracts a metric from a tool: frac is a 0..1 gauge fraction (nil
 // when the metric is not a percentage or has no data), and text is the
 // compact display string ("34%", "$0.05", "989k", or "--").

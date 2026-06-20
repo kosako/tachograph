@@ -28,7 +28,7 @@ type Config struct {
 
 type Menubar struct {
 	Style  string `json:"style"`  // StyleMeter | StyleNumber
-	Metric string `json:"metric"` // see render.Metrics
+	Metric string `json:"metric"` // see render.MenubarMetrics
 }
 
 // Default is the configuration applied when no file exists — it preserves the
@@ -75,7 +75,11 @@ func Load() Config {
 	if err != nil {
 		return c
 	}
-	// Unmarshal onto the defaults: absent keys keep their default values.
+	// Unmarshal onto the defaults: absent keys keep their default values. A
+	// JSON array (including an explicit empty []) replaces Tools, so "show
+	// nothing" is honored; only an absent/null tools key leaves it nil and
+	// falls back to defaults. The writers persist [] (not null) for an empty
+	// selection so that distinction survives a round-trip.
 	_ = json.Unmarshal(b, &c)
 	if c.Tools == nil {
 		c.Tools = Default().Tools

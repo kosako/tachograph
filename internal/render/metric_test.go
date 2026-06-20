@@ -6,6 +6,20 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
+// The menu bar's single metric excludes context (MenubarMetrics), while the
+// general ValidMetric still accepts it.
+func TestValidMenubarMetric(t *testing.T) {
+	if !ValidMenubarMetric(MetricLimit5h) || !ValidMenubarMetric(MetricCost) {
+		t.Error("limit_5h / cost should be valid menu bar metrics")
+	}
+	if ValidMenubarMetric(MetricContext) {
+		t.Error("context must not be a valid menu bar metric")
+	}
+	if !ValidMetric(MetricContext) {
+		t.Error("context should still be a valid general metric")
+	}
+}
+
 func metricTool() schema.Tool {
 	p5, ctx := 24.0, 8.0
 	tokens := int64(989120)
