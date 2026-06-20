@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/kosako/tachograph/internal/schema"
@@ -50,13 +51,17 @@ func errTool(code, msg string) schema.Tool {
 }
 
 // detectBackend distinguishes the auth backend. Rate-limit windows only
-// exist for subscription auth; Bedrock/Vertex degrade to limits=null.
+// exist for subscription auth; Bedrock/Vertex/API-key all degrade to
+// limits=null. ANTHROPIC_API_KEY marks pay-as-you-go API usage, which has
+// no subscription windows and must not be mislabelled as subscription.
 func detectBackend(getenv func(string) string) string {
 	switch {
 	case truthy(getenv("CLAUDE_CODE_USE_BEDROCK")):
 		return schema.BackendBedrock
 	case truthy(getenv("CLAUDE_CODE_USE_VERTEX")):
 		return schema.BackendVertex
+	case truthy(getenv("ANTHROPIC_API_KEY")):
+		return schema.BackendAPI
 	}
 	return schema.BackendSubscription
 }
@@ -155,15 +160,14 @@ func fromStatusline(opts Options) schema.Tool {
 			sess.ContextWindow = &cw.ContextWindowSize
 		}
 		sess.ContextUsedPct = cw.UsedPercentage
-		var cached int64
-		if cw.CurrentUsage != nil {
-			cached = cw.CurrentUsage.CacheReadInputTokens
-		}
+		// cached_input is the session-total cached input by contract. The
+		// statusline JSON has no session-total cache figure: current_usage is
+		// per-turn and total_input_tokens can't be decomposed. Leave it unset
+		// rather than leak a per-turn value under a session-total field.
 		sess.Tokens = &schema.Tokens{
-			Input:       cw.TotalInputTokens,
-			CachedInput: cached,
-			Output:      cw.TotalOutputTokens,
-			Total:       cw.TotalInputTokens + cw.TotalOutputTokens,
+			Input:  cw.TotalInputTokens,
+			Output: cw.TotalOutputTokens,
+			Total:  cw.TotalInputTokens + cw.TotalOutputTokens,
 		}
 		total := sess.Tokens.Total
 		fb.SessionTokens = &total
@@ -216,13 +220,36 @@ type transcriptLine struct {
 }
 
 func fromTranscripts(opts Options) schema.Tool {
-	path := latestTranscript(filepath.Join(opts.Root, "projects"))
-	if path == "" {
+	paths := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
+	if len(paths) == 0 {
 		return schema.Unavailable(schema.ToolClaudeCode)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return errTool("read_error", err.Error())
+
+	// The newest transcript may have no assistant usage yet (session just
+	// opened, or a non-conversation entry was written last). Fall back to the
+	// next most recent transcript that actually carries usage.
+	var (
+		totals  schema.Tokens
+		last    *transcriptLine
+		path    string
+		readErr error
+	)
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			readErr = err
+			continue
+		}
+		if tt, ll := usageFromTranscript(b); ll != nil {
+			totals, last, path = tt, ll, p
+			break
+		}
+	}
+	if last == nil {
+		if readErr != nil {
+			return errTool("read_error", readErr.Error())
+		}
+		return errTool("no_usage", "no assistant usage entries in recent transcripts")
 	}
 
 	t := schema.Tool{
@@ -231,28 +258,7 @@ func fromTranscripts(opts Options) schema.Tool {
 		Backend:   detectBackend(opts.Getenv),
 	}
 	sess := &schema.Session{}
-	tp := path
-	sess.TranscriptPath = &tp
-	totals := schema.Tokens{}
-	var last *transcriptLine
-	for _, raw := range bytes.Split(b, []byte("\n")) {
-		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
-			continue
-		}
-		var line transcriptLine
-		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
-			continue
-		}
-		u := line.Message.Usage
-		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-		totals.CachedInput += u.CacheReadInputTokens
-		totals.Output += u.OutputTokens
-		last = &line
-	}
-	if last == nil {
-		return errTool("no_usage", "no assistant usage entries in "+path)
-	}
+	sess.TranscriptPath = &path
 	totals.Total = totals.Input + totals.Output
 	sess.Tokens = &totals
 	t.Fallback = &schema.Fallback{SessionTokens: &totals.Total}
@@ -277,13 +283,40 @@ func fromTranscripts(opts Options) schema.Tool {
 	return t
 }
 
-func latestTranscript(projects string) string {
+// usageFromTranscript sums token usage across a transcript's assistant turns.
+// last is nil when the transcript carries no usable usage entries, which is
+// the signal to fall back to an older transcript.
+func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) {
+	for _, raw := range bytes.Split(b, []byte("\n")) {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
+			continue
+		}
+		var line transcriptLine
+		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
+			continue
+		}
+		u := line.Message.Usage
+		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+		totals.CachedInput += u.CacheReadInputTokens
+		totals.Output += u.OutputTokens
+		last = &line
+	}
+	return totals, last
+}
+
+// transcriptsByRecency lists transcript paths newest-first by mtime, so the
+// caller can fall back past a newest transcript that has no usage yet.
+func transcriptsByRecency(projects string) []string {
 	dirs, err := os.ReadDir(projects)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var best string
-	var bestMod time.Time
+	type entry struct {
+		path string
+		mod  time.Time
+	}
+	var entries []entry
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
@@ -300,10 +333,15 @@ func latestTranscript(projects string) string {
 			if err != nil {
 				continue
 			}
-			if info.ModTime().After(bestMod) {
-				best, bestMod = filepath.Join(projects, d.Name(), f.Name()), info.ModTime()
-			}
+			entries = append(entries, entry{filepath.Join(projects, d.Name(), f.Name()), info.ModTime()})
 		}
 	}
-	return best
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].mod.After(entries[j].mod)
+	})
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.path
+	}
+	return paths
 }

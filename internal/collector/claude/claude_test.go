@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -59,6 +60,11 @@ func TestFromStatusline(t *testing.T) {
 	}
 	if s.Tokens == nil || s.Tokens.Input != 15500 || s.Tokens.Output != 1200 {
 		t.Errorf("Tokens = %+v", s.Tokens)
+	}
+	// statusline has no session-total cache field, so the per-turn
+	// current_usage.cache_read (2000 in testdata) must not leak in.
+	if s.Tokens.CachedInput != 0 {
+		t.Errorf("CachedInput = %d, want 0 (no session-total cache via statusline)", s.Tokens.CachedInput)
 	}
 
 	if len(got.Limits) != 2 {
@@ -134,6 +140,81 @@ func TestNoTranscripts(t *testing.T) {
 	got := Collect(Options{Root: t.TempDir(), Getenv: noEnv})
 	if got.Available {
 		t.Errorf("Available = true, want false: %+v", got)
+	}
+}
+
+// ANTHROPIC_API_KEY marks pay-as-you-go API usage: backend=api and the
+// subscription rate-limit windows must be suppressed (they don't apply).
+func TestFromStatuslineAPIBackend(t *testing.T) {
+	input, _ := os.ReadFile("testdata/statusline_input.json")
+	env := func(k string) string {
+		if k == "ANTHROPIC_API_KEY" {
+			return "sk-ant-xxx"
+		}
+		return ""
+	}
+	got := Collect(Options{Root: "testdata/clauderoot", StatuslineInput: input, Getenv: env})
+	if got.Backend != schema.BackendAPI {
+		t.Errorf("Backend = %q, want api", got.Backend)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want null for api backend", got.Limits)
+	}
+}
+
+// writeTranscript writes a one-line transcript and stamps its mtime so tests
+// can control recency ordering deterministically.
+func writeTranscript(t *testing.T, dir, name, line string, mod time.Time) {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The newest transcript may have no assistant usage yet; collection must fall
+// back to the next most recent transcript that does.
+func TestTranscriptFallbackPastEmpty(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := `{"timestamp":"2026-06-12T12:00:00Z","sessionId":"old","cwd":"/x","message":{"model":"claude-x","usage":{"input_tokens":10,"output_tokens":5}}}`
+	writeTranscript(t, dir, "old.jsonl", older, time.Unix(1000, 0))
+	// Newest entry carries no usage (e.g. a fresh user turn).
+	writeTranscript(t, dir, "new.jsonl", `{"timestamp":"2026-06-12T12:01:00Z","sessionId":"new","type":"user"}`, time.Unix(2000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	got := Collect(Options{Root: root, Now: now, Getenv: noEnv})
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
+	}
+	if got.Session == nil || got.Session.Tokens == nil ||
+		got.Session.Tokens.Input != 10 || got.Session.Tokens.Output != 5 {
+		t.Fatalf("Tokens = %+v, want fallback to older transcript", got.Session.Tokens)
+	}
+	if got.Session.ID == nil || *got.Session.ID != "old" {
+		t.Errorf("Session.ID = %v, want \"old\" after fallback", got.Session.ID)
+	}
+}
+
+// When no transcript has any usage, surface a no_usage error (not a panic or
+// a false-available zero result).
+func TestTranscriptNoUsage(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTranscript(t, dir, "a.jsonl", `{"timestamp":"2026-06-12T12:00:00Z","type":"user"}`, time.Unix(1000, 0))
+
+	got := Collect(Options{Root: root, Getenv: noEnv})
+	if got.Error == nil || got.Error.Code != "no_usage" {
+		t.Fatalf("Error = %+v, want code no_usage", got.Error)
 	}
 }
 
