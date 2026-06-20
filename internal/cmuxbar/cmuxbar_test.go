@@ -151,6 +151,41 @@ func TestPushAndClearExec(t *testing.T) {
 	}
 }
 
+// Push must actually emit clear-status for a configured tool that has no pill
+// (e.g. codex unavailable), and emit no clear when every tool is present.
+func TestPushClearsAbsentTool(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+
+	bin, log := fakeCLI(t)
+	s := schema.Status{Tools: []schema.Tool{
+		limitsTool(false, 24, 41),            // claude available → set
+		schema.Unavailable(schema.ToolCodex), // codex unavailable → clear
+	}}
+	if err := Push(bin, s, now, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(calls) != 2 {
+		t.Fatalf("calls = %q, want 2 (set claude + clear codex)", calls)
+	}
+	if !strings.HasPrefix(calls[0], "set-status claude ") || calls[1] != "clear-status codex" {
+		t.Errorf("calls = %q, want set-status claude then clear-status codex", calls)
+	}
+
+	// Only claude configured & available → set only, no clear.
+	bin2, log2 := fakeCLI(t)
+	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
+	if err := Push(bin2, s2, now, true); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := os.ReadFile(log2)
+	calls2 := strings.Split(strings.TrimSpace(string(b2)), "\n")
+	if len(calls2) != 1 || !strings.HasPrefix(calls2[0], "set-status claude ") {
+		t.Errorf("calls = %q, want only set-status claude (no clear)", calls2)
+	}
+}
+
 func TestFindCLIEnvOverride(t *testing.T) {
 	t.Setenv("TACHO_CMUX_BIN", "/tmp/custom-cmux")
 	if got := FindCLI(); got != "/tmp/custom-cmux" {

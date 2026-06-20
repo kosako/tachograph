@@ -157,7 +157,9 @@ func filterTools(s schema.Status, cfg config.Config) schema.Status {
 // titleLine is the menu bar representation. With the meter style it is a
 // tachometer gauge image (colored, so `image=` not the tinted
 // `templateImage=`) driven by cfg.Menubar.Metric; with the number style it
-// is the metric value as text. TACHO_SWIFTBAR_TEXT forces the moon-dial text.
+// is the metric value as text. cost/tokens have no gauge fraction, so the
+// meter style falls back to the number text for them. For gauge metrics,
+// TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the image.
 func titleLine(s schema.Status, dark bool, cfg config.Config) string {
 	metric := cfg.Menubar.Metric
 	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
