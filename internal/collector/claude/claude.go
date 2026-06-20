@@ -337,6 +337,11 @@ func transcriptsByRecency(projects string) []string {
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {
+		// Tie-break equal mtimes by path so selection is deterministic
+		// rather than dependent on directory read order.
+		if entries[i].mod.Equal(entries[j].mod) {
+			return entries[i].path > entries[j].path
+		}
 		return entries[i].mod.After(entries[j].mod)
 	})
 	paths := make([]string, len(entries))

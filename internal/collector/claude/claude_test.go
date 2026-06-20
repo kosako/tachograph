@@ -202,6 +202,25 @@ func TestTranscriptFallbackPastEmpty(t *testing.T) {
 	}
 }
 
+// Equal mtimes must resolve deterministically (by path), not by directory
+// read order, so the same session is picked across runs.
+func TestTranscriptTieBreakByPath(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mod := time.Unix(1000, 0)
+	writeTranscript(t, dir, "a.jsonl", `{"sessionId":"a","message":{"usage":{"input_tokens":1,"output_tokens":1}}}`, mod)
+	writeTranscript(t, dir, "b.jsonl", `{"sessionId":"b","message":{"usage":{"input_tokens":2,"output_tokens":2}}}`, mod)
+
+	got := Collect(Options{Root: root, Getenv: noEnv})
+	// Higher path ("b.jsonl") wins the tie.
+	if got.Session == nil || got.Session.ID == nil || *got.Session.ID != "b" {
+		t.Fatalf("Session.ID = %v, want \"b\" (deterministic tie-break)", got.Session.ID)
+	}
+}
+
 // When no transcript has any usage, surface a no_usage error (not a panic or
 // a false-available zero result).
 func TestTranscriptNoUsage(t *testing.T) {
