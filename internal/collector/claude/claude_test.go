@@ -11,6 +11,18 @@ import (
 
 func noEnv(string) string { return "" }
 
+// toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
+func TestToLimitNullResetsAt(t *testing.T) {
+	l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: 5, ResetsAt: 0})
+	if l.ResetsAt != nil {
+		t.Errorf("ResetsAt = %v, want nil for zero epoch", *l.ResetsAt)
+	}
+	l = toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: 5, ResetsAt: 1779646858})
+	if l.ResetsAt == nil {
+		t.Error("ResetsAt = nil, want set for a real epoch")
+	}
+}
+
 func TestFromStatusline(t *testing.T) {
 	input, err := os.ReadFile("testdata/statusline_input.json")
 	if err != nil {

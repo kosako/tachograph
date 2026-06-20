@@ -1,8 +1,10 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -103,6 +105,82 @@ func TestCollectRealHome(t *testing.T) {
 	t.Logf("real ~/.codex result:\n%s", b)
 	if got.Error != nil {
 		t.Errorf("Error = %+v", got.Error)
+	}
+}
+
+// latestSessionFile must backtrack past an empty newest day/month to the most
+// recent day that actually holds a .jsonl (e.g. around date rollover).
+func TestLatestSessionFileBacktracksEmptyBranches(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	dataDay := filepath.Join(sessions, "2026", "05", "24")
+	if err := os.MkdirAll(dataDay, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dataFile := filepath.Join(dataDay, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-c494201693fa.jsonl")
+	if err := os.WriteFile(dataFile, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Newer-but-empty branches that must be skipped: a later day, a later
+	// month, and a later year, all without any .jsonl.
+	for _, empty := range []string{
+		filepath.Join(sessions, "2026", "05", "25"),
+		filepath.Join(sessions, "2026", "06"),
+		filepath.Join(sessions, "2027"),
+	} {
+		if err := os.MkdirAll(empty, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := latestSessionFile(sessions); got != dataFile {
+		t.Errorf("latestSessionFile = %q, want %q (should backtrack past empty newest branches)", got, dataFile)
+	}
+}
+
+// When a single turn is longer than the tail window, turn_context (emitted at
+// turn start) falls outside the tail while token_count (turn end) stays in it.
+// Collect must full-scan so model/cwd don't silently go null.
+func TestCollectTurnContextBeyondTail(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b []byte
+	b = append(b, []byte(`{"timestamp":"2026-05-24T10:00:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/work","model":"gpt-5.4-codex"}}`+"\n")...)
+	// Filler well beyond tailBytes (512KB) between turn_context and token_count.
+	filler := `{"timestamp":"2026-05-24T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + string(bytes.Repeat([]byte("x"), 1000)) + `"}]}}` + "\n"
+	for total := 0; total < tailBytes+50*1024; total += len(filler) {
+		b = append(b, filler...)
+	}
+	b = append(b, []byte(`{"timestamp":"2026-05-24T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"total_tokens":150},"model_context_window":200000}}}`+"\n")...)
+	file := filepath.Join(day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-c494201693fa.jsonl")
+	if err := os.WriteFile(file, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-5.4-codex" {
+		t.Errorf("Model = %+v, want gpt-5.4-codex (turn_context past the tail must be recovered by full scan)", got.Model)
+	}
+	if got.Session == nil || got.Session.CWD == nil || *got.Session.CWD != "/tmp/work" {
+		t.Errorf("CWD = %v, want /tmp/work", got.Session.CWD)
+	}
+}
+
+// toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
+func TestToLimitNullResetsAt(t *testing.T) {
+	l := toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: 5, ResetsAt: 0})
+	if l.ResetsAt != nil {
+		t.Errorf("ResetsAt = %v, want nil for zero epoch", *l.ResetsAt)
+	}
+	l = toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: 5, ResetsAt: 1779646858})
+	if l.ResetsAt == nil {
+		t.Error("ResetsAt = nil, want set for a real epoch")
 	}
 }
 
