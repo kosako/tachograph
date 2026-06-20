@@ -31,10 +31,10 @@ test("downloadURL normalizes the tag", () => {
 });
 
 test("checksumsURL points at the release checksums.txt", () => {
-  assert.strictEqual(
-    checksumsURL("0.1.1"),
-    "https://github.com/kosako/tachograph/releases/download/v0.1.1/checksums.txt",
-  );
+  const want =
+    "https://github.com/kosako/tachograph/releases/download/v0.1.1/checksums.txt";
+  assert.strictEqual(checksumsURL("0.1.1"), want);
+  assert.strictEqual(checksumsURL("v0.1.1"), want);
 });
 
 test("checksumFor parses GoReleaser checksums.txt", () => {
