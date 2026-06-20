@@ -159,11 +159,15 @@ func filterTools(s schema.Status, cfg config.Config) schema.Status {
 // `templateImage=`) driven by cfg.Menubar.Metric; with the number style it
 // is the metric value as text. TACHO_SWIFTBAR_TEXT forces the moon-dial text.
 func titleLine(s schema.Status, dark bool, cfg config.Config) string {
-	if cfg.Menubar.Style == config.StyleNumber {
-		return numberTitle(s, cfg.Menubar.Metric)
+	metric := cfg.Menubar.Metric
+	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
+	// have no fraction, so the ring would always be empty — fall back to the
+	// number style for them.
+	if cfg.Menubar.Style == config.StyleNumber || !render.MetricIsGauge(metric) {
+		return numberTitle(s, metric)
 	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(s, dark, cfg.Menubar.Metric); ok {
+		if b64, ok := menubar.PNGBase64(s, dark, metric); ok {
 			return "| image=" + b64
 		}
 	}

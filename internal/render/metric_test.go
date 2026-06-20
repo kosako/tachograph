@@ -20,6 +20,20 @@ func TestValidMenubarMetric(t *testing.T) {
 	}
 }
 
+// Percentage metrics drive a gauge; cost/tokens are text-only.
+func TestMetricIsGauge(t *testing.T) {
+	for _, m := range []string{MetricLimit5h, MetricLimitWeekly, MetricContext} {
+		if !MetricIsGauge(m) {
+			t.Errorf("%s should be gauge-able", m)
+		}
+	}
+	for _, m := range []string{MetricCost, MetricTokens} {
+		if MetricIsGauge(m) {
+			t.Errorf("%s should not be gauge-able (no fraction)", m)
+		}
+	}
+}
+
 func metricTool() schema.Tool {
 	p5, ctx := 24.0, 8.0
 	tokens := int64(989120)
