@@ -20,27 +20,27 @@ var Presets = []Preset{
 	{
 		Name:     "minimal",
 		Desc:     "model + 5h/weekly percentages only",
-		Template: "{claude.model} 5h {claude.5h.pct} · wk {claude.wk.pct}",
+		Template: "{claude.model} {claude.effort}5h {claude.5h.pct} · wk {claude.wk.pct}",
 	},
 	{
 		Name:     "dial",
 		Desc:     "compact single-character dials (○◔◑◕●)",
-		Template: "{claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}",
+		Template: "{claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}",
 	},
 	{
 		Name:     "moon",
 		Desc:     "moon-phase dials (🌑🌒🌓🌔🌕)",
-		Template: "{claude.model} 5h {claude.5h.moon} {claude.5h.pct} · wk {claude.wk.moon} · codex {codex.5h.moon}{codex.wk.moon}",
+		Template: "{claude.model} {claude.effort}5h {claude.5h.moon} {claude.5h.pct} · wk {claude.wk.moon} · codex {codex.5h.moon}{codex.wk.moon}",
 	},
 	{
 		Name:     "cost",
 		Desc:     "model + context + 5h + this session's tokens/cost",
-		Template: "{claude.model} ctx {claude.ctx} · 5h {claude.5h.pct} · {claude.tokens} {claude.cost}",
+		Template: "{claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.pct} · {claude.tokens} {claude.cost}",
 	},
 	{
 		Name:     "cwd",
 		Desc:     "working directory + model + context + 5h gauge",
-		Template: "{claude.cwd} · {claude.model} ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct}",
+		Template: "{claude.cwd} · {claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct}",
 	},
 }
 

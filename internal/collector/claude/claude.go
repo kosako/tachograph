@@ -75,6 +75,9 @@ type StatuslineInput struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
+	Effort *struct {
+		Level string `json:"level"`
+	} `json:"effort"` // present only when the model supports reasoning effort
 	Workspace struct {
 		CurrentDir string `json:"current_dir"`
 	} `json:"workspace"`
@@ -123,6 +126,10 @@ func fromStatusline(opts Options) schema.Tool {
 		m := &schema.Model{ID: in.Model.ID}
 		if in.Model.DisplayName != "" {
 			m.DisplayName = &in.Model.DisplayName
+		}
+		if in.Effort != nil && in.Effort.Level != "" {
+			lvl := in.Effort.Level
+			m.Effort = &lvl
 		}
 		t.Model = m
 	}

@@ -96,11 +96,12 @@ func limitsTool() schema.Tool {
 	r5, rW := "2026-06-13T02:00:00+09:00", "2026-06-15T10:30:00+09:00"
 	ctx := 8.0
 	name := "Fable 5"
+	effort := "xhigh"
 	return schema.Tool{
 		Tool:      schema.ToolClaudeCode,
 		Available: true,
 		Backend:   schema.BackendSubscription,
-		Model:     &schema.Model{ID: "claude-fable-5", DisplayName: &name},
+		Model:     &schema.Model{ID: "claude-fable-5", DisplayName: &name, Effort: &effort},
 		Session:   &schema.Session{ContextUsedPct: &ctx},
 		Limits: []schema.Limit{
 			{Window: "5h", WindowMinutes: &m5, UsedPct: &pct5, ResetsAt: &r5},

@@ -33,6 +33,8 @@ func TestTemplateBasics(t *testing.T) {
 
 	cases := map[string]string{
 		"{claude.model}":                "Fable 5",
+		"{claude.effort}":               "⚡xhi ", // xhigh, trailing space like {stale}
+		"{codex.effort}":                "",      // unavailable tool → no effort
 		"{claude.ctx}":                  "8%",
 		"{claude.5h.pct}":               "24%",
 		"{claude.5h}":                   "24%", // bare window defaults to pct

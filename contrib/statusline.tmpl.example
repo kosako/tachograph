@@ -10,19 +10,19 @@
 # is in the README ("ステータスラインのカスタマイズ" / "Customizing the status line").
 
 # bar — default: context + 5h gauge + weekly, both tools
-# {claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
+# {claude.model} {claude.effort}{claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}
 
 # minimal — model + 5h/weekly percentages only
-# {claude.model} 5h {claude.5h.pct} · wk {claude.wk.pct}
+# {claude.model} {claude.effort}5h {claude.5h.pct} · wk {claude.wk.pct}
 
 # dial — compact single-character dials (○◔◑◕●)
-# {claude.model} ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
+# {claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.dial} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.dial} · codex {codex.5h.dial}{codex.wk.dial}
 
 # moon — moon-phase dials (🌑🌒🌓🌔🌕)
-# {claude.model} 5h {claude.5h.moon} {claude.5h.pct} · wk {claude.wk.moon} · codex {codex.5h.moon}{codex.wk.moon}
+# {claude.model} {claude.effort}5h {claude.5h.moon} {claude.5h.pct} · wk {claude.wk.moon} · codex {codex.5h.moon}{codex.wk.moon}
 
 # cost — model + context + 5h + this session's tokens/cost
-# {claude.model} ctx {claude.ctx} · 5h {claude.5h.pct} · {claude.tokens} {claude.cost}
+# {claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.pct} · {claude.tokens} {claude.cost}
 
 # cwd — working directory + model + context + 5h gauge
-# {claude.cwd} · {claude.model} ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct}
+# {claude.cwd} · {claude.model} {claude.effort}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct}
