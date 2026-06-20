@@ -7,6 +7,7 @@
     "id": "claude-fable-5",
     "display_name": "Fable 5"
   },
+  "effort": { "level": "xhigh" },
   "workspace": {
     "current_dir": "/Users/example/dev/project",
     "project_dir": "/Users/example/dev/project"

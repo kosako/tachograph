@@ -70,6 +70,7 @@ type Error struct {
 type Model struct {
 	ID          string  `json:"id"`
 	DisplayName *string `json:"display_name"`
+	Effort      *string `json:"effort"` // reasoning effort (low|medium|high|xhigh|max); null when unsupported
 }
 
 type Session struct {

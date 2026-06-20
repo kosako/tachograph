@@ -39,6 +39,26 @@ func TestToolMarshalsAllKeysWithNulls(t *testing.T) {
 	}
 }
 
+// model.effort follows the same key-always-present / explicit-null contract:
+// a nil Effort must marshal to "effort": null, never be omitted.
+func TestModelEffortMarshalsNull(t *testing.T) {
+	b, err := json.Marshal(Model{ID: "claude-opus-4-8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := m["effort"]
+	if !ok {
+		t.Fatal(`key "effort" missing from marshaled Model`)
+	}
+	if string(v) != "null" {
+		t.Errorf(`effort = %s, want null`, v)
+	}
+}
+
 func TestStatusRoundTrip(t *testing.T) {
 	pct := 5.0
 	mins := 300

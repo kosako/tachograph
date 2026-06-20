@@ -178,6 +178,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | field | renders |
 |---|---|
 | `model` | model display name (`Fable 5`, `gpt-5.5`) |
+| `effort` | reasoning effort, `⚡xhi ` (`low`/`med`/`high`/`xhi`/`max`, marker + trailing space; Claude only, empty when the model doesn't support it) |
 | `ctx` | context window usage, `8%` |
 | `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
 | `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |

@@ -13,7 +13,7 @@ import (
 
 // DefaultTemplate is the statusline rendering used when the user has no
 // statusline.tmpl. Kept to one line and modest width.
-const DefaultTemplate = "{claude.model} {claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}"
+const DefaultTemplate = "{claude.model} {claude.effort}{claude.stale}ctx {claude.ctx} · 5h {claude.5h.bar:6} {claude.5h.pct} {claude.5h.resets} · wk {claude.wk.pct} · codex {codex.stale}5h {codex.5h.pct} wk {codex.wk.pct}"
 
 // Missing is rendered for placeholders whose value is absent.
 const Missing = "--"
@@ -88,6 +88,14 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 			return Missing
 		}
 		return ModelShort(t.Model)
+	case "effort":
+		// An optional model attribute: render "⚡<short> " (trailing space,
+		// like {stale}) when present, empty otherwise — so it slots in front of
+		// the next token without leaving a gap when the model has no effort.
+		if !t.Available || t.Model == nil || t.Model.Effort == nil || *t.Model.Effort == "" {
+			return ""
+		}
+		return "⚡" + effortShort(*t.Model.Effort) + " "
 	case "ctx":
 		if t.Session == nil || t.Session.ContextUsedPct == nil {
 			return Missing
@@ -170,6 +178,19 @@ func resolveCost(t *schema.Tool, scope []string) string {
 		return fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD)
 	}
 	return Missing
+}
+
+// effortShort compacts a reasoning-effort level for the status line. Unknown
+// (future) levels are passed through verbatim rather than dropped.
+func effortShort(level string) string {
+	switch level {
+	case "medium":
+		return "med"
+	case "xhigh":
+		return "xhi"
+	default: // low, high, max already short
+		return level
+	}
 }
 
 func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st Style) string {

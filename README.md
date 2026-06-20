@@ -148,6 +148,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | field | 表示 |
 |---|---|
 | `model` | モデル表示名(`Fable 5`、`gpt-5.5`) |
+| `effort` | reasoning effort、`⚡xhi `(`low`/`med`/`high`/`xhi`/`max`、印+末尾スペース。Claudeのみ、非対応モデルでは空) |
 | `ctx` | コンテキストウィンドウ使用率、`8%` |
 | `5h.pct` / `wk.pct` | 5時間枠 / 週次枠のリミット使用率 |
 | `5h.bar:8` / `wk.bar:8` | 指定幅のゲージ、`██░░░░░░` |

@@ -28,6 +28,9 @@ func TestFromStatusline(t *testing.T) {
 	if got.Model == nil || got.Model.ID != "claude-fable-5" || *got.Model.DisplayName != "Fable 5" {
 		t.Errorf("Model = %+v", got.Model)
 	}
+	if got.Model.Effort == nil || *got.Model.Effort != "xhigh" {
+		t.Errorf("Model.Effort = %v, want \"xhigh\"", got.Model.Effort)
+	}
 	if got.Stale {
 		t.Error("Stale = true; statusline input is live")
 	}
@@ -95,6 +98,9 @@ func TestFromTranscripts(t *testing.T) {
 	}
 	if got.Model == nil || got.Model.ID != "claude-fable-5" {
 		t.Errorf("Model = %+v", got.Model)
+	}
+	if got.Model.Effort != nil {
+		t.Errorf("Model.Effort = %v, want nil via transcript route", *got.Model.Effort)
 	}
 	if got.Limits != nil {
 		t.Errorf("Limits = %+v, want null via transcript route", got.Limits)
