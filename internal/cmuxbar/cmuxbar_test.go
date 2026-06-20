@@ -28,6 +28,27 @@ func limitsTool(stale bool, pct5, pctW float64) schema.Tool {
 	}
 }
 
+// A configured tool with no pill this push (unavailable/errored) must be
+// cleared, not left frozen. An available tool must not be cleared.
+func TestAbsentToolKeys(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{
+		limitsTool(false, 24, 41),            // claude available → pill present
+		schema.Unavailable(schema.ToolCodex), // codex unavailable → no pill
+	}}
+	pills := Pills(s, now)
+	keys := absentToolKeys(s, pills)
+	if len(keys) != 1 || keys[0] != "codex" {
+		t.Errorf("absentToolKeys = %v, want [codex] (cleared because it has no pill)", keys)
+	}
+
+	// Both available → nothing to clear.
+	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
+	if got := absentToolKeys(s2, Pills(s2, now)); len(got) != 0 {
+		t.Errorf("absentToolKeys = %v, want none when every tool has a pill", got)
+	}
+}
+
 func TestPills(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	tokens := int64(3962991)
@@ -127,6 +148,41 @@ func TestPushAndClearExec(t *testing.T) {
 	}
 	if calls[1] != "clear-status claude" || calls[2] != "clear-status codex" {
 		t.Errorf("clear calls = %q", calls[1:])
+	}
+}
+
+// Push must actually emit clear-status for a configured tool that has no pill
+// (e.g. codex unavailable), and emit no clear when every tool is present.
+func TestPushClearsAbsentTool(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+
+	bin, log := fakeCLI(t)
+	s := schema.Status{Tools: []schema.Tool{
+		limitsTool(false, 24, 41),            // claude available → set
+		schema.Unavailable(schema.ToolCodex), // codex unavailable → clear
+	}}
+	if err := Push(bin, s, now, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(calls) != 2 {
+		t.Fatalf("calls = %q, want 2 (set claude + clear codex)", calls)
+	}
+	if !strings.HasPrefix(calls[0], "set-status claude ") || calls[1] != "clear-status codex" {
+		t.Errorf("calls = %q, want set-status claude then clear-status codex", calls)
+	}
+
+	// Only claude configured & available → set only, no clear.
+	bin2, log2 := fakeCLI(t)
+	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
+	if err := Push(bin2, s2, now, true); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := os.ReadFile(log2)
+	calls2 := strings.Split(strings.TrimSpace(string(b2)), "\n")
+	if len(calls2) != 1 || !strings.HasPrefix(calls2[0], "set-status claude ") {
+		t.Errorf("calls = %q, want only set-status claude (no clear)", calls2)
 	}
 }
 

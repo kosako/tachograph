@@ -101,6 +101,24 @@ func TestRenderTitleImageByDefault(t *testing.T) {
 	}
 }
 
+// The meter style can't fill a ring for cost/tokens (no fraction), so it must
+// fall back to the number/text title instead of drawing an empty gauge.
+func TestRenderMeterCostFallsBackToNumber(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	cost := 1.5
+	s.Tools[0].Daily = &schema.Daily{Tokens: 1000, CostUSD: &cost}
+	cfg := config.Default() // meter style
+	cfg.Menubar.Metric = render.MetricCost
+	title := strings.SplitN(Render(s, now, true, cfg), "\n", 2)[0]
+	if strings.HasPrefix(title, "| image=") {
+		t.Errorf("meter + cost should not render an empty gauge image; got %q", title)
+	}
+	if title != "C $1.50/d" {
+		t.Errorf("meter + cost title = %q, want number fallback \"C $1.50/d\"", title)
+	}
+}
+
 func TestRenderNumberStyle(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{

@@ -56,6 +56,14 @@ type Pill struct {
 	Color string
 }
 
+// pillKey is the sidebar key for a tool ("claude-code" → "claude").
+func pillKey(tool string) string {
+	if tool == schema.ToolClaudeCode {
+		return "claude"
+	}
+	return tool
+}
+
 // Pills builds one pill per available tool.
 func Pills(s schema.Status, now time.Time) []Pill {
 	var pills []Pill
@@ -63,14 +71,28 @@ func Pills(s schema.Status, now time.Time) []Pill {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		key := t.Tool
-		if key == schema.ToolClaudeCode {
-			key = "claude"
-		}
+		key := pillKey(t.Tool)
 		// The sidebar renders only the value, so the tool name leads it.
 		pills = append(pills, Pill{Key: key, Value: key + " " + pillValue(t, now), Color: pillColor(t)})
 	}
 	return pills
+}
+
+// absentToolKeys returns configured tools that have no pill this push (e.g. one
+// just went unavailable/errored), so their stale pill is cleared instead of
+// left frozen in the sidebar.
+func absentToolKeys(s schema.Status, pills []Pill) []string {
+	present := make(map[string]bool, len(pills))
+	for _, p := range pills {
+		present[p.Key] = true
+	}
+	var keys []string
+	for _, t := range s.Tools {
+		if k := pillKey(t.Tool); !present[k] {
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 func pillValue(t schema.Tool, now time.Time) string {
@@ -130,8 +152,17 @@ func pillColor(t schema.Tool) string {
 // failure (the `tacho cmux push` path).
 func Push(cli string, s schema.Status, now time.Time, wait bool) error {
 	var firstErr error
-	for _, p := range Pills(s, now) {
+	pills := Pills(s, now)
+	for _, p := range pills {
 		cmd := exec.Command(cli, "set-status", p.Key, p.Value, "--color", p.Color)
+		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	// A tool that dropped out (available → unavailable) is no longer in pills;
+	// clear its pill so the sidebar doesn't keep showing a frozen last value.
+	for _, key := range absentToolKeys(s, pills) {
+		cmd := exec.Command(cli, "clear-status", key)
 		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
 			firstErr = err
 		}

@@ -51,6 +51,17 @@ func ValidMetric(metric string) bool {
 	return false
 }
 
+// MetricIsGauge reports whether a metric can drive a 0..1 progress gauge (a
+// percentage). cost/tokens are text-only — Metric returns a nil fraction for
+// them — so a meter/ring can't represent them and callers fall back to text.
+func MetricIsGauge(metric string) bool {
+	switch metric {
+	case MetricLimit5h, MetricLimitWeekly, MetricContext:
+		return true
+	}
+	return false
+}
+
 // ValidMenubarMetric reports whether metric is offered as the menu bar's single
 // metric (the MenubarMetrics subset — context is excluded as it churns per
 // session and isn't a useful at-a-glance menu bar figure).
