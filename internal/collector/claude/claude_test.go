@@ -221,6 +221,41 @@ func TestTranscriptTieBreakByPath(t *testing.T) {
 	}
 }
 
+// Claude Code writes one line per content block, each repeating the same usage;
+// the transcript route must count each response once, not once per block.
+func TestTranscriptDedupContentBlocks(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One response across 3 content-block lines: same id+requestId and usage,
+	// but increasing timestamps (Claude Code stamps each block separately).
+	msg := func(ts string) string {
+		return `{"timestamp":"` + ts + `","sessionId":"s","requestId":"req_a","message":{"id":"msg_a","model":"claude-x","usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":100,"output_tokens":5}}}`
+	}
+	content := msg("2026-06-12T12:00:00Z") + "\n" + msg("2026-06-12T12:00:03Z") + "\n" + msg("2026-06-12T12:00:06Z")
+	writeTranscript(t, dir, "a.jsonl", content, time.Unix(1000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	got := Collect(Options{Root: root, Now: now, Getenv: noEnv})
+	if got.Session == nil || got.Session.Tokens == nil {
+		t.Fatalf("Session = %+v", got.Session)
+	}
+	// Counted once: Input=10+20+100=130, CachedInput=100, Output=5.
+	if tk := got.Session.Tokens; tk.Input != 130 || tk.CachedInput != 100 || tk.Output != 5 {
+		t.Errorf("Tokens = %+v, want one response (Input=130, CachedInput=100, Output=5)", tk)
+	}
+	// Metadata tracks the newest block (12:00:06), not the first, despite dedup.
+	if got.CollectedAt == nil {
+		t.Fatal("CollectedAt = nil")
+	}
+	ct, _ := time.Parse(time.RFC3339, *got.CollectedAt)
+	if want, _ := time.Parse(time.RFC3339, "2026-06-12T12:00:06Z"); !ct.Equal(want) {
+		t.Errorf("CollectedAt = %v, want newest block %v", ct, want)
+	}
+}
+
 // When no transcript has any usage, surface a no_usage error (not a panic or
 // a false-available zero result).
 func TestTranscriptNoUsage(t *testing.T) {

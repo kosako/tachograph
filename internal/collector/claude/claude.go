@@ -213,11 +213,19 @@ type transcriptLine struct {
 	Timestamp string `json:"timestamp"`
 	SessionID string `json:"sessionId"`
 	CWD       string `json:"cwd"`
+	RequestID string `json:"requestId"`
 	Message   *struct {
+		ID    string `json:"id"`
 		Model string `json:"model"`
 		Usage *usage `json:"usage"`
 	} `json:"message"`
 }
+
+// usageKey identifies one assistant API response. Claude Code writes a line per
+// content block (thinking/text/tool_use…) repeating that response's full usage,
+// so it must be counted once per (message id, request id) — otherwise a turn is
+// multiplied by its block count.
+type usageKey struct{ id, req string }
 
 func fromTranscripts(opts Options) schema.Tool {
 	paths := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
@@ -287,6 +295,7 @@ func fromTranscripts(opts Options) schema.Tool {
 // last is nil when the transcript carries no usable usage entries, which is
 // the signal to fall back to an older transcript.
 func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) {
+	seen := map[usageKey]bool{}
 	for _, raw := range bytes.Split(b, []byte("\n")) {
 		raw = bytes.TrimSpace(raw)
 		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
@@ -296,11 +305,24 @@ func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) 
 		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
 			continue
 		}
+		// last tracks the newest usage-bearing line for model/session/timestamp.
+		// Update it on every line, including duplicate blocks: a later block is
+		// still the newest entry, so dedup must not rewind the metadata time.
+		last = &line
+		// A response spans multiple content-block lines with identical usage;
+		// count it once. Lines without a message id (rare, e.g. synthetic)
+		// can't be deduped, so they're always counted.
+		if id := line.Message.ID; id != "" {
+			k := usageKey{id, line.RequestID}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
 		u := line.Message.Usage
 		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 		totals.CachedInput += u.CacheReadInputTokens
 		totals.Output += u.OutputTokens
-		last = &line
 	}
 	return totals, last
 }

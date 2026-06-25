@@ -30,6 +30,11 @@ func claudeMsg(ts time.Time, in, cc, cr, out int64) string {
 		ts.Format(time.RFC3339), in, cc, cr, out)
 }
 
+func claudeMsgID(ts time.Time, id, req string, in, cc, cr, out int64) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"requestId":%q,"message":{"id":%q,"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d,"output_tokens":%d}}}`,
+		ts.Format(time.RFC3339), req, id, in, cc, cr, out)
+}
+
 func TestClaudeTokens(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
@@ -85,6 +90,39 @@ func TestClaudeSessionToday(t *testing.T) {
 	}
 	if got := ClaudeSessionToday(filepath.Join(root, "nope.jsonl"), now, noPrices); got.Tokens != 0 {
 		t.Errorf("missing file = %+v, want zero", got)
+	}
+}
+
+// A single response is written once per content block, each line repeating the
+// same usage; it must be counted once. The same response duplicated across
+// files (resume/compaction copies prior turns forward) must not double-count.
+func TestClaudeDedup(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+
+	// Response A as 3 content-block lines (identical usage) + distinct B once.
+	// New tokens exclude cache reads: A=10+20+5=35, B=1+2+3=6.
+	a := claudeMsgID(now, "msg_a", "req_a", 10, 20, 100, 5)
+	b := claudeMsgID(now, "msg_b", "req_b", 1, 2, 50, 3)
+	writeFile(t, filepath.Join(root, "projects", "p", "s1.jsonl"),
+		a+"\n"+a+"\n"+a+"\n"+b+"\n", now)
+	// A second file re-includes response A (resume copies the prior turn).
+	writeFile(t, filepath.Join(root, "projects", "p", "s2.jsonl"), a+"\n", now)
+
+	if got := ClaudeTotals(root, now, noPrices).Tokens; got != int64(35+6) {
+		t.Errorf("ClaudeTotals.Tokens = %d, want %d (A once + B once)", got, 35+6)
+	}
+
+	// Cost dedups identically: A + B priced once each.
+	prices := pricing.Table{"claude-fable": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}}
+	wantCost := (10*15.0+20*18.75+100*1.5+5*75)/1e6 + (1*15.0+2*18.75+50*1.5+3*75)/1e6
+	if cost := ClaudeTotals(root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
+		t.Errorf("ClaudeTotals.Cost = %v, want %v", cost, wantCost)
+	}
+
+	// ClaudeSessionToday dedups within the file: A counted once.
+	if got := ClaudeSessionToday(filepath.Join(root, "projects", "p", "s1.jsonl"), now, noPrices).Tokens; got != int64(35+6) {
+		t.Errorf("ClaudeSessionToday.Tokens = %d, want %d", got, 35+6)
 	}
 }
 

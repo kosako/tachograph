@@ -35,12 +35,12 @@ func (t Totals) Schema() *schema.Daily {
 // ClaudeSessionToday totals today's new tokens and estimated cost for a single
 // Claude session transcript (used for the {tool.*.session.today} scope). It
 // reuses the same per-message accounting as ClaudeTotals, restricted to one
-// file.
+// file. A fresh dedup set is fine: one session can't duplicate across files.
 func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Table) Totals {
 	if transcriptPath == "" {
 		return Totals{}
 	}
-	return claudeFileTotals(transcriptPath, now.Local().Format("2006-01-02"), prices)
+	return claudeFileTotals(transcriptPath, now.Local().Format("2006-01-02"), prices, map[usageKey]bool{})
 }
 
 // ClaudeTotals sums today's new tokens and estimated cost across every Claude
@@ -55,6 +55,9 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 	}
 	day := now.Local().Format("2006-01-02")
 	var out Totals
+	// One dedup set spans every file so a response duplicated across files
+	// (resume/compaction copies prior turns forward) is also counted once.
+	seen := map[usageKey]bool{}
 
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
@@ -77,7 +80,7 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 			if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
 				continue // only files touched today can hold today's messages
 			}
-			ft := claudeFileTotals(filepath.Join(projects, d.Name(), f.Name()), day, prices)
+			ft := claudeFileTotals(filepath.Join(projects, d.Name(), f.Name()), day, prices, seen)
 			out.Tokens += ft.Tokens
 			out.Cost += ft.Cost
 		}
@@ -85,9 +88,18 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 	return out
 }
 
+// usageKey identifies one assistant API response. Claude Code writes a
+// transcript line per content block (thinking/text/tool_use…), each repeating
+// that response's full usage, so counting per line multiplies a turn by its
+// block count. Summing once per (message id, request id) counts each response
+// once — across its blocks and across files duplicated by resume/compaction.
+type usageKey struct{ id, req string }
+
 type claudeLine struct {
 	Timestamp string `json:"timestamp"`
+	RequestID string `json:"requestId"`
 	Message   *struct {
+		ID    string `json:"id"`
 		Model string `json:"model"`
 		Usage *struct {
 			InputTokens              int64 `json:"input_tokens"`
@@ -98,7 +110,9 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
-func claudeFileTotals(path, day string, prices pricing.Table) Totals {
+// claudeFileTotals sums one transcript's today entries into out, recording
+// counted responses in seen so the caller can dedup across files.
+func claudeFileTotals(path, day string, prices pricing.Table, seen map[usageKey]bool) Totals {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Totals{}
@@ -115,6 +129,16 @@ func claudeFileTotals(path, day string, prices pricing.Table) Totals {
 		}
 		if !sameDay(line.Timestamp, day) {
 			continue
+		}
+		// A response spans multiple content-block lines with identical usage;
+		// count it once. Lines without a message id (rare, e.g. synthetic)
+		// can't be deduped, so they're always counted.
+		if id := line.Message.ID; id != "" {
+			k := usageKey{id, line.RequestID}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
 		}
 		u := line.Message.Usage
 		// New tokens exclude cache reads (same context re-read each message).
