@@ -221,6 +221,29 @@ func TestTranscriptTieBreakByPath(t *testing.T) {
 	}
 }
 
+// Claude Code writes one line per content block, each repeating the same usage;
+// the transcript route must count each response once, not once per block.
+func TestTranscriptDedupContentBlocks(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One response across 3 content-block lines: same id+requestId, same usage.
+	line := `{"timestamp":"2026-06-12T12:00:00Z","sessionId":"s","requestId":"req_a","message":{"id":"msg_a","model":"claude-x","usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":100,"output_tokens":5}}}`
+	writeTranscript(t, dir, "a.jsonl", line+"\n"+line+"\n"+line, time.Unix(1000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	got := Collect(Options{Root: root, Now: now, Getenv: noEnv})
+	if got.Session == nil || got.Session.Tokens == nil {
+		t.Fatalf("Session = %+v", got.Session)
+	}
+	// Counted once: Input=10+20+100=130, CachedInput=100, Output=5.
+	if tk := got.Session.Tokens; tk.Input != 130 || tk.CachedInput != 100 || tk.Output != 5 {
+		t.Errorf("Tokens = %+v, want one response (Input=130, CachedInput=100, Output=5)", tk)
+	}
+}
+
 // When no transcript has any usage, surface a no_usage error (not a panic or
 // a false-available zero result).
 func TestTranscriptNoUsage(t *testing.T) {
