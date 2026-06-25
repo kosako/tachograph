@@ -305,6 +305,10 @@ func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) 
 		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
 			continue
 		}
+		// last tracks the newest usage-bearing line for model/session/timestamp.
+		// Update it on every line, including duplicate blocks: a later block is
+		// still the newest entry, so dedup must not rewind the metadata time.
+		last = &line
 		// A response spans multiple content-block lines with identical usage;
 		// count it once. Lines without a message id (rare, e.g. synthetic)
 		// can't be deduped, so they're always counted.
@@ -319,7 +323,6 @@ func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) 
 		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 		totals.CachedInput += u.CacheReadInputTokens
 		totals.Output += u.OutputTokens
-		last = &line
 	}
 	return totals, last
 }
