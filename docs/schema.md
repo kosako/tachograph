@@ -28,7 +28,7 @@
   "tool": "codex",                    // "claude-code" | "codex"
   "available": true,                  // データソース(セッションファイル等)が見つかったか
   "error": null,                      // 取得失敗時 {"code": "...", "message": "..."}
-  "stale": false,                     // 最終観測データが古い(60分超、StaleAfterMinutes)とき true
+  "stale": false,                     // 最終観測データが古いとき true(閾値はツール別: Claude transcript経路=60分 StaleAfterMinutes、Codex=5時間)
   "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(イベントのtimestamp)
   "backend": "subscription",          // "subscription" | "api" | "bedrock" | "vertex" | "unknown"
   "plan": "prolite",                  // プラン名。不明なら null
@@ -81,7 +81,7 @@
 |---|---|
 | `available` | データソース自体の有無。`false` のとき他フィールドはすべて null |
 | `error` | 取得を試みて失敗したときのみ非null。`available:false`(未インストール等)はエラーではない |
-| `stale` | `collected_at` が現在時刻から60分超過(`StaleAfterMinutes`)。レンダラは灰色表示などに使う |
+| `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
 | `limits` | nullable。配列のときは `window_minutes` 昇順 |

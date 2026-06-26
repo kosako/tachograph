@@ -94,6 +94,17 @@ func TestCollectFreshWithinFiveHours(t *testing.T) {
 	}
 }
 
+// Exactly 5h after the last event is still fresh (the threshold is "older than
+// 5h", a strict >), so the boundary doesn't flip a turn early.
+func TestCollectStaleBoundaryExactlyFiveHours(t *testing.T) {
+	// last token_count event is 2026-05-24T13:40:28.570Z; +5h = 18:40:28.570Z.
+	now, _ := time.Parse(time.RFC3339Nano, "2026-05-24T18:40:28.570Z")
+	got := Collect(Options{Root: "testdata/codexroot", Now: now})
+	if got.Stale {
+		t.Error("Stale = true at exactly 5h, want false (threshold is strictly >5h)")
+	}
+}
+
 func TestCollectNoSessions(t *testing.T) {
 	got := Collect(Options{Root: "testdata/emptyroot"})
 	if got.Available {

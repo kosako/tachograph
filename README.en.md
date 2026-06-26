@@ -106,10 +106,12 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠6h` marks data older than 60 minutes (about an hour) with its age, and the
-whole line is dimmed — usage can only go down while an agent is idle, so a
-stale value reads as an upper bound. Agents without rate-limit windows (e.g. Claude
-Code on Bedrock) fall back to session tokens and estimated cost.
+`⚠6h` marks stale data with its age, and the whole line is dimmed — usage can
+only go down while an agent is idle, so a stale value reads as an upper bound.
+The threshold is per tool: Claude is 60 minutes (about an hour); Codex is 5
+hours, since it has no live feed and its limit windows stay valid for hours.
+Agents without rate-limit windows (e.g. Claude Code on Bedrock) fall back to
+session tokens and estimated cost.
 
 ### Claude Code status line
 
