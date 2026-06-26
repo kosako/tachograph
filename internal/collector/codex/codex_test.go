@@ -131,19 +131,18 @@ func TestCollectRealHome(t *testing.T) {
 	}
 }
 
-// newestSessionDir must backtrack past an empty newest day/month to the most
-// recent day that actually holds a .jsonl (e.g. around date rollover).
-func TestNewestSessionDirBacktracksEmptyBranches(t *testing.T) {
+// pickSession must backtrack past an empty newest day/month to the most recent
+// day that actually holds a usable token_count (e.g. around date rollover).
+func TestPickSessionBacktracksEmptyBranches(t *testing.T) {
 	root := t.TempDir()
 	sessions := filepath.Join(root, "sessions")
 	dataDay := filepath.Join(sessions, "2026", "05", "24")
 	if err := os.MkdirAll(dataDay, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dataFile := filepath.Join(dataDay, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-c494201693fa.jsonl")
-	if err := os.WriteFile(dataFile, []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	name := "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-c494201693fa.jsonl"
+	writeRollout(t, dataDay, name,
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-x", "/x")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150), time.Unix(1000, 0))
 	// Newer-but-empty branches that must be skipped: a later day, a later
 	// month, and a later year, all without any .jsonl.
 	for _, empty := range []string{
@@ -155,8 +154,38 @@ func TestNewestSessionDirBacktracksEmptyBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := newestSessionDir(sessions); got != dataDay {
-		t.Errorf("newestSessionDir = %q, want %q (should backtrack past empty newest branches)", got, dataDay)
+	if res := pickSession(sessions, 3); res.tc == nil || res.path != filepath.Join(dataDay, name) {
+		t.Errorf("pickSession path = %q (tc set=%v), want %q", res.path, res.tc != nil, filepath.Join(dataDay, name))
+	}
+}
+
+// At a day boundary, a brand-new day directory may hold only a fresh
+// turn_context (no token_count yet) while the prior day holds the latest usage.
+// Collect must backtrack ACROSS the day to the prior day's token_count, not
+// return no_token_count for the new day.
+func TestCollectBacktracksDayWithoutTokenCount(t *testing.T) {
+	root := t.TempDir()
+	prevDay := filepath.Join(root, "sessions", "2026", "05", "24")
+	newDay := filepath.Join(root, "sessions", "2026", "05", "25")
+	for _, d := range []string{prevDay, newDay} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Prior day: a session with a token_count (model gpt-prev).
+	writeRollout(t, prevDay, "rollout-2026-05-24T23-50-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
+		ctxLine("2026-05-24T23:50:00.000Z", "gpt-prev", "/a")+"\n"+tcLine("2026-05-24T23:59:00.000Z", 150), time.Unix(1000, 0))
+	// New day: only a fresh turn_context, no token_count yet, newer mtime.
+	writeRollout(t, newDay, "rollout-2026-05-25T00-01-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
+		ctxLine("2026-05-25T00:01:00.000Z", "gpt-new", "/b"), time.Unix(2000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-25T00:30:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v, want the prior day's session (new day has no token_count)", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-prev" {
+		t.Errorf("Model = %+v, want gpt-prev (must backtrack across the day boundary)", got.Model)
 	}
 }
 

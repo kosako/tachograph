@@ -46,48 +46,87 @@ func Collect(opts Options) schema.Tool {
 		now = time.Now()
 	}
 
-	dir := newestSessionDir(filepath.Join(root, "sessions"))
-	if dir == "" {
+	res := pickSession(filepath.Join(root, "sessions"), 3) // year / month / day
+	if res.tc == nil {
+		if res.readErr != nil {
+			return errTool("read_error", res.readErr.Error())
+		}
+		if res.sawFile {
+			return errTool("no_token_count", "no token_count event in recent Codex sessions")
+		}
 		return schema.Unavailable(schema.ToolCodex)
 	}
+	return build(res.path, res.tc, res.turn, now)
+}
 
-	// Every Codex surface (interactive TUI, codex exec, desktop app, IDE
-	// extension) writes a rollout into the same day directory. Pick the session
-	// whose last token_count is the most recent — not the newest file by mtime,
-	// which can be a just-started session with no token_count yet (it would trip
-	// no_token_count or hide an older session's still-valid data). Rate limits
-	// are account-global, so the latest token_count from any session is current.
-	var (
-		best     *tokenCount
-		bestTurn *turnContext
-		bestPath string
-		bestTS   time.Time
-		readErr  error
-	)
-	for _, p := range jsonlFiles(dir) {
+// pick is the freshest usable session found while walking the date tree.
+type pick struct {
+	tc      *tokenCount
+	turn    *turnContext
+	path    string
+	ts      time.Time
+	sawFile bool  // any .jsonl was seen (to distinguish no_token_count vs unavailable)
+	readErr error // last read error, surfaced only when no usable session was found
+}
+
+// pickSession walks the YYYY/MM/DD tree in descending name order and returns the
+// rollout with the latest token_count in the NEWEST day that has one. Every
+// Codex surface (interactive TUI, codex exec, desktop app, IDE extension) writes
+// a rollout into the same day directory; the freshest token_count — not the
+// newest file by mtime — is the current one (rate limits are account-global, so
+// any session's latest token_count is valid). It backtracks past days whose
+// rollouts all lack a token_count, e.g. just after midnight when the new day
+// holds only a fresh turn_context while the prior day holds the latest usage.
+func pickSession(dir string, depth int) pick {
+	if depth == 0 {
+		return pickFromDay(dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return pick{}
+	}
+	var acc pick
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() {
+			continue
+		}
+		p := pickSession(filepath.Join(dir, entries[i].Name()), depth-1)
+		acc.sawFile = acc.sawFile || p.sawFile
+		if p.readErr != nil {
+			acc.readErr = p.readErr
+		}
+		if p.tc != nil {
+			return p // newest day with a usable token_count wins
+		}
+	}
+	return acc
+}
+
+// pickFromDay returns the rollout with the latest token_count directly inside
+// day, or a token_count-less pick (sawFile set if any .jsonl existed) when none
+// has one. A rollout with no token_count yet (just-started session) is skipped
+// so it can't hide an older session's still-valid data.
+func pickFromDay(day string) pick {
+	files := jsonlFiles(day)
+	out := pick{sawFile: len(files) > 0}
+	for _, p := range files {
 		tc, turn, err := sessionEvents(p)
 		if err != nil {
-			readErr = err
+			out.readErr = err
 			continue
 		}
 		if tc == nil {
-			continue // a session with no token_count yet
+			continue
 		}
 		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
 		if err != nil {
 			continue
 		}
-		if best == nil || ts.After(bestTS) {
-			best, bestTurn, bestPath, bestTS = tc, turn, p, ts
+		if out.tc == nil || ts.After(out.ts) {
+			out.tc, out.turn, out.path, out.ts = tc, turn, p, ts
 		}
 	}
-	if best == nil {
-		if readErr != nil {
-			return errTool("read_error", readErr.Error())
-		}
-		return errTool("no_token_count", "no token_count event found under "+dir)
-	}
-	return build(bestPath, best, bestTurn, now)
+	return out
 }
 
 // sessionEvents reads one rollout's most recent token_count and turn_context,
@@ -115,41 +154,6 @@ func errTool(code, msg string) schema.Tool {
 	t.Available = true
 	t.Error = &schema.Error{Code: code, Message: msg}
 	return t
-}
-
-// newestSessionDir prunes by the YYYY/MM/DD layout: it walks date directories
-// in descending name order and returns the first day directory that holds any
-// .jsonl, backtracking past empty branches (e.g. a freshly-rolled-over but
-// still-empty newest day/month/year). The caller then compares the day's
-// rollouts by their last token_count, so this returns the directory, not a file.
-func newestSessionDir(sessions string) string {
-	return descendForDay(sessions, 3) // year / month / day
-}
-
-// descendForDay walks the date tree in descending name order with backtracking:
-// it tries the newest subdirectory first and falls back to older siblings
-// whenever a branch yields no .jsonl, so an empty newest day/month/year doesn't
-// hide real sessions in an older one. depth is the remaining directory levels.
-func descendForDay(dir string, depth int) string {
-	if depth == 0 {
-		if len(jsonlFiles(dir)) > 0 {
-			return dir
-		}
-		return ""
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].IsDir() {
-			continue
-		}
-		if found := descendForDay(filepath.Join(dir, entries[i].Name()), depth-1); found != "" {
-			return found
-		}
-	}
-	return ""
 }
 
 // jsonlFiles returns the .jsonl rollout paths directly inside day (unordered),
