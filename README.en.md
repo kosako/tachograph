@@ -193,7 +193,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
-| `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty |
+| `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty (Codex has no live feed and its limit windows stay valid for hours, so it goes stale after 5 hours) |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
 
 `*.session.today` is Claude only — Codex's token counts are cumulative and

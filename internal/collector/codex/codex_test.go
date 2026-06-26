@@ -76,10 +76,21 @@ func TestCollect(t *testing.T) {
 }
 
 func TestCollectStale(t *testing.T) {
-	now, _ := time.Parse(time.RFC3339, "2026-05-24T16:00:00Z") // ~2h20m after the event
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T19:00:00Z") // ~5h20m after the event, past Codex's 5h threshold
 	got := Collect(Options{Root: "testdata/codexroot", Now: now})
 	if !got.Stale {
-		t.Error("Stale = false, want true for hours-old data")
+		t.Error("Stale = false, want true past the 5h threshold")
+	}
+}
+
+// Codex uses a longer (5h) stale threshold than the shared 60-minute default,
+// because its rate-limit windows stay valid for hours after the last turn.
+// Data 2h20m old is past the 60-min default but still fresh for Codex.
+func TestCollectFreshWithinFiveHours(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T16:00:00Z") // ~2h20m after the event
+	got := Collect(Options{Root: "testdata/codexroot", Now: now})
+	if got.Stale {
+		t.Error("Stale = true, want false within Codex's 5h threshold")
 	}
 }
 

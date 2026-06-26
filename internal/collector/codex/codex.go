@@ -19,6 +19,14 @@ import (
 // turn, so the tail almost always contains both.
 const tailBytes = 512 * 1024
 
+// staleAfterMinutes is longer than the shared schema.StaleAfterMinutes (60).
+// Codex has no live feed: freshness comes only from the last token_count in the
+// log, which advances only when a turn completes. Its rate-limit windows (5h /
+// weekly) stay valid for hours afterward, so greying the whole tool 60 min
+// after the last turn would hide still-accurate limits. 5h matches the primary
+// rate-limit window.
+const staleAfterMinutes = 300
+
 type Options struct {
 	Root string    // Codex home, defaults to ~/.codex
 	Now  time.Time // defaults to time.Now()
@@ -249,7 +257,7 @@ func build(path string, tc *tokenCount, turn *turnContext, now time.Time) schema
 	if ts, err := time.Parse(time.RFC3339Nano, tc.timestamp); err == nil {
 		s := ts.Local().Format(time.RFC3339)
 		t.CollectedAt = &s
-		t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
+		t.Stale = now.Sub(ts) > staleAfterMinutes*time.Minute
 	}
 
 	sess := &schema.Session{}
