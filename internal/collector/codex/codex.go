@@ -46,29 +46,68 @@ func Collect(opts Options) schema.Tool {
 		now = time.Now()
 	}
 
-	path := latestSessionFile(filepath.Join(root, "sessions"))
-	if path == "" {
+	dir := newestSessionDir(filepath.Join(root, "sessions"))
+	if dir == "" {
 		return schema.Unavailable(schema.ToolCodex)
 	}
+
+	// Every Codex surface (interactive TUI, codex exec, desktop app, IDE
+	// extension) writes a rollout into the same day directory. Pick the session
+	// whose last token_count is the most recent — not the newest file by mtime,
+	// which can be a just-started session with no token_count yet (it would trip
+	// no_token_count or hide an older session's still-valid data). Rate limits
+	// are account-global, so the latest token_count from any session is current.
+	var (
+		best     *tokenCount
+		bestTurn *turnContext
+		bestPath string
+		bestTS   time.Time
+		readErr  error
+	)
+	for _, p := range jsonlFiles(dir) {
+		tc, turn, err := sessionEvents(p)
+		if err != nil {
+			readErr = err
+			continue
+		}
+		if tc == nil {
+			continue // a session with no token_count yet
+		}
+		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
+		if err != nil {
+			continue
+		}
+		if best == nil || ts.After(bestTS) {
+			best, bestTurn, bestPath, bestTS = tc, turn, p, ts
+		}
+	}
+	if best == nil {
+		if readErr != nil {
+			return errTool("read_error", readErr.Error())
+		}
+		return errTool("no_token_count", "no token_count event found under "+dir)
+	}
+	return build(bestPath, best, bestTurn, now)
+}
+
+// sessionEvents reads one rollout's most recent token_count and turn_context,
+// reading the tail first and falling back to a full scan when the tail misses
+// either. turn_context is emitted at turn start and token_count at the end, so a
+// single turn longer than the tail can leave turn_context out of reach (model/cwd
+// would silently go null) — the full scan recovers it.
+func sessionEvents(path string) (tc *tokenCount, turn *turnContext, err error) {
 	lines, err := tailLines(path)
 	if err != nil {
-		return errTool("read_error", err.Error())
+		return nil, nil, err
 	}
 	tc, turn, ok := lastEvents(lines)
 	if !ok || turn == nil {
-		// Tail missed token_count or turn_context. turn_context is emitted at
-		// the start of a turn and token_count at the end, so a single turn
-		// longer than the tail can leave turn_context out of reach (model/cwd
-		// would silently go null). Scan the whole file before giving up.
 		if lines, err = allLines(path); err != nil {
-			return errTool("read_error", err.Error())
+			return nil, nil, err
 		}
 		tc, turn, _ = lastEvents(lines)
 	}
-	if tc == nil {
-		return errTool("no_token_count", "no token_count event found in "+path)
-	}
-	return build(path, tc, turn, now)
+	return tc, turn, nil
 }
 
 func errTool(code, msg string) schema.Tool {
@@ -78,22 +117,25 @@ func errTool(code, msg string) schema.Tool {
 	return t
 }
 
-// latestSessionFile prunes by the YYYY/MM/DD layout: it walks date
-// directories in descending name order and returns the newest *.jsonl by
-// mtime within the first day that has any, backtracking past empty branches
-// (e.g. a freshly-rolled-over but still-empty newest day/month/year).
-func latestSessionFile(sessions string) string {
-	return descendForJSONL(sessions, 3) // year / month / day
+// newestSessionDir prunes by the YYYY/MM/DD layout: it walks date directories
+// in descending name order and returns the first day directory that holds any
+// .jsonl, backtracking past empty branches (e.g. a freshly-rolled-over but
+// still-empty newest day/month/year). The caller then compares the day's
+// rollouts by their last token_count, so this returns the directory, not a file.
+func newestSessionDir(sessions string) string {
+	return descendForDay(sessions, 3) // year / month / day
 }
 
-// descendForJSONL walks the date tree in descending name order with
-// backtracking: it tries the newest subdirectory first and falls back to
-// older siblings whenever a branch yields no .jsonl, so an empty newest
-// day/month/year doesn't hide real sessions in an older one. depth is the
-// remaining directory levels before the .jsonl files.
-func descendForJSONL(dir string, depth int) string {
+// descendForDay walks the date tree in descending name order with backtracking:
+// it tries the newest subdirectory first and falls back to older siblings
+// whenever a branch yields no .jsonl, so an empty newest day/month/year doesn't
+// hide real sessions in an older one. depth is the remaining directory levels.
+func descendForDay(dir string, depth int) string {
 	if depth == 0 {
-		return newestJSONL(dir)
+		if len(jsonlFiles(dir)) > 0 {
+			return dir
+		}
+		return ""
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -103,35 +145,28 @@ func descendForJSONL(dir string, depth int) string {
 		if !entries[i].IsDir() {
 			continue
 		}
-		if found := descendForJSONL(filepath.Join(dir, entries[i].Name()), depth-1); found != "" {
+		if found := descendForDay(filepath.Join(dir, entries[i].Name()), depth-1); found != "" {
 			return found
 		}
 	}
 	return ""
 }
 
-// newestJSONL returns the newest *.jsonl by mtime directly inside day, or ""
-// when the directory holds none.
-func newestJSONL(day string) string {
+// jsonlFiles returns the .jsonl rollout paths directly inside day (unordered),
+// or nil when the directory holds none.
+func jsonlFiles(day string) []string {
 	entries, err := os.ReadDir(day)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var best string
-	var bestMod time.Time
+	var out []string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(bestMod) {
-			best, bestMod = filepath.Join(day, e.Name()), info.ModTime()
-		}
+		out = append(out, filepath.Join(day, e.Name()))
 	}
-	return best
+	return out
 }
 
 func tailLines(path string) ([][]byte, error) {

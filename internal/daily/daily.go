@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/kosako/tachograph/internal/pricing"
@@ -167,16 +168,37 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 		return Totals{}
 	}
 	var out Totals
+	// total_token_usage is cumulative per session. Dedup by session id (the UUID
+	// in the rollout filename) keeping the largest cumulative, so a session that
+	// resumed into a second file isn't counted twice. Files without a parseable
+	// id can't be deduped and are summed as-is.
+	bySession := map[string]Totals{}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
 		st := codexSessionTotals(filepath.Join(dayDir, e.Name()), prices)
+		m := codexSessionIDRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			out.Tokens += st.Tokens
+			out.Cost += st.Cost
+			continue
+		}
+		if prev, ok := bySession[m[1]]; !ok || st.Tokens > prev.Tokens {
+			bySession[m[1]] = st
+		}
+	}
+	for _, st := range bySession {
 		out.Tokens += st.Tokens
 		out.Cost += st.Cost
 	}
 	return out
 }
+
+// codexSessionIDRe extracts the session UUID from a rollout filename
+// (rollout-<ISO-ts>-<uuid>.jsonl) so daily totals can dedup a session that
+// resumed into more than one file.
+var codexSessionIDRe = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`)
 
 type codexEvent struct {
 	Type    string          `json:"type"`
