@@ -106,10 +106,12 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠6h` marks data older than 60 minutes (about an hour) with its age, and the
-whole line is dimmed — usage can only go down while an agent is idle, so a
-stale value reads as an upper bound. Agents without rate-limit windows (e.g. Claude
-Code on Bedrock) fall back to session tokens and estimated cost.
+`⚠6h` marks stale data with its age, and the whole line is dimmed — usage can
+only go down while an agent is idle, so a stale value reads as an upper bound.
+The threshold is per tool: Claude is 60 minutes (about an hour); Codex is 5
+hours, since it has no live feed and its limit windows stay valid for hours.
+Agents without rate-limit windows (e.g. Claude Code on Bedrock) fall back to
+session tokens and estimated cost.
 
 ### Claude Code status line
 
@@ -193,7 +195,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
 | `cwd` | session working directory (basename) |
-| `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty |
+| `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty (Codex has no live feed and its limit windows stay valid for hours, so it goes stale after 5 hours) |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
 
 `*.session.today` is Claude only — Codex's token counts are cumulative and
