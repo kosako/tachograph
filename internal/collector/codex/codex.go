@@ -46,29 +46,107 @@ func Collect(opts Options) schema.Tool {
 		now = time.Now()
 	}
 
-	path := latestSessionFile(filepath.Join(root, "sessions"))
-	if path == "" {
+	res := pickSession(filepath.Join(root, "sessions"), 3) // year / month / day
+	if res.tc == nil {
+		if res.readErr != nil {
+			return errTool("read_error", res.readErr.Error())
+		}
+		if res.sawFile {
+			return errTool("no_token_count", "no token_count event in recent Codex sessions")
+		}
 		return schema.Unavailable(schema.ToolCodex)
 	}
+	return build(res.path, res.tc, res.turn, now)
+}
+
+// pick is the freshest usable session found while walking the date tree.
+type pick struct {
+	tc      *tokenCount
+	turn    *turnContext
+	path    string
+	ts      time.Time
+	sawFile bool  // any .jsonl was seen (to distinguish no_token_count vs unavailable)
+	readErr error // last read error, surfaced only when no usable session was found
+}
+
+// pickSession walks the YYYY/MM/DD tree in descending name order and returns the
+// rollout with the latest token_count in the NEWEST day that has one. Every
+// Codex surface (interactive TUI, codex exec, desktop app, IDE extension) writes
+// a rollout into the same day directory; the freshest token_count — not the
+// newest file by mtime — is the current one (rate limits are account-global, so
+// any session's latest token_count is valid). It backtracks past days whose
+// rollouts all lack a token_count, e.g. just after midnight when the new day
+// holds only a fresh turn_context while the prior day holds the latest usage.
+func pickSession(dir string, depth int) pick {
+	if depth == 0 {
+		return pickFromDay(dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return pick{}
+	}
+	var acc pick
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() {
+			continue
+		}
+		p := pickSession(filepath.Join(dir, entries[i].Name()), depth-1)
+		acc.sawFile = acc.sawFile || p.sawFile
+		if p.readErr != nil {
+			acc.readErr = p.readErr
+		}
+		if p.tc != nil {
+			return p // newest day with a usable token_count wins
+		}
+	}
+	return acc
+}
+
+// pickFromDay returns the rollout with the latest token_count directly inside
+// day, or a token_count-less pick (sawFile set if any .jsonl existed) when none
+// has one. A rollout with no token_count yet (just-started session) is skipped
+// so it can't hide an older session's still-valid data.
+func pickFromDay(day string) pick {
+	files := jsonlFiles(day)
+	out := pick{sawFile: len(files) > 0}
+	for _, p := range files {
+		tc, turn, err := sessionEvents(p)
+		if err != nil {
+			out.readErr = err
+			continue
+		}
+		if tc == nil {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
+		if err != nil {
+			continue
+		}
+		if out.tc == nil || ts.After(out.ts) {
+			out.tc, out.turn, out.path, out.ts = tc, turn, p, ts
+		}
+	}
+	return out
+}
+
+// sessionEvents reads one rollout's most recent token_count and turn_context,
+// reading the tail first and falling back to a full scan when the tail misses
+// either. turn_context is emitted at turn start and token_count at the end, so a
+// single turn longer than the tail can leave turn_context out of reach (model/cwd
+// would silently go null) — the full scan recovers it.
+func sessionEvents(path string) (tc *tokenCount, turn *turnContext, err error) {
 	lines, err := tailLines(path)
 	if err != nil {
-		return errTool("read_error", err.Error())
+		return nil, nil, err
 	}
 	tc, turn, ok := lastEvents(lines)
 	if !ok || turn == nil {
-		// Tail missed token_count or turn_context. turn_context is emitted at
-		// the start of a turn and token_count at the end, so a single turn
-		// longer than the tail can leave turn_context out of reach (model/cwd
-		// would silently go null). Scan the whole file before giving up.
 		if lines, err = allLines(path); err != nil {
-			return errTool("read_error", err.Error())
+			return nil, nil, err
 		}
 		tc, turn, _ = lastEvents(lines)
 	}
-	if tc == nil {
-		return errTool("no_token_count", "no token_count event found in "+path)
-	}
-	return build(path, tc, turn, now)
+	return tc, turn, nil
 }
 
 func errTool(code, msg string) schema.Tool {
@@ -78,60 +156,21 @@ func errTool(code, msg string) schema.Tool {
 	return t
 }
 
-// latestSessionFile prunes by the YYYY/MM/DD layout: it walks date
-// directories in descending name order and returns the newest *.jsonl by
-// mtime within the first day that has any, backtracking past empty branches
-// (e.g. a freshly-rolled-over but still-empty newest day/month/year).
-func latestSessionFile(sessions string) string {
-	return descendForJSONL(sessions, 3) // year / month / day
-}
-
-// descendForJSONL walks the date tree in descending name order with
-// backtracking: it tries the newest subdirectory first and falls back to
-// older siblings whenever a branch yields no .jsonl, so an empty newest
-// day/month/year doesn't hide real sessions in an older one. depth is the
-// remaining directory levels before the .jsonl files.
-func descendForJSONL(dir string, depth int) string {
-	if depth == 0 {
-		return newestJSONL(dir)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].IsDir() {
-			continue
-		}
-		if found := descendForJSONL(filepath.Join(dir, entries[i].Name()), depth-1); found != "" {
-			return found
-		}
-	}
-	return ""
-}
-
-// newestJSONL returns the newest *.jsonl by mtime directly inside day, or ""
-// when the directory holds none.
-func newestJSONL(day string) string {
+// jsonlFiles returns the .jsonl rollout paths directly inside day (unordered),
+// or nil when the directory holds none.
+func jsonlFiles(day string) []string {
 	entries, err := os.ReadDir(day)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var best string
-	var bestMod time.Time
+	var out []string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(bestMod) {
-			best, bestMod = filepath.Join(day, e.Name()), info.ModTime()
-		}
+		out = append(out, filepath.Join(day, e.Name()))
 	}
-	return best
+	return out
 }
 
 func tailLines(path string) ([][]byte, error) {

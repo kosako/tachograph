@@ -153,6 +153,25 @@ func TestCodexTotals(t *testing.T) {
 	}
 }
 
+// A Codex session that resumed into a second rollout carries its cumulative
+// total forward; daily must count it once (the largest cumulative), not sum
+// both files. Distinct sessions still add up.
+func TestCodexTotalsDedupSession(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
+	id := "019e5933-2289-7e72-88fd-c494201693fa"
+	// Same session id in two files: cumulative 1000 then 1500 (resumed).
+	writeFile(t, filepath.Join(dayDir, "rollout-2026-05-24T10-00-00-"+id+".jsonl"), codexSession(1000), now)
+	writeFile(t, filepath.Join(dayDir, "rollout-2026-05-24T11-00-00-"+id+".jsonl"), codexSession(1500), now)
+	// A distinct session adds 500.
+	writeFile(t, filepath.Join(dayDir, "rollout-2026-05-24T12-00-00-019e0000-0000-7000-8000-000000000000.jsonl"), codexSession(500), now)
+
+	if got := CodexTotals(root, now, noPrices).Tokens; got != int64(1500+500) {
+		t.Errorf("CodexTotals.Tokens = %d, want %d (resumed session counted once at max cumulative + distinct)", got, 1500+500)
+	}
+}
+
 func TestEmptyRoots(t *testing.T) {
 	if got := ClaudeTotals(t.TempDir(), time.Now(), noPrices); got.Tokens != 0 || got.Cost != 0 {
 		t.Errorf("ClaudeTotals(empty) = %+v", got)
