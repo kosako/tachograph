@@ -4,16 +4,29 @@ const { test } = require("node:test");
 const { assetFor, downloadURL, checksumsURL, checksumFor } = require("./asset");
 
 test("assetFor maps known platforms", () => {
+  // Full platform × arch matrix: macOS, Linux, and Windows on amd64 + arm64.
   assert.deepStrictEqual(assetFor("darwin", "arm64"), {
     asset: "tachograph_darwin_arm64.tar.gz",
+    binary: "tacho",
+  });
+  assert.deepStrictEqual(assetFor("darwin", "x64"), {
+    asset: "tachograph_darwin_amd64.tar.gz",
     binary: "tacho",
   });
   assert.deepStrictEqual(assetFor("linux", "x64"), {
     asset: "tachograph_linux_amd64.tar.gz",
     binary: "tacho",
   });
+  assert.deepStrictEqual(assetFor("linux", "arm64"), {
+    asset: "tachograph_linux_arm64.tar.gz",
+    binary: "tacho",
+  });
   assert.deepStrictEqual(assetFor("win32", "x64"), {
     asset: "tachograph_windows_amd64.zip",
+    binary: "tacho.exe",
+  });
+  assert.deepStrictEqual(assetFor("win32", "arm64"), {
+    asset: "tachograph_windows_arm64.zip",
     binary: "tacho.exe",
   });
 });

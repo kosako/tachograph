@@ -1,8 +1,11 @@
 package cache
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +43,74 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	}
 	if _, ok := ReadStatus(StatusTTL, now); ok {
 		t.Error("ReadStatus hit on expired cache")
+	}
+}
+
+// TestWriteStatusConcurrent exercises the tmp-file + atomic-rename contract:
+// many writers racing on one path never corrupt it, a reader racing them never
+// sees a partial file, the survivor is exactly one writer's payload, and no
+// temp files are left behind.
+func TestWriteStatusConcurrent(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now()
+
+	const writers = 20
+	want := make(map[string]bool, writers)
+	for i := 0; i < writers; i++ {
+		want[strconv.Itoa(i)] = true
+	}
+
+	// A reader racing the writers must only ever observe a complete file:
+	// rename is all-or-nothing, so ReadFile gets either ENOENT or whole JSON.
+	stop := make(chan struct{})
+	var readerWG sync.WaitGroup
+	readerWG.Add(1)
+	go func() {
+		defer readerWG.Done()
+		path := filepath.Join(dir, "status.json")
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				continue // not written yet, or mid-rename — both fine
+			}
+			var s schema.Status
+			if json.Unmarshal(b, &s) != nil {
+				t.Error("reader observed a partial/corrupt status.json")
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: strconv.Itoa(i)}
+			if err := WriteStatus(s); err != nil {
+				t.Errorf("WriteStatus: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(stop)
+	readerWG.Wait()
+
+	got, ok := ReadStatus(StatusTTL, now)
+	if !ok {
+		t.Fatal("ReadStatus miss after concurrent writes")
+	}
+	if !want[got.GeneratedAt] {
+		t.Errorf("final status.json = %q, not one of the written payloads", got.GeneratedAt)
+	}
+
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*")); len(leftovers) != 0 {
+		t.Errorf("leftover temp files after writes: %v", leftovers)
 	}
 }
 
