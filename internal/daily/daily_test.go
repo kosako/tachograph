@@ -35,6 +35,31 @@ func claudeMsgID(ts time.Time, id, req string, in, cc, cr, out int64) string {
 		ts.Format(time.RFC3339), req, id, in, cc, cr, out)
 }
 
+// TestSameDayLocalBoundary pins the local-day boundary used to slice "today":
+// the first and last instant of the calendar day count, one second either side
+// does not. sameDay compares formatted calendar dates (no 24h arithmetic), so
+// this stays correct across DST transitions. Instants are built explicitly in
+// time.Local so the RFC 3339 offset matches what sameDay re-localizes to.
+func TestSameDayLocalBoundary(t *testing.T) {
+	day := "2026-06-28"
+	cases := []struct {
+		name string
+		ts   time.Time
+		want bool
+	}{
+		{"start of day", time.Date(2026, 6, 28, 0, 0, 0, 0, time.Local), true},
+		{"end of day", time.Date(2026, 6, 28, 23, 59, 59, 0, time.Local), true},
+		{"one second before", time.Date(2026, 6, 27, 23, 59, 59, 0, time.Local), false},
+		{"start of next day", time.Date(2026, 6, 29, 0, 0, 0, 0, time.Local), false},
+	}
+	for _, c := range cases {
+		ts := c.ts.Format(time.RFC3339)
+		if got := sameDay(ts, day); got != c.want {
+			t.Errorf("%s: sameDay(%q, %q) = %v, want %v", c.name, ts, day, got, c.want)
+		}
+	}
+}
+
 func TestClaudeTokens(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
