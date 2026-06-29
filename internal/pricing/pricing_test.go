@@ -28,14 +28,16 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 		model string
 		want  Rate
 	}{
-		{"openai.gpt-5.5", tab["gpt-5"]},                         // Bedrock OpenAI
-		{"openai.gpt-5.4", tab["gpt-5"]},                         // Bedrock OpenAI
+		{"openai.gpt-5.5", tab["gpt-5.5"]},                       // Bedrock OpenAI → version key
+		{"openai.gpt-5.4", tab["gpt-5.4"]},                       // Bedrock OpenAI → version key
 		{"us.anthropic.claude-sonnet-4-6", tab["claude-sonnet"]}, // Bedrock cross-region Claude
 		{"anthropic.claude-opus-4-8", tab["claude-opus"]},        // Bedrock Claude
 		{"sonnet", tab["claude-sonnet"]},                         // bare alias
 		{"opus", tab["claude-opus"]},                             // bare alias
 		{"haiku", tab["claude-haiku"]},                           // bare alias
-		{"gpt-5.5", tab["gpt-5"]},                                // first-party (regression)
+		{"gpt-5.5", tab["gpt-5.5"]},                              // first-party → version key
+		{"gpt-5-codex", tab["gpt-5"]},                            // no version → gpt-5 base
+		{"gpt-5.4-codex", tab["gpt-5.4"]},                        // -codex variant → 5.4 base
 		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
 	}
 	for _, c := range cases {
@@ -51,6 +53,37 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 	// A synthetic/placeholder model carries no billable price.
 	if _, ok := tab.For("<synthetic>"); ok {
 		t.Error("<synthetic> should not be priced")
+	}
+}
+
+// The built-in defaults must reflect current first-party API prices (per-1M
+// input/output). Locks the table against drift back to stale values.
+func TestDefaultPricesCurrent(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	tab := Load()
+	// Rate fields are {In, Out, CacheRead, CacheWrite}.
+	cases := []struct {
+		model string
+		want  Rate
+	}{
+		{"claude-opus-4-8", Rate{5, 25, 0.5, 6.25}},
+		{"claude-opus-4-1-20250805", Rate{15, 75, 1.5, 18.75}}, // 4.1 kept the older price; not shadowed by claude-opus
+		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
+		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
+		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
+		{"gpt-5.5", Rate{5, 30, 0.5, 5}}, // and openai.gpt-5.5 via canonical
+		{"gpt-5.5-pro", Rate{30, 180, 3, 30}},
+		{"gpt-5.4", Rate{2.5, 15, 0.25, 2.5}},
+		{"gpt-5.4-codex", Rate{2.5, 15, 0.25, 2.5}}, // -codex variant falls to the base price
+		{"gpt-5.4-mini", Rate{0.75, 4.5, 0.075, 0.75}},
+		{"gpt-5.4-nano", Rate{0.2, 1.25, 0.02, 0.2}},
+		{"gpt-5.4-pro", Rate{30, 180, 3, 30}},
+	}
+	for _, c := range cases {
+		r, ok := tab.For(c.model)
+		if !ok || r != c.want {
+			t.Errorf("%s: got %+v (ok=%v), want %+v", c.model, r, ok, c.want)
+		}
 	}
 }
 
@@ -98,7 +131,7 @@ func TestPartialOverrideMergesOverDefaults(t *testing.T) {
 		t.Fatal("claude-opus should be priced")
 	}
 	// input overridden; output / cache_read / cache_write keep defaults.
-	if r.In != 20 || r.Out != 75 || r.CacheRead != 1.5 || r.CacheWrite != 18.75 {
+	if r.In != 20 || r.Out != 25 || r.CacheRead != 0.5 || r.CacheWrite != 6.25 {
 		t.Errorf("partial override = %+v, want In=20 with default Out/CacheRead/CacheWrite", r)
 	}
 }
@@ -112,8 +145,8 @@ func TestExplicitZeroOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := Load().For("claude-opus-4-8")
-	if r.CacheRead != 0 || r.In != 15 {
-		t.Errorf("explicit zero override = %+v, want CacheRead=0 with default In=15", r)
+	if r.CacheRead != 0 || r.In != 5 {
+		t.Errorf("explicit zero override = %+v, want CacheRead=0 with default In=5", r)
 	}
 }
 
