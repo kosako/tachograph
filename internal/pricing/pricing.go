@@ -30,6 +30,11 @@ var defaults = map[string]Rate{
 	"claude-mythos": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // approx
 	"gpt-5":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25},
 	"codex":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25},
+	// Bare aliases some tools record instead of the full model id (e.g. a
+	// transcript that logs just "sonnet"). Same rate as the matching claude-* tier.
+	"opus":   {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75},
+	"sonnet": {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75},
+	"haiku":  {In: 0.8, Out: 4, CacheRead: 0.08, CacheWrite: 1},
 }
 
 // Table is the merged price table (overrides applied over defaults).
@@ -84,9 +89,39 @@ type rateOverride struct {
 	CacheWrite *float64 `json:"cache_write"`
 }
 
+// bedrockProviders are the provider prefixes Amazon Bedrock prepends to a model
+// id (optionally after a cross-region prefix like "us."). Stripping them lets a
+// Bedrock id match the same bare keys as the first-party id.
+var bedrockProviders = []string{"anthropic.", "openai."}
+
+// canonical strips a Bedrock "[region.]provider." prefix so ids like
+// "openai.gpt-5.5" or "us.anthropic.claude-sonnet-4-6" match the bare keys.
+func canonical(model string) string {
+	for _, p := range bedrockProviders {
+		if i := strings.Index(model, p); i != -1 {
+			return model[i+len(p):]
+		}
+	}
+	return model
+}
+
 // For returns the rate for a model id by longest-prefix match, and whether a
-// price was found.
+// price was found. The id is matched as given first — so a pricing.json key for
+// a provider-prefixed id (e.g. "openai.gpt-5") wins — then retried with the
+// Bedrock provider prefix stripped, so a Bedrock-hosted model still prices like
+// its first-party form when no provider-specific key exists.
 func (t Table) For(model string) (Rate, bool) {
+	if r, ok := t.match(model); ok {
+		return r, true
+	}
+	if c := canonical(model); c != model {
+		return t.match(c)
+	}
+	return Rate{}, false
+}
+
+// match does a single longest-prefix lookup against the table.
+func (t Table) match(model string) (Rate, bool) {
 	best := ""
 	for key := range t {
 		if strings.HasPrefix(model, key) && len(key) > len(best) {
