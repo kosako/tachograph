@@ -106,10 +106,22 @@ func canonical(model string) string {
 }
 
 // For returns the rate for a model id by longest-prefix match, and whether a
-// price was found. The id is first stripped of any Bedrock provider prefix so a
-// Bedrock-hosted model prices the same as its first-party form.
+// price was found. The id is matched as given first — so a pricing.json key for
+// a provider-prefixed id (e.g. "openai.gpt-5") wins — then retried with the
+// Bedrock provider prefix stripped, so a Bedrock-hosted model still prices like
+// its first-party form when no provider-specific key exists.
 func (t Table) For(model string) (Rate, bool) {
-	model = canonical(model)
+	if r, ok := t.match(model); ok {
+		return r, true
+	}
+	if c := canonical(model); c != model {
+		return t.match(c)
+	}
+	return Rate{}, false
+}
+
+// match does a single longest-prefix lookup against the table.
+func (t Table) match(model string) (Rate, bool) {
 	best := ""
 	for key := range t {
 		if strings.HasPrefix(model, key) && len(key) > len(best) {

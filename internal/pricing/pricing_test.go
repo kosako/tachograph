@@ -54,6 +54,23 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 	}
 }
 
+// A pricing.json key for the provider-prefixed id must win over the canonical
+// fallback to the bare default — otherwise a user couldn't price a Bedrock
+// model separately from its first-party form.
+func TestProviderOverrideBeatsCanonicalFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"openai.gpt-5":{"input":2,"output":20,"cache_read":0.2,"cache_write":2}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := Load().For("openai.gpt-5.5")
+	// The provider-specific override (In=2) must win over the bare gpt-5 default (In=1.25).
+	if !ok || r.In != 2 || r.Out != 20 {
+		t.Errorf("provider override not honored: %+v %v, want In=2 Out=20", r, ok)
+	}
+}
+
 func TestOverrideFromFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
