@@ -224,7 +224,7 @@ tacho config set tools codex               # Codexだけ表示
 
 ```json
 {
-  "claude-fable": { "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
+  "claude-fable": { "input": 10, "output": 50, "cache_read": 1, "cache_write": 12.5 },
   "gpt-5":        { "input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 1.25 }
 }
 ```

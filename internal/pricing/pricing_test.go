@@ -61,27 +61,28 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 func TestDefaultPricesCurrent(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	tab := Load()
+	// Rate fields are {In, Out, CacheRead, CacheWrite}.
 	cases := []struct {
-		model   string
-		in, out float64
+		model string
+		want  Rate
 	}{
-		{"claude-opus-4-8", 5, 25},
-		{"claude-opus-4-1-20250805", 15, 75}, // Opus 4.1 kept the older price; 4-1 key must not be shadowed by claude-opus
-		{"claude-sonnet-4-6", 3, 15},
-		{"claude-haiku-4-5", 1, 5},
-		{"claude-fable-5", 10, 50},
-		{"gpt-5.5", 5, 30}, // and openai.gpt-5.5 via canonical
-		{"gpt-5.5-pro", 30, 180},
-		{"gpt-5.4", 2.5, 15},
-		{"gpt-5.4-codex", 2.5, 15}, // -codex variant falls to the base price
-		{"gpt-5.4-mini", 0.75, 4.5},
-		{"gpt-5.4-nano", 0.2, 1.25},
-		{"gpt-5.4-pro", 30, 180},
+		{"claude-opus-4-8", Rate{5, 25, 0.5, 6.25}},
+		{"claude-opus-4-1-20250805", Rate{15, 75, 1.5, 18.75}}, // 4.1 kept the older price; not shadowed by claude-opus
+		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
+		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
+		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
+		{"gpt-5.5", Rate{5, 30, 0.5, 5}}, // and openai.gpt-5.5 via canonical
+		{"gpt-5.5-pro", Rate{30, 180, 3, 30}},
+		{"gpt-5.4", Rate{2.5, 15, 0.25, 2.5}},
+		{"gpt-5.4-codex", Rate{2.5, 15, 0.25, 2.5}}, // -codex variant falls to the base price
+		{"gpt-5.4-mini", Rate{0.75, 4.5, 0.075, 0.75}},
+		{"gpt-5.4-nano", Rate{0.2, 1.25, 0.02, 0.2}},
+		{"gpt-5.4-pro", Rate{30, 180, 3, 30}},
 	}
 	for _, c := range cases {
 		r, ok := tab.For(c.model)
-		if !ok || r.In != c.in || r.Out != c.out {
-			t.Errorf("%s: got In=%v Out=%v (ok=%v), want In=%v Out=%v", c.model, r.In, r.Out, ok, c.in, c.out)
+		if !ok || r != c.want {
+			t.Errorf("%s: got %+v (ok=%v), want %+v", c.model, r, ok, c.want)
 		}
 	}
 }
