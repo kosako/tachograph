@@ -37,6 +37,7 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 		{"haiku", tab["claude-haiku"]},                           // bare alias
 		{"gpt-5.5", tab["gpt-5.5"]},                              // first-party → version key
 		{"gpt-5-codex", tab["gpt-5"]},                            // no version → gpt-5 base
+		{"gpt-5.4-codex", tab["gpt-5.4"]},                        // -codex variant → 5.4 base
 		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
 	}
 	for _, c := range cases {
@@ -65,11 +66,17 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		in, out float64
 	}{
 		{"claude-opus-4-8", 5, 25},
+		{"claude-opus-4-1-20250805", 15, 75}, // Opus 4.1 kept the older price; 4-1 key must not be shadowed by claude-opus
 		{"claude-sonnet-4-6", 3, 15},
 		{"claude-haiku-4-5", 1, 5},
 		{"claude-fable-5", 10, 50},
 		{"gpt-5.5", 5, 30}, // and openai.gpt-5.5 via canonical
+		{"gpt-5.5-pro", 30, 180},
 		{"gpt-5.4", 2.5, 15},
+		{"gpt-5.4-codex", 2.5, 15}, // -codex variant falls to the base price
+		{"gpt-5.4-mini", 0.75, 4.5},
+		{"gpt-5.4-nano", 0.2, 1.25},
+		{"gpt-5.4-pro", 30, 180},
 	}
 	for _, c := range cases {
 		r, ok := tab.For(c.model)
