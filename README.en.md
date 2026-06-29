@@ -76,17 +76,24 @@ setup claude` prints a snippet with the correct absolute path baked in.
 
 ### Updating
 
-Re-run the same `go install` to upgrade to the latest version. It overwrites
-the same path under `$GOPATH/bin`, so your statusLine / SwiftBar config keeps
+If you installed via **npm**, reinstall to pull the latest version. It
+overwrites the same location, so your statusLine / SwiftBar config keeps
 working unchanged:
 
 ```sh
-go install github.com/kosako/tachograph/cmd/tacho@latest
+npm install -g tachograph@latest
 tacho version    # check the current version (also shown at the top of tacho doctor)
 ```
 
-`@latest` fetches the newest tagged release; pin a specific one with a tag
-like `@v0.1.0`. `tacho version` reports the version Go embeds at install time
+If you installed via `go install`, re-run the same command (it overwrites the
+same path under `$GOPATH/bin`):
+
+```sh
+go install github.com/kosako/tachograph/cmd/tacho@latest
+```
+
+To pin a specific version, use `tachograph@0.2.2` with npm or a tag like
+`@v0.2.2` with go. `tacho version` reports the version embedded at install time
 (the tag) — an untagged local build shows a commit-based pseudo-version.
 
 ## Usage
