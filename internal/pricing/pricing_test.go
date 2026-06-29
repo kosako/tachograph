@@ -19,6 +19,41 @@ func TestForLongestPrefix(t *testing.T) {
 	}
 }
 
+// Bedrock provider-prefixed ids and bare aliases (the strings actually seen in
+// Codex/Claude logs) must price the same as their first-party / full-tier form.
+func TestForBedrockPrefixAndAliases(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir()) // pure defaults, ignore any local pricing.json
+	tab := Load()
+	cases := []struct {
+		model string
+		want  Rate
+	}{
+		{"openai.gpt-5.5", tab["gpt-5"]},                         // Bedrock OpenAI
+		{"openai.gpt-5.4", tab["gpt-5"]},                         // Bedrock OpenAI
+		{"us.anthropic.claude-sonnet-4-6", tab["claude-sonnet"]}, // Bedrock cross-region Claude
+		{"anthropic.claude-opus-4-8", tab["claude-opus"]},        // Bedrock Claude
+		{"sonnet", tab["claude-sonnet"]},                         // bare alias
+		{"opus", tab["claude-opus"]},                             // bare alias
+		{"haiku", tab["claude-haiku"]},                           // bare alias
+		{"gpt-5.5", tab["gpt-5"]},                                // first-party (regression)
+		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
+	}
+	for _, c := range cases {
+		r, ok := tab.For(c.model)
+		if !ok {
+			t.Errorf("%s: expected a price, got none", c.model)
+			continue
+		}
+		if r != c.want {
+			t.Errorf("%s: rate = %+v, want %+v", c.model, r, c.want)
+		}
+	}
+	// A synthetic/placeholder model carries no billable price.
+	if _, ok := tab.For("<synthetic>"); ok {
+		t.Error("<synthetic> should not be priced")
+	}
+}
+
 func TestOverrideFromFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
