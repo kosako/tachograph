@@ -20,21 +20,29 @@ type Rate struct {
 	CacheWrite float64 `json:"cache_write"`
 }
 
-// defaults are approximate public prices (USD per million tokens). They are
-// matched by model-id prefix. Override or extend via the pricing.json file.
+// defaults are approximate first-party API prices (USD per million tokens),
+// matched by model-id prefix. Cache rates follow each provider's convention:
+// Anthropic cache read = 0.1x input, write (5-min ephemeral) = 1.25x input;
+// OpenAI uses its published cached-input price (and bills cache writes at the
+// input rate). Long-context premiums (Opus >200K, GPT-5.5 >272K) are not modeled
+// — this is a flat table. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
-	"claude-opus":   {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75},
-	"claude-sonnet": {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75},
-	"claude-haiku":  {In: 0.8, Out: 4, CacheRead: 0.08, CacheWrite: 1},
-	"claude-fable":  {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // approx (Opus tier)
-	"claude-mythos": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // approx
-	"gpt-5":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25},
-	"codex":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25},
+	"claude-opus":   {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25}, // Opus 4.x
+	"claude-sonnet": {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75}, // Sonnet 4.6
+	"claude-haiku":  {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25},  // Haiku 4.5
+	"claude-fable":  {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},  // Fable 5
+	"claude-mythos": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},  // Mythos 5
+	// gpt-5.4 / gpt-5.5 are priced separately from the original gpt-5; the
+	// version-specific keys win by longest-prefix match.
+	"gpt-5.5": {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 5},
+	"gpt-5.4": {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
+	"gpt-5":   {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
+	"codex":   {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // fallback for "codex*" ids
 	// Bare aliases some tools record instead of the full model id (e.g. a
 	// transcript that logs just "sonnet"). Same rate as the matching claude-* tier.
-	"opus":   {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75},
+	"opus":   {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},
 	"sonnet": {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75},
-	"haiku":  {In: 0.8, Out: 4, CacheRead: 0.08, CacheWrite: 1},
+	"haiku":  {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25},
 }
 
 // Table is the merged price table (overrides applied over defaults).
