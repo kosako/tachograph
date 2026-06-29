@@ -64,14 +64,20 @@ PATHを通したくない場合は、`tacho` を絶対パス(例 `~/go/bin/tacho
 
 ### アップデート
 
-同じ `go install` を再実行すると最新版に入れ替わります(`$GOPATH/bin` の同じパスを上書きするため、statusLineやSwiftBarの設定はそのままでOK):
+npm で入れた場合は、再インストールで最新版に入れ替わります(同じ場所を上書きするので、statusLineやSwiftBarの設定はそのままでOK):
 
 ```sh
-go install github.com/kosako/tachograph/cmd/tacho@latest
+npm install -g tachograph@latest
 tacho version    # 現在の版を確認(tacho doctor でも先頭に表示)
 ```
 
-`@latest` は最新のタグ付きリリースを取得します。特定バージョンに固定したい場合は `@v0.1.0` のようにタグを指定します。`tacho version` はインストール時にGoが埋め込んだ版(タグ)を表示します — タグ無しのローカルビルドはコミットベースの擬似バージョンになります。
+`go install` で入れた場合は、同じコマンドを再実行します(`$GOPATH/bin` の同じパスを上書きします):
+
+```sh
+go install github.com/kosako/tachograph/cmd/tacho@latest
+```
+
+バージョンを固定したい場合は、npm なら `tachograph@0.2.2`、go なら `@v0.2.2` のように指定します。`tacho version` はインストール時に埋め込んだ版(タグ)を表示します — タグ無しのローカルビルドはコミットベースの擬似バージョンになります。
 
 ## 使い方
 
