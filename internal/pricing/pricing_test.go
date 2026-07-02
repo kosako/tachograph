@@ -7,6 +7,7 @@ import (
 )
 
 func TestForLongestPrefix(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir()) // pure defaults, ignore any local pricing.json
 	tab := Load()
 	if _, ok := tab.For("claude-opus-4-8"); !ok {
 		t.Error("claude-opus-4-8 should match claude-opus")
