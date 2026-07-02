@@ -15,10 +15,6 @@ const (
 	MetricTokens      = "tokens"       // daily token count
 )
 
-// Metrics lists every metric (used for the dropdown's full readout and for
-// validation).
-var Metrics = []string{MetricLimit5h, MetricLimitWeekly, MetricContext, MetricCost, MetricTokens}
-
 // MenubarMetrics is the subset offered as the menu bar's single metric.
 // Context is excluded: it churns per session and isn't a useful at-a-glance
 // menu bar figure.
@@ -39,16 +35,6 @@ func MetricLabel(metric string) string {
 		return "tokens"
 	}
 	return metric
-}
-
-// ValidMetric reports whether metric is a known id.
-func ValidMetric(metric string) bool {
-	for _, m := range Metrics {
-		if m == metric {
-			return true
-		}
-	}
-	return false
 }
 
 // MetricIsGauge reports whether a metric can drive a 0..1 progress gauge (a

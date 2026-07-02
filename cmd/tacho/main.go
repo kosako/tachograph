@@ -174,12 +174,6 @@ func runConfig(args []string) int {
 			return 2
 		}
 		return configSet(args[0], args[1])
-	case "cycle":
-		if len(args) != 1 {
-			fmt.Fprint(os.Stderr, configUsage)
-			return 2
-		}
-		return configCycle(args[0])
 	case "toggle-tool":
 		if len(args) != 1 {
 			fmt.Fprint(os.Stderr, configUsage)
@@ -192,26 +186,6 @@ func runConfig(args []string) int {
 		fmt.Fprint(os.Stderr, configUsage)
 		return 2
 	}
-}
-
-// configCycle advances an enum-valued key to its next option (wrapping). Used
-// by the one-click SwiftBar dropdown settings.
-func configCycle(key string) int {
-	c := config.Load()
-	switch key {
-	case "menubar.style":
-		c.Menubar.Style = nextIn([]string{config.StyleMeter, config.StyleNumber}, c.Menubar.Style)
-	case "menubar.metric":
-		c.Menubar.Metric = nextIn(render.MenubarMetrics, c.Menubar.Metric)
-	default:
-		fmt.Fprintf(os.Stderr, "tacho: cannot cycle %q\n", key)
-		return 2
-	}
-	if err := config.Save(c); err != nil {
-		fmt.Fprintln(os.Stderr, "tacho:", err)
-		return 1
-	}
-	return 0
 }
 
 // configToggleTool adds or removes a tool, keeping canonical order.
@@ -274,17 +248,6 @@ func configStatuslinePreset(args []string) int {
 	fmt.Println("Wrote preset " + name + " to " + path)
 	fmt.Println(tmpl)
 	return 0
-}
-
-// nextIn returns the element after cur in list (wrapping); the first element
-// when cur is absent.
-func nextIn(list []string, cur string) string {
-	for i, v := range list {
-		if v == cur {
-			return list[(i+1)%len(list)]
-		}
-	}
-	return list[0]
 }
 
 func configSet(key, val string) int {
