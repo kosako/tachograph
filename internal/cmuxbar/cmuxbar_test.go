@@ -28,8 +28,18 @@ func limitsTool(stale bool, pct5, pctW float64) schema.Tool {
 	}
 }
 
-// A configured tool with no pill this push (unavailable/errored) must be
-// cleared, not left frozen. An available tool must not be cleared.
+func codexTokenTool() schema.Tool {
+	tokens := int64(3962991)
+	return schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Backend:   schema.BackendBedrock,
+		Fallback:  &schema.Fallback{SessionTokens: &tokens},
+	}
+}
+
+// A tacho-managed sidebar key with no pill this push (unavailable, errored, or
+// filtered out before Push) must be cleared, not left frozen.
 func TestAbsentToolKeys(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	s := schema.Status{Tools: []schema.Tool{
@@ -37,30 +47,23 @@ func TestAbsentToolKeys(t *testing.T) {
 		schema.Unavailable(schema.ToolCodex), // codex unavailable → no pill
 	}}
 	pills := Pills(s, now)
-	keys := absentToolKeys(s, pills)
+	keys := absentToolKeys(pills)
 	if len(keys) != 1 || keys[0] != "codex" {
 		t.Errorf("absentToolKeys = %v, want [codex] (cleared because it has no pill)", keys)
 	}
 
 	// Both available → nothing to clear.
-	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
-	if got := absentToolKeys(s2, Pills(s2, now)); len(got) != 0 {
+	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41), codexTokenTool()}}
+	if got := absentToolKeys(Pills(s2, now)); len(got) != 0 {
 		t.Errorf("absentToolKeys = %v, want none when every tool has a pill", got)
 	}
 }
 
 func TestPills(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	tokens := int64(3962991)
-	codex := schema.Tool{
-		Tool:      schema.ToolCodex,
-		Available: true,
-		Backend:   schema.BackendBedrock,
-		Fallback:  &schema.Fallback{SessionTokens: &tokens},
-	}
 	s := schema.Status{Tools: []schema.Tool{
 		limitsTool(false, 24, 41),
-		codex,
+		codexTokenTool(),
 		schema.Unavailable(schema.ToolCodex), // ignored
 	}}
 
@@ -127,7 +130,7 @@ func fakeCLI(t *testing.T) (bin, log string) {
 func TestPushAndClearExec(t *testing.T) {
 	bin, log := fakeCLI(t)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	s := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
+	s := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41), codexTokenTool()}}
 
 	if err := Push(bin, s, now, true); err != nil {
 		t.Fatal(err)
@@ -140,14 +143,17 @@ func TestPushAndClearExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(calls) != 3 {
-		t.Fatalf("calls = %q, want 3 (1 set + 2 clear)", calls)
+	if len(calls) != 4 {
+		t.Fatalf("calls = %q, want 4 (2 set + 2 clear)", calls)
 	}
 	if calls[0] != "set-status claude claude ctx24% 5h24% wk41% --color "+colorGreen {
 		t.Errorf("set call = %q", calls[0])
 	}
-	if calls[1] != "clear-status claude" || calls[2] != "clear-status codex" {
-		t.Errorf("clear calls = %q", calls[1:])
+	if calls[1] != "set-status codex codex 4Mtok --color "+colorGreen {
+		t.Errorf("set call = %q", calls[1])
+	}
+	if calls[2] != "clear-status claude" || calls[3] != "clear-status codex" {
+		t.Errorf("clear calls = %q", calls[2:])
 	}
 }
 
@@ -173,7 +179,8 @@ func TestPushClearsAbsentTool(t *testing.T) {
 		t.Errorf("calls = %q, want set-status claude then clear-status codex", calls)
 	}
 
-	// Only claude configured & available → set only, no clear.
+	// If status was filtered to only claude, codex must still be cleared so an
+	// old codex pill is not left frozen in the sidebar.
 	bin2, log2 := fakeCLI(t)
 	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
 	if err := Push(bin2, s2, now, true); err != nil {
@@ -181,8 +188,11 @@ func TestPushClearsAbsentTool(t *testing.T) {
 	}
 	b2, _ := os.ReadFile(log2)
 	calls2 := strings.Split(strings.TrimSpace(string(b2)), "\n")
-	if len(calls2) != 1 || !strings.HasPrefix(calls2[0], "set-status claude ") {
-		t.Errorf("calls = %q, want only set-status claude (no clear)", calls2)
+	if len(calls2) != 2 {
+		t.Fatalf("calls = %q, want 2 (set claude + clear codex)", calls2)
+	}
+	if !strings.HasPrefix(calls2[0], "set-status claude ") || calls2[1] != "clear-status codex" {
+		t.Errorf("calls = %q, want set-status claude then clear-status codex", calls2)
 	}
 }
 

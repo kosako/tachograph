@@ -29,6 +29,8 @@ const (
 	colorGray   = "#8E8E93"
 )
 
+var managedSidebarKeys = [...]string{"claude", "codex"}
+
 // Detect reports whether we are running inside a cmux terminal.
 func Detect() bool {
 	return os.Getenv("CMUX_WORKSPACE_ID") != ""
@@ -78,18 +80,17 @@ func Pills(s schema.Status, now time.Time) []Pill {
 	return pills
 }
 
-// absentToolKeys returns configured tools that have no pill this push (e.g. one
-// just went unavailable/errored), so their stale pill is cleared instead of
-// left frozen in the sidebar.
-func absentToolKeys(s schema.Status, pills []Pill) []string {
+// absentToolKeys returns tacho-managed sidebar keys that have no pill this
+// push, so stale pills are cleared instead of left frozen in the sidebar.
+func absentToolKeys(pills []Pill) []string {
 	present := make(map[string]bool, len(pills))
 	for _, p := range pills {
 		present[p.Key] = true
 	}
 	var keys []string
-	for _, t := range s.Tools {
-		if k := pillKey(t.Tool); !present[k] {
-			keys = append(keys, k)
+	for _, key := range managedSidebarKeys {
+		if !present[key] {
+			keys = append(keys, key)
 		}
 	}
 	return keys
@@ -159,9 +160,9 @@ func Push(cli string, s schema.Status, now time.Time, wait bool) error {
 			firstErr = err
 		}
 	}
-	// A tool that dropped out (available → unavailable) is no longer in pills;
-	// clear its pill so the sidebar doesn't keep showing a frozen last value.
-	for _, key := range absentToolKeys(s, pills) {
+	// A tool that dropped out (unavailable/errored/filtered out) is no longer
+	// in pills; clear it so the sidebar doesn't keep showing a frozen value.
+	for _, key := range absentToolKeys(pills) {
 		cmd := exec.Command(cli, "clear-status", key)
 		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
 			firstErr = err
@@ -173,7 +174,7 @@ func Push(cli string, s schema.Status, now time.Time, wait bool) error {
 // Clear removes tacho's pills from the sidebar.
 func Clear(cli string, wait bool) error {
 	var firstErr error
-	for _, key := range []string{"claude", "codex"} {
+	for _, key := range managedSidebarKeys {
 		cmd := exec.Command(cli, "clear-status", key)
 		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
 			firstErr = err
