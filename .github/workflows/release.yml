@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
       # The npm installer derives its download tag from npm/package.json's
       # version, so it must equal the pushed git tag or every `npm i` 404s.
       # Fail the release before publishing if they drift.
@@ -29,6 +32,15 @@ jobs:
             echo "::error::git tag v$tag != npm/package.json version $pkg"
             exit 1
           fi
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+      - run: node test.js
+        working-directory: npm
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
