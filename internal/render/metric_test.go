@@ -6,17 +6,13 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// The menu bar's single metric excludes context (MenubarMetrics), while the
-// general ValidMetric still accepts it.
+// The menu bar's single metric excludes context.
 func TestValidMenubarMetric(t *testing.T) {
 	if !ValidMenubarMetric(MetricLimit5h) || !ValidMenubarMetric(MetricCost) {
 		t.Error("limit_5h / cost should be valid menu bar metrics")
 	}
 	if ValidMenubarMetric(MetricContext) {
 		t.Error("context must not be a valid menu bar metric")
-	}
-	if !ValidMetric(MetricContext) {
-		t.Error("context should still be a valid general metric")
 	}
 }
 
@@ -77,11 +73,5 @@ func TestMetric(t *testing.T) {
 func TestMetricUnavailable(t *testing.T) {
 	if _, text := Metric(schema.Unavailable(schema.ToolCodex), MetricLimit5h); text != Missing {
 		t.Errorf("unavailable text = %q, want %q", text, Missing)
-	}
-}
-
-func TestValidMetric(t *testing.T) {
-	if !ValidMetric(MetricCost) || ValidMetric("nope") {
-		t.Error("ValidMetric mismatch")
 	}
 }
