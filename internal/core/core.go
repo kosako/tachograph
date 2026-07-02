@@ -40,6 +40,7 @@ func assemble(opts Options) schema.Status {
 	prices := pricing.Load()
 	claudeT := claudeTool(opts)
 	codexT := codex.Collect(codex.Options{Root: opts.CodexRoot, Now: opts.Now})
+	addCodexSessionCost(&codexT, prices)
 	addDaily(&claudeT, daily.ClaudeTotals(opts.ClaudeRoot, opts.Now, prices))
 	addDaily(&codexT, daily.CodexTotals(opts.CodexRoot, opts.Now, prices))
 	AddSessionToday(&claudeT, opts.Now, prices)
@@ -57,6 +58,30 @@ func addDaily(t *schema.Tool, tot daily.Totals) {
 		return
 	}
 	t.Daily = tot.Schema()
+}
+
+func addCodexSessionCost(t *schema.Tool, prices pricing.Table) {
+	if t.Tool != schema.ToolCodex || !t.Available || t.Error != nil ||
+		t.Model == nil || t.Session == nil || t.Session.Tokens == nil {
+		return
+	}
+	if t.Fallback != nil && t.Fallback.EstimatedCostUSD != nil {
+		return
+	}
+	r, ok := prices.For(t.Model.ID)
+	if !ok {
+		return
+	}
+	u := t.Session.Tokens
+	nonCachedInput := u.Input - u.CachedInput
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
+	}
+	cost := r.Cost(nonCachedInput, 0, u.CachedInput, u.Output)
+	if t.Fallback == nil {
+		t.Fallback = &schema.Fallback{}
+	}
+	t.Fallback.EstimatedCostUSD = &cost
 }
 
 // AddSessionToday attaches the current session's today-only totals, computed
