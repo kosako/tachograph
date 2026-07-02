@@ -20,6 +20,11 @@ const StatusTTL = 30 * time.Second
 // than dropping to "--". Deliberately long: last-known beats no data.
 const SnapshotMaxAge = 30 * 24 * time.Hour
 
+type snapshotFile struct {
+	SchemaVersion string `json:"schema_version"`
+	schema.Tool
+}
+
 // Dir returns the cache directory, honoring TACHO_CACHE_DIR for tests
 // and non-standard setups.
 func Dir() (string, error) {
@@ -63,7 +68,10 @@ func WriteStatus(s *schema.Status) error {
 // cache. Used by `tacho statusline` to piggyback Claude Code's push so
 // other renderers can show rate limits without a statusline stdin.
 func WriteSnapshot(t schema.Tool) error {
-	return writeJSON("snapshot-"+t.Tool+".json", t)
+	return writeJSON("snapshot-"+t.Tool+".json", snapshotFile{
+		SchemaVersion: schema.Version,
+		Tool:          t,
+	})
 }
 
 // ReadSnapshot returns a tool snapshot no older than maxAge, with its
@@ -77,14 +85,15 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Too
 	if err != nil {
 		return nil, false
 	}
-	var t schema.Tool
-	if json.Unmarshal(b, &t) != nil || t.CollectedAt == nil {
+	var snap snapshotFile
+	if json.Unmarshal(b, &snap) != nil || snap.SchemaVersion != schema.Version || snap.CollectedAt == nil {
 		return nil, false
 	}
-	ts, err := time.Parse(time.RFC3339, *t.CollectedAt)
+	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
 	if err != nil || now.Sub(ts) > maxAge {
 		return nil, false
 	}
+	t := snap.Tool
 	t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
 	return &t, true
 }

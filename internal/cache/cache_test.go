@@ -156,3 +156,16 @@ func TestSnapshot(t *testing.T) {
 		t.Errorf("ReadSnapshot stale recompute: got %+v, %v", got, ok)
 	}
 }
+
+func TestSnapshotRejectsOtherSchemaVersion(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now()
+	collected := now.Format(time.RFC3339)
+	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
+		[]byte(`{"schema_version":"9.9","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+		t.Error("ReadSnapshot accepted a different schema_version")
+	}
+}

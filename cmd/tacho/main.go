@@ -335,13 +335,17 @@ func runWatch(args []string) int {
 	st := style(*noColor)
 	for {
 		now := time.Now()
-		s := config.Load().FilterStatus(core.Status(core.Options{Now: now}))
+		s := watchStatus(now)
 		// Clear screen and home the cursor between refreshes.
 		fmt.Print("\x1b[H\x1b[2J")
 		fmt.Printf("tachograph  %s  (every %ds, ctrl-c to quit)\n\n", now.Format("15:04:05"), *interval)
 		fmt.Println(render.StatusLines(s, now, st))
 		time.Sleep(time.Duration(*interval) * time.Second)
 	}
+}
+
+func watchStatus(now time.Time) schema.Status {
+	return config.Load().FilterStatus(core.Status(core.Options{Now: now, NoCache: true}))
 }
 
 // runStatusline is the R1 renderer: it consumes the session JSON Claude
