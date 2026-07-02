@@ -361,7 +361,8 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	// The live payload knows only the current session; total today's portion of
 	// it from the transcript so {claude.*.session.today} works.
 	core.AddSessionToday(&claudeTool, now, pricing.Load())
-	if claudeTool.Available && claudeTool.Error == nil {
+	if shouldWriteStatuslineSnapshot(input, claudeTool) {
+		preserveSnapshotLimits(&claudeTool, now)
 		_ = cache.WriteSnapshot(claudeTool)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
@@ -388,6 +389,34 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 		}
 	}
 	return 0
+}
+
+func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
+	if strings.TrimSpace(string(input)) == "" || !t.Available || t.Error != nil {
+		return false
+	}
+	if len(t.Limits) > 0 || t.Model != nil || t.Plan != nil || t.Credits != nil {
+		return true
+	}
+	if t.Session != nil {
+		if t.Session.ID != nil || t.Session.CWD != nil || t.Session.ContextWindow != nil ||
+			t.Session.ContextUsedPct != nil || t.Session.Tokens != nil || t.Session.TranscriptPath != nil {
+			return true
+		}
+	}
+	if t.Fallback != nil {
+		return t.Fallback.SessionTokens != nil || t.Fallback.EstimatedCostUSD != nil
+	}
+	return false
+}
+
+func preserveSnapshotLimits(t *schema.Tool, now time.Time) {
+	if len(t.Limits) > 0 {
+		return
+	}
+	if snap, ok := cache.ReadSnapshot(t.Tool, cache.SnapshotMaxAge, now); ok && len(snap.Limits) > 0 {
+		t.Limits = snap.Limits
+	}
 }
 
 func runCmux(args []string) int {
