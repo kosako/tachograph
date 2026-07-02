@@ -39,7 +39,7 @@
   },
   "session": {
     "id": "019e5933-...",
-    "cwd": "/Users/kosako/dev/...",
+    "cwd": "/Users/example/dev/...",
     "context_window": 258400,
     "context_used_pct": 38.2,         // 算出不能なら null
     "tokens": {
@@ -48,7 +48,7 @@
       "output": 2207,
       "total": 989120
     },
-    "transcript_path": "/Users/.../<session>.jsonl"  // 任意。session_today算出に使用
+    "transcript_path": "/Users/example/.../<session>.jsonl"  // 任意。session_today算出に使用
   },
   "limits": [                         // レートリミット枠。概念が存在しない場合は null
     {

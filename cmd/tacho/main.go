@@ -62,6 +62,7 @@ const usage = `usage:
   tacho watch [-n sec]  refresh continuously
   tacho status --json   unified schema JSON (see docs/schema.md)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
+  tacho version         print the installed version
   tacho cmux push       push status pills to the cmux sidebar once
   tacho cmux clear      remove tacho's pills from the cmux sidebar
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)

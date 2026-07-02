@@ -125,7 +125,8 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 // all-session total. The bare {tool.tokens} / {tool.cost} and the explicit
 // .session form both mean the current session (back-compat); .all means
 // today's total across every session, rendered with a "/d" marker so it reads
-// as a daily figure. .session.today is reserved for a later change.
+// as a daily figure. .session.today means the current session's today-only
+// portion when the collector can derive it.
 func scopeName(scope []string) string {
 	switch {
 	case len(scope) == 0, len(scope) == 1 && scope[0] == "session":
