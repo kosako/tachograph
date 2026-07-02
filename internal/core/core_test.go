@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -15,6 +16,7 @@ const (
 
 func TestStatusAssemblesBothTools(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	s := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now})
 
@@ -26,6 +28,9 @@ func TestStatusAssemblesBothTools(t *testing.T) {
 	}
 	if !s.Tools[0].Available || !s.Tools[1].Available {
 		t.Errorf("both tools should be available from fixtures: %+v", s.Tools)
+	}
+	if s.Tools[1].Fallback == nil || s.Tools[1].Fallback.EstimatedCostUSD == nil {
+		t.Errorf("Codex session cost was not attached: %+v", s.Tools[1].Fallback)
 	}
 }
 
@@ -68,5 +73,49 @@ func TestStatusPrefersClaudeSnapshot(t *testing.T) {
 	got := s.Tools[0]
 	if got.Limits == nil || *got.Limits[0].UsedPct != 42.0 {
 		t.Errorf("expected snapshot (with limits) to win over transcript route: %+v", got)
+	}
+}
+
+func TestAddCodexSessionCost(t *testing.T) {
+	tool := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Model:     &schema.Model{ID: "gpt-x"},
+		Session: &schema.Session{Tokens: &schema.Tokens{
+			Input:       120,
+			CachedInput: 20,
+			Output:      30,
+			Total:       150,
+		}},
+		Fallback: &schema.Fallback{},
+	}
+	addCodexSessionCost(&tool, pricing.Table{
+		"gpt-x": {In: 2, CacheRead: 0.5, Out: 10},
+	})
+
+	if tool.Fallback.EstimatedCostUSD == nil {
+		t.Fatal("EstimatedCostUSD = nil")
+	}
+	want := (100*2.0 + 20*0.5 + 30*10.0) / 1_000_000
+	if got := *tool.Fallback.EstimatedCostUSD; got != want {
+		t.Errorf("EstimatedCostUSD = %v, want %v", got, want)
+	}
+}
+
+func TestAddCodexSessionCostPreservesExistingEstimate(t *testing.T) {
+	existing := 9.0
+	tool := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Model:     &schema.Model{ID: "gpt-x"},
+		Session:   &schema.Session{Tokens: &schema.Tokens{Input: 100, Total: 100}},
+		Fallback:  &schema.Fallback{EstimatedCostUSD: &existing},
+	}
+	addCodexSessionCost(&tool, pricing.Table{
+		"gpt-x": {In: 2},
+	})
+
+	if got := *tool.Fallback.EstimatedCostUSD; got != existing {
+		t.Errorf("EstimatedCostUSD = %v, want existing %v", got, existing)
 	}
 }
