@@ -24,7 +24,8 @@
   "files": [
     "bin/tacho.js",
     "install.js",
-    "asset.js"
+    "asset.js",
+    "LICENSE"
   ],
   "scripts": {
     "postinstall": "node install.js",

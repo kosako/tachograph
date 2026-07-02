@@ -21,6 +21,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    flags:
+      - -trimpath
     # Inject the tag (e.g. v0.1.1) so `tacho version` matches the release;
     # build info alone can't see it under GoReleaser's plain `go build`.
     ldflags:
