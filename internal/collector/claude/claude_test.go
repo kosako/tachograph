@@ -143,10 +143,39 @@ func TestNoTranscripts(t *testing.T) {
 	}
 }
 
-// ANTHROPIC_API_KEY marks pay-as-you-go API usage: backend=api and the
-// subscription rate-limit windows must be suppressed (they don't apply).
-func TestFromStatuslineAPIBackend(t *testing.T) {
+// A live statusline rate_limits payload is stronger evidence than an ambient
+// ANTHROPIC_API_KEY exported for other tools.
+func TestFromStatuslineAPIKeyDoesNotDiscardRateLimits(t *testing.T) {
 	input, _ := os.ReadFile("testdata/statusline_input.json")
+	env := func(k string) string {
+		if k == "ANTHROPIC_API_KEY" {
+			return "sk-ant-xxx"
+		}
+		return ""
+	}
+	got := Collect(Options{Root: "testdata/clauderoot", StatuslineInput: input, Getenv: env})
+	if got.Backend != schema.BackendSubscription {
+		t.Errorf("Backend = %q, want subscription", got.Backend)
+	}
+	if len(got.Limits) != 2 {
+		t.Fatalf("Limits = %+v, want statusline rate limits", got.Limits)
+	}
+	if got.Limits[0].Window != schema.WindowFiveHour || got.Limits[0].UsedPct == nil || *got.Limits[0].UsedPct != 23.5 {
+		t.Errorf("5h limit = %+v", got.Limits[0])
+	}
+}
+
+func TestFromStatuslineAPIBackendWithoutRateLimits(t *testing.T) {
+	input, _ := os.ReadFile("testdata/statusline_input.json")
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		t.Fatal(err)
+	}
+	delete(payload, "rate_limits")
+	input, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
 	env := func(k string) string {
 		if k == "ANTHROPIC_API_KEY" {
 			return "sk-ant-xxx"
@@ -158,7 +187,7 @@ func TestFromStatuslineAPIBackend(t *testing.T) {
 		t.Errorf("Backend = %q, want api", got.Backend)
 	}
 	if got.Limits != nil {
-		t.Errorf("Limits = %+v, want null for api backend", got.Limits)
+		t.Errorf("Limits = %+v, want null without observed rate limits", got.Limits)
 	}
 }
 
