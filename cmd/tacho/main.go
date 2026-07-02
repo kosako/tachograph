@@ -69,7 +69,7 @@ const usage = `usage:
   tacho config show     print the current configuration
   tacho config set K V  set a config value (e.g. menubar.metric cost)
   tacho setup claude    print/install the Claude Code statusLine config
-  tacho doctor          diagnose install path, PATH, and statusLine setup
+  tacho doctor          diagnose install path, data sources, cache, and integrations
 `
 
 func main() {

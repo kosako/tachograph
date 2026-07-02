@@ -105,7 +105,7 @@ tacho status --json    # unified schema JSON (see docs/schema.md)
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
 tacho cmux push|clear  # manage cmux sidebar pills manually
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
-tacho doctor           # diagnose install path, PATH, and config
+tacho doctor           # diagnose install path, data sources, cache, and integrations
 ```
 
 ```
@@ -144,7 +144,8 @@ resolved absolute path when it isn't. To edit by hand, add to
 ```
 
 If something isn't working, `tacho doctor` reports the real binary path, PATH
-status, config files, and whether the statusLine is configured.
+status, config files, data-source freshness, cache state, cmux/SwiftBar
+integration, and whether the statusLine is configured.
 
 Claude Code pipes its session JSON (model, context, rate limits) to
 `tacho statusline`, which prints one line combining it with Codex usage.
