@@ -93,6 +93,7 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 }
 
 func TestRenderTitleImageByDefault(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "")
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
 	out := Render(s, now, true, config.Default())

@@ -346,15 +346,18 @@ func runWatch(args []string) int {
 // Code pipes in, snapshots it so other renderers can reuse the rate limits
 // (the piggyback design from issue #4), and prints one templated line.
 func runStatusline(args []string) int {
+	return runStatuslineWithIO(args, os.Stdin, os.Stdout, time.Now())
+}
+
+func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now time.Time) int {
 	fs := flag.NewFlagSet("statusline", flag.ExitOnError)
 	tmplFlag := fs.String("template", "", "override the statusline template")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fs.Parse(args)
 
-	stdin, _ := io.ReadAll(os.Stdin)
-	now := time.Now()
+	input, _ := io.ReadAll(stdin)
 
-	claudeTool := claude.Collect(claude.Options{Now: now, StatuslineInput: stdin})
+	claudeTool := claude.Collect(claude.Options{Now: now, StatuslineInput: input})
 	// The live payload knows only the current session; total today's portion of
 	// it from the transcript so {claude.*.session.today} works.
 	core.AddSessionToday(&claudeTool, now, pricing.Load())
@@ -375,7 +378,7 @@ func runStatusline(args []string) int {
 	if tmpl == "" {
 		tmpl = loadTemplate()
 	}
-	fmt.Println(render.Template(tmpl, s, now, style(*noColor)))
+	fmt.Fprintln(stdout, render.Template(tmpl, s, now, style(*noColor)))
 
 	// R3 piggyback: inside a cmux terminal, mirror the status to the
 	// sidebar. Fire-and-forget so the statusline stays fast.
