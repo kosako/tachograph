@@ -20,6 +20,36 @@ const (
 	cDim    = "\x1b[2m"
 )
 
+// Shared pressure thresholds for used percentages.
+const (
+	WarnPct   = 50.0
+	DangerPct = 80.0
+)
+
+// PressureLevel classifies a used percentage for renderer-specific coloring.
+type PressureLevel int
+
+const (
+	// PressureOK is below WarnPct.
+	PressureOK PressureLevel = iota
+	// PressureWarn is at or above WarnPct and below DangerPct.
+	PressureWarn
+	// PressureDanger is at or above DangerPct.
+	PressureDanger
+)
+
+// PressureFor classifies pct using the shared pressure thresholds.
+func PressureFor(pct float64) PressureLevel {
+	switch {
+	case pct >= DangerPct:
+		return PressureDanger
+	case pct >= WarnPct:
+		return PressureWarn
+	default:
+		return PressureOK
+	}
+}
+
 type Style struct {
 	Color bool
 }
@@ -28,10 +58,10 @@ func (st Style) paintPct(pct float64, s string) string {
 	if !st.Color {
 		return s
 	}
-	switch {
-	case pct >= 80:
+	switch PressureFor(pct) {
+	case PressureDanger:
 		return cRed + s + cReset
-	case pct >= 50:
+	case PressureWarn:
 		return cYellow + s + cReset
 	default:
 		return cGreen + s + cReset

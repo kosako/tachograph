@@ -10,6 +10,23 @@ import (
 
 var plain = Style{}
 
+func TestPressureFor(t *testing.T) {
+	cases := []struct {
+		pct  float64
+		want PressureLevel
+	}{
+		{49.9, PressureOK},
+		{WarnPct, PressureWarn},
+		{79.9, PressureWarn},
+		{DangerPct, PressureDanger},
+	}
+	for _, c := range cases {
+		if got := PressureFor(c.pct); got != c.want {
+			t.Errorf("PressureFor(%v) = %v, want %v", c.pct, got, c.want)
+		}
+	}
+}
+
 func TestBar(t *testing.T) {
 	cases := []struct {
 		pct  float64

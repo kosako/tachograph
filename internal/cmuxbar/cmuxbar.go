@@ -137,10 +137,10 @@ func pillColor(t schema.Tool) string {
 			max = *l.UsedPct
 		}
 	}
-	switch {
-	case max >= 80:
+	switch render.PressureFor(max) {
+	case render.PressureDanger:
 		return colorRed
-	case max >= 50:
+	case render.PressureWarn:
 		return colorYellow
 	default:
 		return colorGreen
