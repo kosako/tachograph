@@ -103,15 +103,15 @@ func PNGBase64(s schema.Status, dark bool, metric string) (string, bool) {
 }
 
 // ringColor is the fill color for the used portion: gray when stale,
-// otherwise green/yellow/red by 5h pressure.
+// otherwise green/yellow/red by pressure.
 func ringColor(t schema.Tool, frac float64) color.NRGBA {
 	if t.Stale {
 		return cGray
 	}
-	switch {
-	case frac >= 0.8:
+	switch render.PressureFor(frac * 100) {
+	case render.PressureDanger:
 		return cRed
-	case frac >= 0.5:
+	case render.PressureWarn:
 		return cYellow
 	default:
 		return cGreen

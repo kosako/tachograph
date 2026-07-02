@@ -346,10 +346,10 @@ func lineColor(t schema.Tool, pct float64) string {
 	if t.Stale {
 		return colorGray
 	}
-	switch {
-	case pct >= 80:
+	switch render.PressureFor(pct) {
+	case render.PressureDanger:
 		return attnRed()
-	case pct >= 50:
+	case render.PressureWarn:
 		return attnYellow()
 	default:
 		return ink()
