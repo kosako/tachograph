@@ -132,3 +132,17 @@ func (c Config) ToolEnabled(tool string) bool {
 	}
 	return false
 }
+
+// FilterStatus keeps only configured tools, in configured order.
+func (c Config) FilterStatus(s schema.Status) schema.Status {
+	out := s
+	out.Tools = nil
+	for _, name := range c.Tools {
+		for _, t := range s.Tools {
+			if t.Tool == name {
+				out.Tools = append(out.Tools, t)
+			}
+		}
+	}
+	return out
+}

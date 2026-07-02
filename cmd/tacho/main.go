@@ -126,8 +126,9 @@ func runSwiftbar(args []string) int {
 		swiftbar.BinPath = exe // so dropdown settings click the same binary
 	}
 	s := core.Status(core.Options{Now: now})
+	shown := cfg.FilterStatus(s)
 	if *pngOut != "" {
-		b64, ok := menubar.PNGBase64(s, dark, cfg.Menubar.Metric)
+		b64, ok := menubar.PNGBase64(shown, dark, cfg.Menubar.Metric)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
@@ -317,7 +318,7 @@ func runOnce(args []string) int {
 	fs.Parse(args)
 
 	now := time.Now()
-	s := core.Status(core.Options{Now: now, NoCache: *noCache})
+	s := config.Load().FilterStatus(core.Status(core.Options{Now: now, NoCache: *noCache}))
 	fmt.Println(render.StatusLines(s, now, style(*noColor)))
 	return 0
 }
@@ -334,7 +335,7 @@ func runWatch(args []string) int {
 	st := style(*noColor)
 	for {
 		now := time.Now()
-		s := core.Status(core.Options{Now: now})
+		s := config.Load().FilterStatus(core.Status(core.Options{Now: now}))
 		// Clear screen and home the cursor between refreshes.
 		fmt.Print("\x1b[H\x1b[2J")
 		fmt.Printf("tachograph  %s  (every %ds, ctrl-c to quit)\n\n", now.Format("15:04:05"), *interval)
@@ -386,7 +387,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	// sidebar. Fire-and-forget so the statusline stays fast.
 	if cmuxbar.Detect() {
 		if cli := cmuxbar.FindCLI(); cli != "" {
-			_ = cmuxbar.Push(cli, s, now, false)
+			_ = cmuxbar.Push(cli, config.Load().FilterStatus(s), now, false)
 		}
 	}
 	return 0
@@ -435,7 +436,8 @@ func runCmux(args []string) int {
 		err = cmuxbar.Clear(cli, true)
 	} else {
 		now := time.Now()
-		err = cmuxbar.Push(cli, core.Status(core.Options{Now: now}), now, true)
+		s := config.Load().FilterStatus(core.Status(core.Options{Now: now}))
+		err = cmuxbar.Push(cli, s, now, true)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)

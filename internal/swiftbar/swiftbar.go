@@ -61,7 +61,7 @@ var BinPath = "tacho"
 // selects the menu bar appearance; cfg selects which tools, metric, and
 // display style to show.
 func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string {
-	shown := filterTools(s, cfg)
+	shown := cfg.FilterStatus(s)
 
 	var b strings.Builder
 	b.WriteString(titleLine(shown, dark, cfg))
@@ -138,20 +138,6 @@ func clickOption(b *strings.Builder, depth int, label string, params ...string) 
 		fmt.Fprintf(b, " param%d=%q", i+1, p)
 	}
 	b.WriteByte('\n')
-}
-
-// filterTools keeps only the configured tools, in configured order.
-func filterTools(s schema.Status, cfg config.Config) schema.Status {
-	out := s
-	out.Tools = nil
-	for _, name := range cfg.Tools {
-		for _, t := range s.Tools {
-			if t.Tool == name {
-				out.Tools = append(out.Tools, t)
-			}
-		}
-	}
-	return out
 }
 
 // titleLine is the menu bar representation. With the meter style it is a
