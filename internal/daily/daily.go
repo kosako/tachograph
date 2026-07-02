@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/pricing"
@@ -33,15 +34,33 @@ func (t Totals) Schema() *schema.Daily {
 	return d
 }
 
-// ClaudeSessionToday totals today's new tokens and estimated cost for a single
-// Claude session transcript (used for the {tool.*.session.today} scope). It
-// reuses the same per-message accounting as ClaudeTotals, restricted to one
-// file. A fresh dedup set is fine: one session can't duplicate across files.
+// ClaudeSessionToday totals today's new tokens and estimated cost for one
+// Claude session transcript plus its nested subagent/workflow transcripts
+// (used for the {tool.*.session.today} scope). It reuses the same per-message
+// accounting as ClaudeTotals with a fresh dedup set for that session tree.
 func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Table) Totals {
 	if transcriptPath == "" {
 		return Totals{}
 	}
-	return claudeFileTotals(transcriptPath, now.Local().Format("2006-01-02"), prices, map[usageKey]bool{})
+	day := now.Local().Format("2006-01-02")
+	seen := map[usageKey]bool{}
+	out := claudeFileTotals(transcriptPath, day, prices, seen)
+
+	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
+	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
+		if err != nil || f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+			return nil
+		}
+		info, err := f.Info()
+		if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
+			return nil
+		}
+		ft := claudeFileTotals(path, day, prices, seen)
+		out.Tokens += ft.Tokens
+		out.Cost += ft.Cost
+		return nil
+	})
+	return out
 }
 
 // ClaudeTotals sums today's new tokens and estimated cost across every Claude
@@ -69,21 +88,22 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 		if !d.IsDir() {
 			continue
 		}
-		files, err := os.ReadDir(filepath.Join(projects, d.Name()))
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
-				continue
+		projectDir := filepath.Join(projects, d.Name())
+		err := filepath.WalkDir(projectDir, func(path string, f os.DirEntry, err error) error {
+			if err != nil || f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+				return nil
 			}
 			info, err := f.Info()
 			if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
-				continue // only files touched today can hold today's messages
+				return nil // only files touched today can hold today's messages
 			}
-			ft := claudeFileTotals(filepath.Join(projects, d.Name(), f.Name()), day, prices, seen)
+			ft := claudeFileTotals(path, day, prices, seen)
 			out.Tokens += ft.Tokens
 			out.Cost += ft.Cost
+			return nil
+		})
+		if err != nil {
+			continue
 		}
 	}
 	return out
@@ -96,18 +116,26 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 // once — across its blocks and across files duplicated by resume/compaction.
 type usageKey struct{ id, req string }
 
+type claudeUsage struct {
+	InputTokens              int64                `json:"input_tokens"`
+	CacheCreationInputTokens int64                `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64                `json:"cache_read_input_tokens"`
+	OutputTokens             int64                `json:"output_tokens"`
+	CacheCreation            *claudeCacheCreation `json:"cache_creation"`
+}
+
+type claudeCacheCreation struct {
+	Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens"`
+}
+
 type claudeLine struct {
 	Timestamp string `json:"timestamp"`
 	RequestID string `json:"requestId"`
 	Message   *struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-		Usage *struct {
-			InputTokens              int64 `json:"input_tokens"`
-			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-			OutputTokens             int64 `json:"output_tokens"`
-		} `json:"usage"`
+		ID    string       `json:"id"`
+		Model string       `json:"model"`
+		Usage *claudeUsage `json:"usage"`
 	} `json:"message"`
 }
 
@@ -142,13 +170,39 @@ func claudeFileTotals(path, day string, prices pricing.Table, seen map[usageKey]
 			seen[k] = true
 		}
 		u := line.Message.Usage
+		cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := claudeCacheWrites(u)
 		// New tokens exclude cache reads (same context re-read each message).
-		out.Tokens += u.InputTokens + u.CacheCreationInputTokens + u.OutputTokens
+		out.Tokens += u.InputTokens + cacheWriteTotal + u.OutputTokens
 		if r, ok := prices.For(line.Message.Model); ok {
-			out.Cost += r.Cost(u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens)
+			out.Cost += claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 		}
 	}
 	return out
+}
+
+func claudeCacheWrites(u *claudeUsage) (fiveMinute, oneHour, unknown, total int64) {
+	if u == nil {
+		return 0, 0, 0, 0
+	}
+	total = u.CacheCreationInputTokens
+	if u.CacheCreation == nil {
+		return 0, 0, total, total
+	}
+	fiveMinute = u.CacheCreation.Ephemeral5mInputTokens
+	oneHour = u.CacheCreation.Ephemeral1hInputTokens
+	known := fiveMinute + oneHour
+	if total >= known {
+		return fiveMinute, oneHour, total - known, total
+	}
+	return fiveMinute, oneHour, 0, known
+}
+
+func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
+	return (float64(in)*r.In +
+		float64(cacheWrite5m+cacheWriteUnknown)*r.CacheWrite +
+		float64(cacheWrite1h)*r.In*2 +
+		float64(cacheRead)*r.CacheRead +
+		float64(out)*r.Out) / 1_000_000
 }
 
 // CodexTotals sums today's new tokens and estimated cost across Codex

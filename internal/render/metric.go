@@ -11,8 +11,8 @@ const (
 	MetricLimit5h     = "limit_5h"     // 5-hour rate-limit usage %
 	MetricLimitWeekly = "limit_weekly" // weekly rate-limit usage %
 	MetricContext     = "context"      // context window usage %
-	MetricCost        = "cost"         // estimated session cost
-	MetricTokens      = "tokens"       // session token count
+	MetricCost        = "cost"         // estimated daily API cost
+	MetricTokens      = "tokens"       // daily token count
 )
 
 // Metrics lists every metric (used for the dropdown's full readout and for

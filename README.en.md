@@ -272,10 +272,11 @@ tacho config set tools codex            # show only Codex
 
 #### Cost price table (approximate, overridable)
 
-`cost` and `tokens` are **today's totals across all sessions**. Cost is
-estimated from a per-model price table (tokens × rate). Prices are rough, not
-exact, so override or extend them in `~/.config/tachograph/pricing.json` (USD
-per million tokens):
+`cost` and `tokens` are **today's totals across all sessions**. For Claude Code,
+this includes regular sessions plus subagents / workflows transcripts under
+those sessions. Cost is estimated from a per-model price table (tokens × rate).
+Prices are rough, not exact, so override or extend them in
+`~/.config/tachograph/pricing.json` (USD per million tokens):
 
 ```json
 {
@@ -287,9 +288,11 @@ per million tokens):
 Only the fields you set override the built-in defaults (e.g. set just `input`
 and the other rates stay at their defaults — partial overrides merge). A **new
 model id** not in the table has no defaults, so any rate you leave out is `0`.
-Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`). Models not
-in the price table are excluded from the cost calculation and don't count toward
-the total (if no priced model ran that day, cost shows as unknown, `--`).
+Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`). When a
+Claude transcript records 1-hour cache writes, they are priced at 2x the input
+rate. Models not in the price table are excluded from the cost calculation and
+don't count toward the total (if no priced model ran that day, cost shows as
+unknown, `--`).
 
 ### Codex TUI
 
