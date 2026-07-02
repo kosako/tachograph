@@ -136,6 +136,27 @@ func TestFromTranscripts(t *testing.T) {
 	}
 }
 
+func TestCollectUsesClaudeConfigDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"timestamp":"2026-06-12T12:00:00Z","sessionId":"env-root","cwd":"/x","message":{"model":"claude-x","usage":{"input_tokens":10,"output_tokens":5}}}`
+	writeTranscript(t, dir, "env.jsonl", line, time.Unix(1000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	got := Collect(Options{Now: now, Getenv: noEnv})
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
+	}
+	if got.Session == nil || got.Session.ID == nil || *got.Session.ID != "env-root" {
+		t.Fatalf("Session = %+v, want CLAUDE_CONFIG_DIR transcript", got.Session)
+	}
+}
+
 func TestNoTranscripts(t *testing.T) {
 	got := Collect(Options{Root: t.TempDir(), Getenv: noEnv})
 	if got.Available {

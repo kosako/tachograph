@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -64,14 +65,13 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 }
 
 // ClaudeTotals sums today's new tokens and estimated cost across every Claude
-// transcript message under <root>/projects. root defaults to ~/.claude.
+// transcript message under <root>/projects. root defaults to CLAUDE_CONFIG_DIR
+// or ~/.claude.
 func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Totals{}
-		}
-		root = filepath.Join(home, ".claude")
+	var ok bool
+	root, ok = agentpath.ClaudeRoot(root)
+	if !ok {
+		return Totals{}
 	}
 	day := now.Local().Format("2006-01-02")
 	var out Totals
@@ -208,15 +208,13 @@ func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnk
 }
 
 // CodexTotals sums today's new tokens and estimated cost across Codex
-// sessions. root defaults to ~/.codex; today's sessions live under
-// sessions/YYYY/MM/DD.
+// sessions. root defaults to CODEX_HOME or ~/.codex; today's sessions live
+// under sessions/YYYY/MM/DD.
 func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Totals{}
-		}
-		root = filepath.Join(home, ".codex")
+	var ok bool
+	root, ok = agentpath.CodexRoot(root)
+	if !ok {
+		return Totals{}
 	}
 	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
 	entries, err := os.ReadDir(dayDir)
