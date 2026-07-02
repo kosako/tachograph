@@ -105,3 +105,26 @@ func TestToolEnabled(t *testing.T) {
 		t.Errorf("ToolEnabled mismatch: %+v", c)
 	}
 }
+
+func TestFilterStatusUsesConfiguredOrder(t *testing.T) {
+	c := Config{Tools: []string{schema.ToolCodex, schema.ToolClaudeCode}}
+	s := schema.Status{Tools: []schema.Tool{
+		{Tool: schema.ToolClaudeCode},
+		{Tool: schema.ToolCodex},
+	}}
+
+	got := c.FilterStatus(s)
+	if len(got.Tools) != 2 || got.Tools[0].Tool != schema.ToolCodex || got.Tools[1].Tool != schema.ToolClaudeCode {
+		t.Fatalf("FilterStatus tools = %+v", got.Tools)
+	}
+}
+
+func TestFilterStatusHonorsEmptyTools(t *testing.T) {
+	got := (Config{Tools: []string{}}).FilterStatus(schema.Status{Tools: []schema.Tool{
+		{Tool: schema.ToolClaudeCode},
+		{Tool: schema.ToolCodex},
+	}})
+	if len(got.Tools) != 0 {
+		t.Fatalf("FilterStatus tools = %+v, want empty", got.Tools)
+	}
+}
