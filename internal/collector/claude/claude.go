@@ -50,10 +50,7 @@ func errTool(code, msg string) schema.Tool {
 	return t
 }
 
-// detectBackend distinguishes the auth backend. Rate-limit windows only
-// exist for subscription auth; Bedrock/Vertex/API-key all degrade to
-// limits=null. ANTHROPIC_API_KEY marks pay-as-you-go API usage, which has
-// no subscription windows and must not be mislabelled as subscription.
+// detectBackend distinguishes the auth backend from process environment.
 func detectBackend(getenv func(string) string) string {
 	switch {
 	case truthy(getenv("CLAUDE_CODE_USE_BEDROCK")):
@@ -68,6 +65,21 @@ func detectBackend(getenv func(string) string) string {
 
 func truthy(v string) bool {
 	return v != "" && v != "0" && v != "false"
+}
+
+// backendFromStatusline lets Claude Code's live payload override an ambient
+// ANTHROPIC_API_KEY from other tools. Explicit Bedrock/Vertex env still wins:
+// those backends do not expose subscription windows.
+func backendFromStatusline(getenv func(string) string, rl *statuslineRateLimits) string {
+	backend := detectBackend(getenv)
+	if backend == schema.BackendAPI && hasRateLimitWindow(rl) {
+		return schema.BackendSubscription
+	}
+	return backend
+}
+
+func hasRateLimitWindow(rl *statuslineRateLimits) bool {
+	return rl != nil && (rl.FiveHour != nil || rl.SevenDay != nil)
 }
 
 // StatuslineInput mirrors the JSON Claude Code pipes to the statusline
@@ -96,10 +108,12 @@ type StatuslineInput struct {
 		UsedPercentage    *float64 `json:"used_percentage"`
 		CurrentUsage      *usage   `json:"current_usage"`
 	} `json:"context_window"`
-	RateLimits *struct {
-		FiveHour *slWindow `json:"five_hour"`
-		SevenDay *slWindow `json:"seven_day"`
-	} `json:"rate_limits"`
+	RateLimits *statuslineRateLimits `json:"rate_limits"`
+}
+
+type statuslineRateLimits struct {
+	FiveHour *slWindow `json:"five_hour"`
+	SevenDay *slWindow `json:"seven_day"`
 }
 
 type slWindow struct {
@@ -122,7 +136,7 @@ func fromStatusline(opts Options) schema.Tool {
 	t := schema.Tool{
 		Tool:      schema.ToolClaudeCode,
 		Available: true,
-		Backend:   detectBackend(opts.Getenv),
+		Backend:   backendFromStatusline(opts.Getenv, in.RateLimits),
 	}
 	collected := opts.Now.Local().Format(time.RFC3339)
 	t.CollectedAt = &collected // stdin data is live by definition
