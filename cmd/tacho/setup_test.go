@@ -27,11 +27,25 @@ func TestSetupWriteBackupNotClobberedOnRerun(t *testing.T) {
 	if b, err := os.ReadFile(bak); err != nil || !bytes.Equal(b, original) {
 		t.Fatalf(".bak after first write = %s (err %v), want the original settings", b, err)
 	}
+	requirePerm(t, bak, 0o600)
+	requirePerm(t, settings, 0o600)
 
 	if code := runSetup([]string{"claude", "--write"}); code != 0 {
 		t.Fatalf("second --write returned %d", code)
 	}
 	if b, _ := os.ReadFile(bak); !bytes.Equal(b, original) {
 		t.Errorf(".bak clobbered on rerun: got %s, want the original settings preserved", b)
+	}
+}
+
+func requirePerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %v, want %v", path, got, want)
 	}
 }
