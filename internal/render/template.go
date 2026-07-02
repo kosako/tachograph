@@ -109,7 +109,7 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		if t.Plan == nil {
 			return Missing
 		}
-		return *t.Plan
+		return DisplayText(*t.Plan)
 	case "cwd":
 		if t.Session == nil || t.Session.CWD == nil {
 			return Missing
