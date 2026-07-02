@@ -12,11 +12,12 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
 type Options struct {
-	Root            string    // Claude home, defaults to ~/.claude
+	Root            string    // Claude home, defaults to CLAUDE_CONFIG_DIR or ~/.claude
 	Now             time.Time // defaults to time.Now()
 	StatuslineInput []byte    // raw stdin JSON; when set it is the primary source
 	Getenv          func(string) string
@@ -29,12 +30,10 @@ func Collect(opts Options) schema.Tool {
 	if opts.Getenv == nil {
 		opts.Getenv = os.Getenv
 	}
-	if opts.Root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return errTool("home_dir", err.Error())
-		}
-		opts.Root = filepath.Join(home, ".claude")
+	if root, ok := agentpath.ClaudeRoot(opts.Root); ok {
+		opts.Root = root
+	} else {
+		return errTool("home_dir", "cannot locate the home directory")
 	}
 
 	if len(opts.StatuslineInput) > 0 {

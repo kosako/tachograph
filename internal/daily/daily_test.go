@@ -102,6 +102,19 @@ func TestClaudeTokens(t *testing.T) {
 	}
 }
 
+func TestClaudeTotalsUsesClaudeConfigDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+	now := time.Now()
+
+	writeFile(t, filepath.Join(root, "projects", "p", "today.jsonl"),
+		claudeMsg(now, 10, 20, 100, 5)+"\n", now)
+
+	if got := ClaudeTotals("", now, noPrices).Tokens; got != 35 {
+		t.Errorf("ClaudeTotals(empty root).Tokens = %d, want 35 from CLAUDE_CONFIG_DIR", got)
+	}
+}
+
 func TestClaudeCostWithCacheCreationTTL(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
@@ -255,6 +268,19 @@ func TestCodexTotals(t *testing.T) {
 	prices := pricing.Table{"gpt-5": {In: 2}}
 	if cost := CodexTotals(root, now, prices).Cost; cost != 1500*2.0/1e6 {
 		t.Errorf("CodexTotals.Cost = %v, want %v", cost, 1500*2.0/1e6)
+	}
+}
+
+func TestCodexTotalsUsesCodexHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	now := time.Now()
+
+	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
+	writeFile(t, filepath.Join(dayDir, "s1.jsonl"), codexSession(1000), now)
+
+	if got := CodexTotals("", now, noPrices).Tokens; got != 1000 {
+		t.Errorf("CodexTotals(empty root).Tokens = %d, want 1000 from CODEX_HOME", got)
 	}
 }
 

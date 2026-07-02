@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -28,18 +29,14 @@ const tailBytes = 512 * 1024
 const staleAfterMinutes = 300
 
 type Options struct {
-	Root string    // Codex home, defaults to ~/.codex
+	Root string    // Codex home, defaults to CODEX_HOME or ~/.codex
 	Now  time.Time // defaults to time.Now()
 }
 
 func Collect(opts Options) schema.Tool {
-	root := opts.Root
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return errTool("home_dir", err.Error())
-		}
-		root = filepath.Join(home, ".codex")
+	root, ok := agentpath.CodexRoot(opts.Root)
+	if !ok {
+		return errTool("home_dir", "cannot locate the home directory")
 	}
 	now := opts.Now
 	if now.IsZero() {

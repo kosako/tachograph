@@ -116,6 +116,28 @@ func TestCollectNoSessions(t *testing.T) {
 	}
 }
 
+func TestCollectUsesCodexHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-c494201693fa.jsonl"
+	writeRollout(t, day, name,
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-env", "/x")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150), time.Unix(1000, 0))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:30:00Z")
+	got := Collect(Options{Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-env" {
+		t.Fatalf("Model = %+v, want CODEX_HOME session", got.Model)
+	}
+}
+
 // TestCollectRealHome runs against the real ~/.codex. Opt-in:
 //
 //	TACHO_E2E=1 go test ./internal/collector/codex -run RealHome -v
