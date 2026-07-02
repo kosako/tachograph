@@ -252,7 +252,7 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 		header += " — " + render.ModelShort(t.Model)
 	}
 	if t.Plan != nil {
-		header += " (" + *t.Plan + ")"
+		header += " (" + render.DisplayText(*t.Plan) + ")"
 	}
 	headerColor := ink()
 	if t.Stale && t.CollectedAt != nil {

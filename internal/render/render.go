@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -164,9 +165,20 @@ func ModelShort(m *schema.Model) string {
 		return "--"
 	}
 	if m.DisplayName != nil && *m.DisplayName != "" {
-		return *m.DisplayName
+		return DisplayText(*m.DisplayName)
 	}
-	return strings.TrimPrefix(m.ID, "claude-")
+	return DisplayText(strings.TrimPrefix(m.ID, "claude-"))
+}
+
+// DisplayText removes characters that can break line-oriented renderers or
+// inject renderer parameters.
+func DisplayText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '|' || unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // ToolLine renders one tool as a single compact line.

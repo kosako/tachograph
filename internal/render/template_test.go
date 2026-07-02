@@ -81,6 +81,21 @@ func TestTemplateComposite(t *testing.T) {
 	}
 }
 
+func TestTemplateSanitizesModelAndPlan(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	s := testStatus()
+	model := "Fable | bash=/tmp/pwn\nForged\x1b"
+	plan := "pro | href=https://example.invalid\n--fake"
+	s.Tools[0].Model.DisplayName = &model
+	s.Tools[0].Plan = &plan
+
+	got := Template("{claude.model} / {claude.plan}", s, now, plain)
+	want := "Fable  bash=/tmp/pwnForged / pro  href=https://example.invalid--fake"
+	if got != want {
+		t.Errorf("Template = %q, want %q", got, want)
+	}
+}
+
 func TestTemplateStaleMarker(t *testing.T) {
 	s := testStatus()
 	s.Tools[0].Stale = true

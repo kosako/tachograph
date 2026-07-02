@@ -164,6 +164,31 @@ func TestRenderSettingsMenu(t *testing.T) {
 	}
 }
 
+func TestRenderSanitizesHeaderText(t *testing.T) {
+	now := time.Now()
+	model := "Fable | bash=/tmp/pwn\nForged\x1b"
+	plan := "pro | href=https://example.invalid\n--fake"
+	tl := tool(schema.ToolCodex, false, 24, 41)
+	tl.Model = &schema.Model{ID: "gpt-safe", DisplayName: &model}
+	tl.Plan = &plan
+
+	out := Render(schema.Status{Tools: []schema.Tool{tl}}, now, true, config.Default())
+	for _, bad := range []string{
+		"Fable | bash=/tmp/pwn",
+		"\nForged",
+		"pro | href=https://example.invalid",
+		"\n--fake",
+		"\x1b",
+	} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("SwiftBar output contains unsanitized header text %q:\n%s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "Codex — Fable  bash=/tmp/pwnForged (pro  href=https://example.invalid--fake) | color=") {
+		t.Fatalf("sanitized header missing:\n%s", out)
+	}
+}
+
 func TestRenderToolFilter(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{
