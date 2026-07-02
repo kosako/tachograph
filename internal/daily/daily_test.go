@@ -35,6 +35,15 @@ func claudeMsgID(ts time.Time, id, req string, in, cc, cr, out int64) string {
 		ts.Format(time.RFC3339), req, id, in, cc, cr, out)
 }
 
+func claudeMsgCacheCreation(ts time.Time, in, cc5m, cc1h, cr, out int64) string {
+	return claudeMsgCacheCreationTotal(ts, in, cc5m+cc1h, cc5m, cc1h, cr, out)
+}
+
+func claudeMsgCacheCreationTotal(ts time.Time, in, totalCC, cc5m, cc1h, cr, out int64) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d,"output_tokens":%d,"cache_creation":{"ephemeral_5m_input_tokens":%d,"ephemeral_1h_input_tokens":%d}}}}`,
+		ts.Format(time.RFC3339), in, totalCC, cr, out, cc5m, cc1h)
+}
+
 // TestSameDayLocalBoundary pins the local-day boundary used to slice "today":
 // the first and last instant of the calendar day count, one second either side
 // does not. sameDay compares formatted calendar dates (no 24h arithmetic), so
@@ -93,6 +102,44 @@ func TestClaudeTokens(t *testing.T) {
 	}
 }
 
+func TestClaudeCostWithCacheCreationTTL(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeFile(t, filepath.Join(root, "projects", "p", "today.jsonl"),
+		claudeMsgCacheCreation(now, 100, 200, 300, 1000, 10)+"\n", now)
+
+	prices := pricing.Table{"claude-fable": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}}
+	got := ClaudeTotals(root, now, prices)
+	if got.Tokens != 100+200+300+10 {
+		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got.Tokens, 100+200+300+10)
+	}
+	// API estimate: 5m cache write uses cache_write, 1h cache write uses 2x input,
+	// cache read uses the API cache-read price.
+	wantCost := (100*10.0 + 200*12.5 + 300*20.0 + 1000*1.0 + 10*50.0) / 1e6
+	if diff := got.Cost - wantCost; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("ClaudeTotals.Cost = %v, want %v", got.Cost, wantCost)
+	}
+}
+
+func TestClaudeCostClampsInconsistentCacheCreationTTL(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeFile(t, filepath.Join(root, "projects", "p", "today.jsonl"),
+		claudeMsgCacheCreationTotal(now, 100, 250, 200, 300, 1000, 10)+"\n", now)
+
+	prices := pricing.Table{"claude-fable": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}}
+	got := ClaudeTotals(root, now, prices)
+	if got.Tokens != 100+250+10 {
+		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got.Tokens, 100+250+10)
+	}
+	// The TTL split exceeds the top-level total, so the authoritative total is
+	// counted once as unknown cache creation instead of over-counting the split.
+	wantCost := (100*10.0 + 250*12.5 + 1000*1.0 + 10*50.0) / 1e6
+	if diff := got.Cost - wantCost; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("ClaudeTotals.Cost = %v, want %v", got.Cost, wantCost)
+	}
+}
+
 func TestClaudeSessionToday(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
@@ -115,6 +162,39 @@ func TestClaudeSessionToday(t *testing.T) {
 	}
 	if got := ClaudeSessionToday(filepath.Join(root, "nope.jsonl"), now, noPrices); got.Tokens != 0 {
 		t.Errorf("missing file = %+v, want zero", got)
+	}
+}
+
+func TestClaudeTotalsIncludesSubagentsAndWorkflows(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath,
+		claudeMsg(now, 10, 20, 100, 5)+"\n", now)
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "agent-a.jsonl"),
+		claudeMsg(now, 1, 2, 50, 3)+"\n", now)
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "workflows", "wf_123", "agent-b.jsonl"),
+		claudeMsg(now, 4, 5, 60, 6)+"\n", now)
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "workflows", "wf_123", "journal.jsonl"),
+		`{"timestamp":"`+now.Format(time.RFC3339)+`","event":"started"}`+"\n", now)
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "old-agent.jsonl"),
+		claudeMsg(yesterday, 1000, 1000, 1000, 1000)+"\n", yesterday)
+
+	if got := ClaudeTotals(root, now, noPrices).Tokens; got != int64(35+6+15) {
+		t.Errorf("ClaudeTotals.Tokens = %d, want %d (main + subagent + workflow)", got, 35+6+15)
+	}
+
+	prices := pricing.Table{"claude-fable": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}}
+	wantCost := (10*15.0+20*18.75+100*1.5+5*75)/1e6 +
+		(1*15.0+2*18.75+50*1.5+3*75)/1e6 +
+		(4*15.0+5*18.75+60*1.5+6*75)/1e6
+	if cost := ClaudeTotals(root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
+		t.Errorf("ClaudeTotals.Cost = %v, want %v", cost, wantCost)
+	}
+	if got := ClaudeSessionToday(mainPath, now, noPrices).Tokens; got != int64(35+6+15) {
+		t.Errorf("ClaudeSessionToday.Tokens = %d, want %d (main + subagent + workflow)", got, 35+6+15)
 	}
 }
 

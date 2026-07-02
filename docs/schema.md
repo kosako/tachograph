@@ -87,6 +87,7 @@
 | `limits` | nullable。配列のときは `window_minutes` 昇順 |
 | `used_pct` | 0–100。「使った割合」。残量表示はレンダラ側で `100 - used_pct` |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト) |
+| `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算 |
 
 ## データソース対応表
 
@@ -102,6 +103,9 @@
 
 Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`
 の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
+`daily` は `projects` 配下の通常セッションに加え、同セッション配下の subagents / workflows
+transcript も集計する。`session_today` も現セッション transcript と、その同名セッション
+ディレクトリ配下の subagents / workflows transcript を集計する。
 
 ## バージョニング
 
