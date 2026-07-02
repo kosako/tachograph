@@ -36,7 +36,10 @@ func claudeMsgID(ts time.Time, id, req string, in, cc, cr, out int64) string {
 }
 
 func claudeMsgCacheCreation(ts time.Time, in, cc5m, cc1h, cr, out int64) string {
-	totalCC := cc5m + cc1h
+	return claudeMsgCacheCreationTotal(ts, in, cc5m+cc1h, cc5m, cc1h, cr, out)
+}
+
+func claudeMsgCacheCreationTotal(ts time.Time, in, totalCC, cc5m, cc1h, cr, out int64) string {
 	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d,"output_tokens":%d,"cache_creation":{"ephemeral_5m_input_tokens":%d,"ephemeral_1h_input_tokens":%d}}}}`,
 		ts.Format(time.RFC3339), in, totalCC, cr, out, cc5m, cc1h)
 }
@@ -113,6 +116,25 @@ func TestClaudeCostWithCacheCreationTTL(t *testing.T) {
 	// API estimate: 5m cache write uses cache_write, 1h cache write uses 2x input,
 	// cache read uses the API cache-read price.
 	wantCost := (100*10.0 + 200*12.5 + 300*20.0 + 1000*1.0 + 10*50.0) / 1e6
+	if diff := got.Cost - wantCost; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("ClaudeTotals.Cost = %v, want %v", got.Cost, wantCost)
+	}
+}
+
+func TestClaudeCostClampsInconsistentCacheCreationTTL(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeFile(t, filepath.Join(root, "projects", "p", "today.jsonl"),
+		claudeMsgCacheCreationTotal(now, 100, 250, 200, 300, 1000, 10)+"\n", now)
+
+	prices := pricing.Table{"claude-fable": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}}
+	got := ClaudeTotals(root, now, prices)
+	if got.Tokens != 100+250+10 {
+		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got.Tokens, 100+250+10)
+	}
+	// The TTL split exceeds the top-level total, so the authoritative total is
+	// counted once as unknown cache creation instead of over-counting the split.
+	wantCost := (100*10.0 + 250*12.5 + 1000*1.0 + 10*50.0) / 1e6
 	if diff := got.Cost - wantCost; diff > 1e-9 || diff < -1e-9 {
 		t.Errorf("ClaudeTotals.Cost = %v, want %v", got.Cost, wantCost)
 	}

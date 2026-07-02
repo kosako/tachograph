@@ -194,7 +194,9 @@ func claudeCacheWrites(u *claudeUsage) (fiveMinute, oneHour, unknown, total int6
 	if total >= known {
 		return fiveMinute, oneHour, total - known, total
 	}
-	return fiveMinute, oneHour, 0, known
+	// Trust the top-level total when the TTL breakdown is inconsistent; there
+	// is no reliable way to reconstruct the 5m/1h split from malformed logs.
+	return 0, 0, total, total
 }
 
 func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
