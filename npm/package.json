@@ -1,6 +1,6 @@
 {
   "name": "tachograph",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "A compact instrument cluster for your coding agents (Claude Code / Codex). Shows model, rate-limit usage, and context at a glance.",
   "keywords": [
     "claude-code",
