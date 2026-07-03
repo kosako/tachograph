@@ -88,7 +88,7 @@ tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
 tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
-tacho doctor           # インストール先・PATH・設定の診断
+tacho doctor           # インストール先・データソース・キャッシュ・連携の診断
 ```
 
 ```
@@ -119,7 +119,7 @@ PATHが通っていれば `tacho statusline`、通っていなければ解決済
 }
 ```
 
-うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・statusLineの設定状況を診断します。
+うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・cmux/SwiftBar連携・statusLineの設定状況を診断します。
 
 Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります)。
 

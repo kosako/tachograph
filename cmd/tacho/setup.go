@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/setup"
 )
 
@@ -90,58 +89,6 @@ func runSetup(args []string) int {
 	return 0
 }
 
-func runDoctor(args []string) int {
-	exe := resolveExe()
-	onPath := tachoOnPath()
-
-	fmt.Println("tachograph doctor")
-	fmt.Println()
-
-	fmt.Println("binary:")
-	fmt.Println("  version:   " + buildVersion())
-	if exe != "" {
-		fmt.Println("  running:   " + exe)
-	} else {
-		fmt.Println("  running:   (unknown)")
-	}
-	if onPath {
-		if p, err := exec.LookPath("tacho"); err == nil {
-			fmt.Println("  on PATH:   yes (" + p + ")")
-		} else {
-			fmt.Println("  on PATH:   yes")
-		}
-	} else {
-		fmt.Println("  on PATH:   no — `tacho` won't resolve; use an absolute path")
-		if gobin := goBin(); gobin != "" {
-			fmt.Println("  go bin:    " + gobin + "  (add to PATH, or this is where `go install` put it)")
-		}
-	}
-	fmt.Println()
-
-	fmt.Println("config (" + config.Dir() + "):")
-	reportFile("config.json", filepath.Join(config.Dir(), "config.json"))
-	reportFile("statusline.tmpl", filepath.Join(config.Dir(), "statusline.tmpl"))
-	reportFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"))
-	fmt.Println()
-
-	path := claudeSettingsPath()
-	fmt.Println("Claude Code statusLine (" + path + "):")
-	switch cmd := claudeStatusLineCommand(path); {
-	case cmd == "(missing)":
-		fmt.Println("  not configured — run `tacho setup claude --write`")
-	case cmd == "(no statusLine)":
-		fmt.Println("  settings.json exists but has no statusLine — run `tacho setup claude --write`")
-	case cmd == "(unreadable)":
-		fmt.Println("  settings.json is not valid JSON — fix it, then `tacho setup claude`")
-	default:
-		fmt.Println("  command:   " + cmd)
-		if !statusLineResolves(cmd) {
-			fmt.Println("  warning:   that command does not resolve — re-run `tacho setup claude --write`")
-		}
-	}
-	return 0
-}
-
 // resolveExe returns the absolute path to the running binary, following
 // symlinks so the snippet points at the real file.
 func resolveExe() string {
@@ -186,14 +133,6 @@ func claudeSettingsPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".claude", "settings.json")
-}
-
-func reportFile(label, path string) {
-	if _, err := os.Stat(path); err == nil {
-		fmt.Println("  " + label + ":  present")
-	} else {
-		fmt.Println("  " + label + ":  (default)")
-	}
 }
 
 // claudeStatusLineCommand extracts the configured statusLine command, or a

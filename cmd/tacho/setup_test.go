@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/kosako/tachograph/internal/schema"
 )
 
 // Re-running `setup claude --write` must not clobber the .bak: the merge is
@@ -47,5 +51,73 @@ func requirePerm(t *testing.T, path string, want os.FileMode) {
 	}
 	if got := info.Mode().Perm(); got != want {
 		t.Fatalf("%s mode = %v, want %v", path, got, want)
+	}
+}
+
+func TestNewestJSONLPicksNewestNestedFile(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "projects", "old.jsonl")
+	newPath := filepath.Join(root, "sessions", "2026", "07", "02", "new.jsonl")
+	if err := os.MkdirAll(filepath.Dir(oldPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	newTime := oldTime.Add(2 * time.Hour)
+	if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+
+	got, count, err := newestJSONL(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+	if !got.Equal(newTime) {
+		t.Fatalf("newest = %v, want %v", got, newTime)
+	}
+}
+
+func TestDoctorErrorHints(t *testing.T) {
+	got := doctorErrorHint(schema.ToolCodex, "no_token_count")
+	if !strings.Contains(got, "token_count") || !strings.Contains(got, "CODEX_HOME") {
+		t.Fatalf("Codex no_token_count hint = %q", got)
+	}
+	got = doctorErrorHint(schema.ToolClaudeCode, "no_usage")
+	if !strings.Contains(got, "Claude Code") || !strings.Contains(got, "usage") {
+		t.Fatalf("Claude no_usage hint = %q", got)
+	}
+}
+
+func TestSwiftBarPluginCandidates(t *testing.T) {
+	swiftDir := t.TempDir()
+	xbarDir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("SWIFTBAR_PLUGIN_DIR", swiftDir)
+	t.Setenv("XBAR_PLUGIN_PATH", xbarDir)
+	t.Setenv("HOME", home)
+
+	got := strings.Join(swiftBarPluginCandidates(), "\n")
+	for _, want := range []string{
+		filepath.Join(swiftDir, "tacho.30s.sh"),
+		filepath.Join(xbarDir, "tacho.30s.sh"),
+		filepath.Join(home, "Library", "Application Support", "SwiftBar", "Plugins", "tacho.30s.sh"),
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("swiftBarPluginCandidates() missing %q in:\n%s", want, got)
+		}
 	}
 }
