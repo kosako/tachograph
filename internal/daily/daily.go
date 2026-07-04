@@ -207,46 +207,112 @@ func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnk
 		float64(out)*r.Out) / 1_000_000
 }
 
+// codexScanDays is how many day directories (today and previous) CodexTotals
+// scans. Rollouts live in their session's START-day directory, so a session
+// running past midnight keeps writing to an older day's file; reading only
+// today's directory would miss its today-portion entirely (#133). Matches the
+// collector's cross-day comparison window.
+const codexScanDays = 3
+
 // CodexTotals sums today's new tokens and estimated cost across Codex
-// sessions. root defaults to CODEX_HOME or ~/.codex; today's sessions live
-// under sessions/YYYY/MM/DD.
+// sessions. root defaults to CODEX_HOME or ~/.codex. total_token_usage is
+// cumulative per session, so each session contributes its growth since local
+// midnight: the last cumulative snapshot minus the last snapshot before today
+// (zero for sessions started today).
 func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 	var ok bool
 	root, ok = agentpath.CodexRoot(root)
 	if !ok {
 		return Totals{}
 	}
-	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
-	entries, err := os.ReadDir(dayDir)
-	if err != nil {
-		return Totals{}
-	}
+	local := now.Local()
+	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+
 	var out Totals
-	// total_token_usage is cumulative per session. Dedup by session id (the UUID
-	// in the rollout filename) keeping the largest cumulative, so a session that
-	// resumed into a second file isn't counted twice. Files without a parseable
-	// id can't be deduped and are summed as-is.
-	bySession := map[string]Totals{}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+	// Dedup by session id (the UUID in the rollout filename) keeping the
+	// largest cumulative on each side of midnight, so a session that resumed
+	// into a second file isn't counted twice. Files without a parseable id
+	// can't be deduped and are summed as-is.
+	bySession := map[string]*codexRollout{}
+	for back := 0; back < codexScanDays; back++ {
+		day := local.AddDate(0, 0, -back)
+		dayDir := filepath.Join(root, "sessions", day.Format("2006"), day.Format("01"), day.Format("02"))
+		entries, err := os.ReadDir(dayDir)
+		if err != nil {
 			continue
 		}
-		st := codexSessionTotals(filepath.Join(dayDir, e.Name()), prices)
-		m := codexSessionIDRe.FindStringSubmatch(e.Name())
-		if m == nil {
-			out.Tokens += st.Tokens
-			out.Cost += st.Cost
-			continue
-		}
-		if prev, ok := bySession[m[1]]; !ok || st.Tokens > prev.Tokens {
-			bySession[m[1]] = st
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+				continue
+			}
+			ro := codexRolloutUsage(filepath.Join(dayDir, e.Name()), dayStart)
+			if ro.last == nil {
+				continue
+			}
+			// Without any parsable timestamp the cumulative can't be split
+			// at midnight; attribute it to the file's own day directory
+			// (count fully in today's directory, ignore in older ones).
+			if !ro.tsParsed && back != 0 {
+				continue
+			}
+			m := codexSessionIDRe.FindStringSubmatch(e.Name())
+			if m == nil {
+				t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+				out.Tokens += t.Tokens
+				out.Cost += t.Cost
+				continue
+			}
+			mergeCodexRollout(bySession, m[1], ro)
 		}
 	}
-	for _, st := range bySession {
-		out.Tokens += st.Tokens
-		out.Cost += st.Cost
+	for _, ro := range bySession {
+		t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+		out.Tokens += t.Tokens
+		out.Cost += t.Cost
 	}
 	return out
+}
+
+// mergeCodexRollout folds one rollout into its session's entry. Cumulative
+// usage only grows within a session (resumed files carry the total forward),
+// so the largest snapshot on each side of midnight is that side's latest.
+func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRollout) {
+	prev, ok := bySession[id]
+	if !ok {
+		bySession[id] = &ro
+		return
+	}
+	if ro.before != nil && (prev.before == nil || ro.before.Total > prev.before.Total) {
+		prev.before = ro.before
+	}
+	if ro.last.Total > prev.last.Total {
+		prev.last, prev.model = ro.last, ro.model
+	}
+}
+
+// codexDeltaTotals prices the growth from before (nil = session started
+// today) to last. Tokens counts new tokens — cumulative total minus cached
+// input — the same measure the whole-session accounting used.
+func codexDeltaTotals(model string, before, last *codexUsage, prices pricing.Table) Totals {
+	var b codexUsage
+	if before != nil {
+		b = *before
+	}
+	out := Totals{Tokens: clamp0((last.Total - last.Cached) - (b.Total - b.Cached))}
+	if r, ok := prices.For(model); ok {
+		in := clamp0(last.Input - b.Input)
+		cached := clamp0(last.Cached - b.Cached)
+		outTok := clamp0(last.Output - b.Output)
+		out.Cost = r.Cost(clamp0(in-cached), 0, cached, outTok)
+	}
+	return out
+}
+
+func clamp0(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // codexSessionIDRe extracts the session UUID from a rollout filename
@@ -255,8 +321,9 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 var codexSessionIDRe = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`)
 
 type codexEvent struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 type codexTokenCount struct {
@@ -271,61 +338,69 @@ type codexTokenCount struct {
 	} `json:"info"`
 }
 
-// codexSessionTotals returns the session's new tokens (cumulative total minus
-// cached input) and estimated cost, priced with the session's model.
-func codexSessionTotals(path string, prices pricing.Table) Totals {
+// codexUsage is one cumulative total_token_usage snapshot.
+type codexUsage struct {
+	Input, Cached, Output, Total int64
+}
+
+// codexRollout is what one rollout file contributes to today's totals: the
+// last cumulative snapshot strictly before local midnight (nil when the file
+// has none) and the last snapshot overall, plus the session's model.
+type codexRollout struct {
+	model    string
+	before   *codexUsage
+	last     *codexUsage
+	tsParsed bool // at least one token_count carried a parsable timestamp
+}
+
+// codexRolloutUsage extracts one rollout's cumulative usage snapshots around
+// dayStart. Events are appended in order, so a forward scan keeps the latest
+// snapshot on each side of midnight and the latest turn_context model.
+func codexRolloutUsage(path string, dayStart time.Time) codexRollout {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Totals{}
+		return codexRollout{}
 	}
-	lines := bytes.Split(b, []byte("\n"))
-
-	model := ""
-	for i := len(lines) - 1; i >= 0 && model == ""; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if !bytes.Contains(line, []byte("turn_context")) {
+	var ro codexRollout
+	for _, raw := range bytes.Split(b, []byte("\n")) {
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 {
 			continue
 		}
-		var ev codexEvent
-		if json.Unmarshal(line, &ev) != nil || ev.Type != "turn_context" {
-			continue
-		}
-		var p struct {
-			Model string `json:"model"`
-		}
-		if json.Unmarshal(ev.Payload, &p) == nil {
-			model = p.Model
-		}
-	}
-
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 || !bytes.Contains(line, []byte("token_count")) {
-			continue
-		}
-		var ev codexEvent
-		if json.Unmarshal(line, &ev) != nil || ev.Type != "event_msg" {
-			continue
-		}
-		var tc codexTokenCount
-		if json.Unmarshal(ev.Payload, &tc) == nil && tc.Type == "token_count" &&
-			tc.Info != nil && tc.Info.TotalTokenUsage != nil {
+		switch {
+		case bytes.Contains(line, []byte("turn_context")):
+			var ev codexEvent
+			if json.Unmarshal(line, &ev) != nil || ev.Type != "turn_context" {
+				continue
+			}
+			var p struct {
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(ev.Payload, &p) == nil {
+				ro.model = p.Model
+			}
+		case bytes.Contains(line, []byte("token_count")):
+			var ev codexEvent
+			if json.Unmarshal(line, &ev) != nil || ev.Type != "event_msg" {
+				continue
+			}
+			var tc codexTokenCount
+			if json.Unmarshal(ev.Payload, &tc) != nil || tc.Type != "token_count" ||
+				tc.Info == nil || tc.Info.TotalTokenUsage == nil {
+				continue
+			}
 			u := tc.Info.TotalTokenUsage
-			out := Totals{Tokens: u.TotalTokens - u.CachedInputTokens}
-			if out.Tokens < 0 {
-				out.Tokens = 0
-			}
-			if r, ok := prices.For(model); ok {
-				nonCached := u.InputTokens - u.CachedInputTokens
-				if nonCached < 0 {
-					nonCached = 0
+			snap := codexUsage{Input: u.InputTokens, Cached: u.CachedInputTokens, Output: u.OutputTokens, Total: u.TotalTokens}
+			ro.last = &snap
+			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
+				ro.tsParsed = true
+				if ts.Before(dayStart) {
+					ro.before = &snap
 				}
-				out.Cost = r.Cost(nonCached, 0, u.CachedInputTokens, u.OutputTokens)
 			}
-			return out
 		}
 	}
-	return Totals{}
+	return ro
 }
 
 // sameDay reports whether an RFC 3339 timestamp falls on the given local day.
