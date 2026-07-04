@@ -176,7 +176,7 @@ func TestPickSessionBacktracksEmptyBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if res := pickSession(sessions, 3); res.tc == nil || res.path != filepath.Join(dataDay, name) {
+	if res := pickSession(sessions); res.tc == nil || res.path != filepath.Join(dataDay, name) {
 		t.Errorf("pickSession path = %q (tc set=%v), want %q", res.path, res.tc != nil, filepath.Join(dataDay, name))
 	}
 }

@@ -43,7 +43,7 @@ func Collect(opts Options) schema.Tool {
 		now = time.Now()
 	}
 
-	res := pickSession(filepath.Join(root, "sessions"), 3) // year / month / day
+	res := pickSession(filepath.Join(root, "sessions"))
 	if res.tc == nil {
 		if res.readErr != nil {
 			return errTool("read_error", res.readErr.Error())
@@ -66,37 +66,71 @@ type pick struct {
 	readErr error // last read error, surfaced only when no usable session was found
 }
 
-// pickSession walks the YYYY/MM/DD tree in descending name order and returns the
-// rollout with the latest token_count in the NEWEST day that has one. Every
-// Codex surface (interactive TUI, codex exec, desktop app, IDE extension) writes
-// a rollout into the same day directory; the freshest token_count — not the
-// newest file by mtime — is the current one (rate limits are account-global, so
-// any session's latest token_count is valid). It backtracks past days whose
-// rollouts all lack a token_count, e.g. just after midnight when the new day
-// holds only a fresh turn_context while the prior day holds the latest usage.
-func pickSession(dir string, depth int) pick {
-	if depth == 0 {
-		return pickFromDay(dir)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return pick{}
-	}
+// extraDaysCompared is how many additional older day directories (that hold
+// rollouts) are still compared by token_count timestamp after the newest
+// usable day. Rollouts live in their session's START-day directory, so a
+// session running past midnight keeps appending fresher token_counts to an
+// older day's file; the newest day directory alone cannot be trusted (#133).
+// Two extra days cover a session spanning a skipped-day gap (e.g. started
+// Friday, still running Monday).
+const extraDaysCompared = 2
+
+// pickSession walks the YYYY/MM/DD tree newest-first and returns the rollout
+// with the freshest token_count by event timestamp. Every Codex surface
+// (interactive TUI, codex exec, desktop app, IDE extension) writes a rollout
+// into its start-day directory; the freshest token_count — not the newest file
+// by mtime, nor the newest day directory — is the current one (rate limits are
+// account-global, so any session's latest token_count is valid). It backtracks
+// past days whose rollouts all lack a token_count, and once one is found it
+// compares extraDaysCompared more rollout-holding days so a cross-midnight
+// session in an older directory can outrank a one-off run in today's.
+func pickSession(dir string) pick {
 	var acc pick
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].IsDir() {
-			continue
+	extra := 0
+	for _, day := range dayDirsDesc(dir) {
+		p := pickFromDay(day)
+		if acc.tc != nil && p.sawFile {
+			extra++
 		}
-		p := pickSession(filepath.Join(dir, entries[i].Name()), depth-1)
 		acc.sawFile = acc.sawFile || p.sawFile
 		if p.readErr != nil {
 			acc.readErr = p.readErr
 		}
-		if p.tc != nil {
-			return p // newest day with a usable token_count wins
+		if p.tc != nil && (acc.tc == nil || p.ts.After(acc.ts)) {
+			acc.tc, acc.turn, acc.path, acc.ts = p.tc, p.turn, p.path, p.ts
+		}
+		if acc.tc != nil && extra >= extraDaysCompared {
+			break
 		}
 	}
 	return acc
+}
+
+// dayDirsDesc lists the YYYY/MM/DD leaf directories under dir, newest first by
+// name at each level.
+func dayDirsDesc(dir string) []string {
+	var days []string
+	for _, y := range subdirsDesc(dir) {
+		for _, m := range subdirsDesc(y) {
+			days = append(days, subdirsDesc(m)...)
+		}
+	}
+	return days
+}
+
+// subdirsDesc lists dir's immediate subdirectories in descending name order.
+func subdirsDesc(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].IsDir() {
+			out = append(out, filepath.Join(dir, entries[i].Name()))
+		}
+	}
+	return out
 }
 
 // pickFromDay returns the rollout with the latest token_count directly inside
