@@ -18,6 +18,15 @@ func codexSessionAt(entries ...[2]any) string {
 	return out
 }
 
+// codexDayClock pins a deterministic local midnight: dayStart is today's
+// local 00:00 for the returned now (02:00). Deriving event timestamps from
+// dayStart keeps the "before/after local midnight" contract valid on any CI
+// timezone (CodexTotals splits at now.Local()'s midnight).
+func codexDayClock() (now, dayStart time.Time) {
+	dayStart = time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
+	return dayStart.Add(2 * time.Hour), dayStart
+}
+
 // codexDayDir returns root's sessions/YYYY/MM/DD directory for now shifted by
 // back days (local time).
 func codexDayDir(root string, now time.Time, back int) string {
@@ -30,10 +39,9 @@ func codexDayDir(root string, now time.Time, back int) string {
 // its growth since local midnight (150000-100000) counts into today.
 func TestCodexTotalsCrossMidnightCountsTodayPortion(t *testing.T) {
 	root := t.TempDir()
-	// 02:00 UTC = 11:00 JST — "today" locally; midnight JST = 15:00 UTC prev day.
-	now := time.Date(2026, 7, 4, 2, 0, 0, 0, time.UTC)
-	beforeMidnight := time.Date(2026, 7, 3, 14, 50, 0, 0, time.UTC).Format(time.RFC3339) // 23:50 JST 07-03
-	afterMidnight := time.Date(2026, 7, 3, 16, 30, 0, 0, time.UTC).Format(time.RFC3339)  // 01:30 JST 07-04
+	now, dayStart := codexDayClock()
+	beforeMidnight := dayStart.Add(-10 * time.Minute).Format(time.RFC3339)
+	afterMidnight := dayStart.Add(90 * time.Minute).Format(time.RFC3339)
 
 	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-019e5933-2289-7e72-88fd-cccccccccccc.jsonl"),
 		codexSessionAt([2]any{beforeMidnight, 100000}, [2]any{afterMidnight, 150000}), now)
@@ -47,8 +55,8 @@ func TestCodexTotalsCrossMidnightCountsTodayPortion(t *testing.T) {
 // though its rollout sits inside the scanned window.
 func TestCodexTotalsIgnoresSessionFinishedYesterday(t *testing.T) {
 	root := t.TempDir()
-	now := time.Date(2026, 7, 4, 2, 0, 0, 0, time.UTC)
-	ts := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC).Format(time.RFC3339) // 21:00 JST 07-03
+	now, dayStart := codexDayClock()
+	ts := dayStart.Add(-3 * time.Hour).Format(time.RFC3339)
 
 	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T10-00-00-019e5933-2289-7e72-88fd-dddddddddddd.jsonl"),
 		codexSessionAt([2]any{ts, 80000}), now)
@@ -64,10 +72,10 @@ func TestCodexTotalsIgnoresSessionFinishedYesterday(t *testing.T) {
 // not the naive sum of both files.
 func TestCodexTotalsCrossMidnightResumeCountsOnce(t *testing.T) {
 	root := t.TempDir()
-	now := time.Date(2026, 7, 4, 2, 0, 0, 0, time.UTC)
-	beforeMidnight := time.Date(2026, 7, 3, 14, 50, 0, 0, time.UTC).Format(time.RFC3339) // 23:50 JST 07-03
-	resumed := time.Date(2026, 7, 3, 16, 0, 0, 0, time.UTC).Format(time.RFC3339)         // 01:00 JST 07-04
-	latest := time.Date(2026, 7, 3, 17, 0, 0, 0, time.UTC).Format(time.RFC3339)          // 02:00 JST 07-04
+	now, dayStart := codexDayClock()
+	beforeMidnight := dayStart.Add(-10 * time.Minute).Format(time.RFC3339)
+	resumed := dayStart.Add(60 * time.Minute).Format(time.RFC3339)
+	latest := dayStart.Add(110 * time.Minute).Format(time.RFC3339)
 
 	// Same session UUID in both files; the resumed file carries the total forward.
 	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-019e5933-2289-7e72-88fd-eeeeeeeeeeee.jsonl"),
