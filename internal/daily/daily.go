@@ -1,18 +1,19 @@
 // Package daily aggregates today's usage across all of a tool's sessions.
-// It reads the same on-disk logs the collectors use, summing only entries
-// dated today (local time).
+// It walks the same on-disk logs the collectors read, delegating log-format
+// parsing to the collector packages and keeping only the date filtering and
+// aggregation here.
 package daily
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
+	"github.com/kosako/tachograph/internal/collector/claude"
+	"github.com/kosako/tachograph/internal/collector/codex"
 	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -44,7 +45,7 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 		return Totals{}
 	}
 	day := now.Local().Format("2006-01-02")
-	seen := map[usageKey]bool{}
+	seen := claude.UsageSet{}
 	out := claudeFileTotals(transcriptPath, day, prices, seen)
 
 	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
@@ -77,7 +78,7 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 	var out Totals
 	// One dedup set spans every file so a response duplicated across files
 	// (resume/compaction copies prior turns forward) is also counted once.
-	seen := map[usageKey]bool{}
+	seen := claude.UsageSet{}
 
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
@@ -109,94 +110,30 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 	return out
 }
 
-// usageKey identifies one assistant API response. Claude Code writes a
-// transcript line per content block (thinking/text/tool_use…), each repeating
-// that response's full usage, so counting per line multiplies a turn by its
-// block count. Summing once per (message id, request id) counts each response
-// once — across its blocks and across files duplicated by resume/compaction.
-type usageKey struct{ id, req string }
-
-type claudeUsage struct {
-	InputTokens              int64                `json:"input_tokens"`
-	CacheCreationInputTokens int64                `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64                `json:"cache_read_input_tokens"`
-	OutputTokens             int64                `json:"output_tokens"`
-	CacheCreation            *claudeCacheCreation `json:"cache_creation"`
-}
-
-type claudeCacheCreation struct {
-	Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens"`
-	Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens"`
-}
-
-type claudeLine struct {
-	Timestamp string `json:"timestamp"`
-	RequestID string `json:"requestId"`
-	Message   *struct {
-		ID    string       `json:"id"`
-		Model string       `json:"model"`
-		Usage *claudeUsage `json:"usage"`
-	} `json:"message"`
-}
-
 // claudeFileTotals sums one transcript's today entries into out, recording
 // counted responses in seen so the caller can dedup across files.
-func claudeFileTotals(path, day string, prices pricing.Table, seen map[usageKey]bool) Totals {
+func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageSet) Totals {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Totals{}
 	}
 	var out Totals
-	for _, raw := range bytes.Split(b, []byte("\n")) {
-		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
-			continue
-		}
-		var line claudeLine
-		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
-			continue
-		}
+	claude.EachUsageLine(b, func(line claude.TranscriptLine) {
 		if !sameDay(line.Timestamp, day) {
-			continue
+			return
 		}
-		// A response spans multiple content-block lines with identical usage;
-		// count it once. Lines without a message id (rare, e.g. synthetic)
-		// can't be deduped, so they're always counted.
-		if id := line.Message.ID; id != "" {
-			k := usageKey{id, line.RequestID}
-			if seen[k] {
-				continue
-			}
-			seen[k] = true
+		if seen.Dup(line) {
+			return
 		}
 		u := line.Message.Usage
-		cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := claudeCacheWrites(u)
+		cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := u.CacheWrites()
 		// New tokens exclude cache reads (same context re-read each message).
 		out.Tokens += u.InputTokens + cacheWriteTotal + u.OutputTokens
 		if r, ok := prices.For(line.Message.Model); ok {
 			out.Cost += claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 		}
-	}
+	})
 	return out
-}
-
-func claudeCacheWrites(u *claudeUsage) (fiveMinute, oneHour, unknown, total int64) {
-	if u == nil {
-		return 0, 0, 0, 0
-	}
-	total = u.CacheCreationInputTokens
-	if u.CacheCreation == nil {
-		return 0, 0, total, total
-	}
-	fiveMinute = u.CacheCreation.Ephemeral5mInputTokens
-	oneHour = u.CacheCreation.Ephemeral1hInputTokens
-	known := fiveMinute + oneHour
-	if total >= known {
-		return fiveMinute, oneHour, total - known, total
-	}
-	// Trust the top-level total when the TTL breakdown is inconsistent; there
-	// is no reliable way to reconstruct the 5m/1h split from malformed logs.
-	return 0, 0, total, total
 }
 
 func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
@@ -255,14 +192,14 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 			if !ro.tsParsed && back != 0 {
 				continue
 			}
-			m := codexSessionIDRe.FindStringSubmatch(e.Name())
-			if m == nil {
+			id, ok := codex.SessionID(e.Name())
+			if !ok {
 				t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
 				out.Tokens += t.Tokens
 				out.Cost += t.Cost
 				continue
 			}
-			mergeCodexRollout(bySession, m[1], ro)
+			mergeCodexRollout(bySession, id, ro)
 		}
 	}
 	for _, ro := range bySession {
@@ -282,10 +219,10 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 		bySession[id] = &ro
 		return
 	}
-	if ro.before != nil && (prev.before == nil || ro.before.Total > prev.before.Total) {
+	if ro.before != nil && (prev.before == nil || ro.before.TotalTokens > prev.before.TotalTokens) {
 		prev.before = ro.before
 	}
-	if ro.last.Total > prev.last.Total {
+	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
 	}
 }
@@ -293,16 +230,16 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 // codexDeltaTotals prices the growth from before (nil = session started
 // today) to last. Tokens counts new tokens — cumulative total minus cached
 // input — the same measure the whole-session accounting used.
-func codexDeltaTotals(model string, before, last *codexUsage, prices pricing.Table) Totals {
-	var b codexUsage
+func codexDeltaTotals(model string, before, last *codex.TokenUsage, prices pricing.Table) Totals {
+	var b codex.TokenUsage
 	if before != nil {
 		b = *before
 	}
-	out := Totals{Tokens: clamp0((last.Total - last.Cached) - (b.Total - b.Cached))}
+	out := Totals{Tokens: clamp0((last.TotalTokens - last.CachedInputTokens) - (b.TotalTokens - b.CachedInputTokens))}
 	if r, ok := prices.For(model); ok {
-		in := clamp0(last.Input - b.Input)
-		cached := clamp0(last.Cached - b.Cached)
-		outTok := clamp0(last.Output - b.Output)
+		in := clamp0(last.InputTokens - b.InputTokens)
+		cached := clamp0(last.CachedInputTokens - b.CachedInputTokens)
+		outTok := clamp0(last.OutputTokens - b.OutputTokens)
 		out.Cost = r.Cost(clamp0(in-cached), 0, cached, outTok)
 	}
 	return out
@@ -315,41 +252,13 @@ func clamp0(v int64) int64 {
 	return v
 }
 
-// codexSessionIDRe extracts the session UUID from a rollout filename
-// (rollout-<ISO-ts>-<uuid>.jsonl) so daily totals can dedup a session that
-// resumed into more than one file.
-var codexSessionIDRe = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`)
-
-type codexEvent struct {
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-type codexTokenCount struct {
-	Type string `json:"type"`
-	Info *struct {
-		TotalTokenUsage *struct {
-			InputTokens       int64 `json:"input_tokens"`
-			CachedInputTokens int64 `json:"cached_input_tokens"`
-			OutputTokens      int64 `json:"output_tokens"`
-			TotalTokens       int64 `json:"total_tokens"`
-		} `json:"total_token_usage"`
-	} `json:"info"`
-}
-
-// codexUsage is one cumulative total_token_usage snapshot.
-type codexUsage struct {
-	Input, Cached, Output, Total int64
-}
-
 // codexRollout is what one rollout file contributes to today's totals: the
 // last cumulative snapshot strictly before local midnight (nil when the file
 // has none) and the last snapshot overall, plus the session's model.
 type codexRollout struct {
 	model    string
-	before   *codexUsage
-	last     *codexUsage
+	before   *codex.TokenUsage
+	last     *codex.TokenUsage
 	tsParsed bool // at least one token_count carried a parsable timestamp
 }
 
@@ -363,39 +272,31 @@ func codexRolloutUsage(path string, dayStart time.Time) codexRollout {
 	}
 	var ro codexRollout
 	for _, raw := range bytes.Split(b, []byte("\n")) {
-		line := bytes.TrimSpace(raw)
-		if len(line) == 0 {
-			continue
-		}
+		// Cheap substring prefilter; the full envelope decode runs only for
+		// candidate lines.
 		switch {
-		case bytes.Contains(line, []byte("turn_context")):
-			var ev codexEvent
-			if json.Unmarshal(line, &ev) != nil || ev.Type != "turn_context" {
+		case bytes.Contains(raw, []byte("turn_context")):
+			ev, ok := codex.ParseEvent(raw)
+			if !ok {
 				continue
 			}
-			var p struct {
-				Model string `json:"model"`
+			if turn := ev.TurnContext(); turn != nil {
+				ro.model = turn.Model
 			}
-			if json.Unmarshal(ev.Payload, &p) == nil {
-				ro.model = p.Model
-			}
-		case bytes.Contains(line, []byte("token_count")):
-			var ev codexEvent
-			if json.Unmarshal(line, &ev) != nil || ev.Type != "event_msg" {
+		case bytes.Contains(raw, []byte("token_count")):
+			ev, ok := codex.ParseEvent(raw)
+			if !ok {
 				continue
 			}
-			var tc codexTokenCount
-			if json.Unmarshal(ev.Payload, &tc) != nil || tc.Type != "token_count" ||
-				tc.Info == nil || tc.Info.TotalTokenUsage == nil {
+			tc := ev.TokenCount()
+			if tc == nil || tc.Info == nil || tc.Info.TotalTokenUsage == nil {
 				continue
 			}
-			u := tc.Info.TotalTokenUsage
-			snap := codexUsage{Input: u.InputTokens, Cached: u.CachedInputTokens, Output: u.OutputTokens, Total: u.TotalTokens}
-			ro.last = &snap
+			ro.last = tc.Info.TotalTokenUsage
 			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
 				ro.tsParsed = true
 				if ts.Before(dayStart) {
-					ro.before = &snap
+					ro.before = ro.last
 				}
 			}
 		}

@@ -4,11 +4,9 @@ package codex
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
@@ -58,8 +56,8 @@ func Collect(opts Options) schema.Tool {
 
 // pick is the freshest usable session found while walking the date tree.
 type pick struct {
-	tc      *tokenCount
-	turn    *turnContext
+	tc      *TokenCount
+	turn    *TurnContext
 	path    string
 	ts      time.Time
 	sawFile bool  // any .jsonl was seen (to distinguish no_token_count vs unavailable)
@@ -165,7 +163,7 @@ func pickFromDay(day string) pick {
 // either. turn_context is emitted at turn start and token_count at the end, so a
 // single turn longer than the tail can leave turn_context out of reach (model/cwd
 // would silently go null) — the full scan recovers it.
-func sessionEvents(path string) (tc *tokenCount, turn *turnContext, err error) {
+func sessionEvents(path string) (tc *TokenCount, turn *TurnContext, err error) {
 	lines, err := tailLines(path)
 	if err != nil {
 		return nil, nil, err
@@ -237,76 +235,19 @@ func allLines(path string) ([][]byte, error) {
 	return bytes.Split(b, []byte("\n")), nil
 }
 
-type event struct {
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-type tokenCount struct {
-	timestamp string
-	Type      string `json:"type"`
-	Info      *struct {
-		TotalTokenUsage    *tokenUsage `json:"total_token_usage"`
-		LastTokenUsage     *tokenUsage `json:"last_token_usage"`
-		ModelContextWindow *int64      `json:"model_context_window"`
-	} `json:"info"`
-	RateLimits *struct {
-		Primary   *rlWindow `json:"primary"`
-		Secondary *rlWindow `json:"secondary"`
-		Credits   any       `json:"credits"`
-		PlanType  *string   `json:"plan_type"`
-	} `json:"rate_limits"`
-}
-
-type tokenUsage struct {
-	InputTokens       int64 `json:"input_tokens"`
-	CachedInputTokens int64 `json:"cached_input_tokens"`
-	OutputTokens      int64 `json:"output_tokens"`
-	TotalTokens       int64 `json:"total_tokens"`
-}
-
-type rlWindow struct {
-	UsedPercent   float64 `json:"used_percent"`
-	WindowMinutes int     `json:"window_minutes"`
-	ResetsAt      int64   `json:"resets_at"` // epoch seconds
-}
-
-type turnContext struct {
-	CWD   string `json:"cwd"`
-	Model string `json:"model"`
-}
-
 // lastEvents scans backwards for the most recent token_count and
 // turn_context. ok reports whether a token_count was found.
-func lastEvents(lines [][]byte) (tc *tokenCount, turn *turnContext, ok bool) {
+func lastEvents(lines [][]byte) (tc *TokenCount, turn *TurnContext, ok bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 {
+		ev, evOK := ParseEvent(lines[i])
+		if !evOK {
 			continue
 		}
-		var ev event
-		if json.Unmarshal(line, &ev) != nil {
-			continue
+		if tc == nil {
+			tc = ev.TokenCount()
 		}
-		switch ev.Type {
-		case "event_msg":
-			if tc != nil {
-				continue
-			}
-			var p tokenCount
-			if json.Unmarshal(ev.Payload, &p) == nil && p.Type == "token_count" {
-				p.timestamp = ev.Timestamp
-				tc = &p
-			}
-		case "turn_context":
-			if turn != nil {
-				continue
-			}
-			var p turnContext
-			if json.Unmarshal(ev.Payload, &p) == nil {
-				turn = &p
-			}
+		if turn == nil {
+			turn = ev.TurnContext()
 		}
 		if tc != nil && turn != nil {
 			break
@@ -315,9 +256,7 @@ func lastEvents(lines [][]byte) (tc *tokenCount, turn *turnContext, ok bool) {
 	return tc, turn, tc != nil
 }
 
-var sessionIDRe = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`)
-
-func build(path string, tc *tokenCount, turn *turnContext, now time.Time) schema.Tool {
+func build(path string, tc *TokenCount, turn *TurnContext, now time.Time) schema.Tool {
 	t := schema.Tool{
 		Tool:      schema.ToolCodex,
 		Available: true,
@@ -331,8 +270,8 @@ func build(path string, tc *tokenCount, turn *turnContext, now time.Time) schema
 	}
 
 	sess := &schema.Session{}
-	if m := sessionIDRe.FindStringSubmatch(path); m != nil {
-		sess.ID = &m[1]
+	if id, ok := SessionID(path); ok {
+		sess.ID = &id
 	}
 	if turn != nil {
 		if turn.CWD != "" {

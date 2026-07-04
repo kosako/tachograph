@@ -5,7 +5,6 @@
 package claude
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -105,7 +104,7 @@ type StatuslineInput struct {
 		TotalOutputTokens int64    `json:"total_output_tokens"`
 		ContextWindowSize int64    `json:"context_window_size"`
 		UsedPercentage    *float64 `json:"used_percentage"`
-		CurrentUsage      *usage   `json:"current_usage"`
+		CurrentUsage      *Usage   `json:"current_usage"`
 	} `json:"context_window"`
 	RateLimits *statuslineRateLimits `json:"rate_limits"`
 }
@@ -118,13 +117,6 @@ type statuslineRateLimits struct {
 type slWindow struct {
 	UsedPercentage float64 `json:"used_percentage"`
 	ResetsAt       int64   `json:"resets_at"` // epoch seconds
-}
-
-type usage struct {
-	InputTokens              int64 `json:"input_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
 }
 
 func fromStatusline(opts Options) schema.Tool {
@@ -222,24 +214,6 @@ func toLimit(window string, mins int, w *slWindow) schema.Limit {
 
 // ---- transcript route (no statusline stdin available) ----
 
-type transcriptLine struct {
-	Timestamp string `json:"timestamp"`
-	SessionID string `json:"sessionId"`
-	CWD       string `json:"cwd"`
-	RequestID string `json:"requestId"`
-	Message   *struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-		Usage *usage `json:"usage"`
-	} `json:"message"`
-}
-
-// usageKey identifies one assistant API response. Claude Code writes a line per
-// content block (thinking/text/tool_use…) repeating that response's full usage,
-// so it must be counted once per (message id, request id) — otherwise a turn is
-// multiplied by its block count.
-type usageKey struct{ id, req string }
-
 func fromTranscripts(opts Options) schema.Tool {
 	paths := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
 	if len(paths) == 0 {
@@ -251,7 +225,7 @@ func fromTranscripts(opts Options) schema.Tool {
 	// next most recent transcript that actually carries usage.
 	var (
 		totals  schema.Tokens
-		last    *transcriptLine
+		last    *TranscriptLine
 		path    string
 		readErr error
 	)
@@ -307,36 +281,21 @@ func fromTranscripts(opts Options) schema.Tool {
 // usageFromTranscript sums token usage across a transcript's assistant turns.
 // last is nil when the transcript carries no usable usage entries, which is
 // the signal to fall back to an older transcript.
-func usageFromTranscript(b []byte) (totals schema.Tokens, last *transcriptLine) {
-	seen := map[usageKey]bool{}
-	for _, raw := range bytes.Split(b, []byte("\n")) {
-		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
-			continue
-		}
-		var line transcriptLine
-		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
-			continue
-		}
+func usageFromTranscript(b []byte) (totals schema.Tokens, last *TranscriptLine) {
+	seen := UsageSet{}
+	EachUsageLine(b, func(line TranscriptLine) {
 		// last tracks the newest usage-bearing line for model/session/timestamp.
 		// Update it on every line, including duplicate blocks: a later block is
 		// still the newest entry, so dedup must not rewind the metadata time.
 		last = &line
-		// A response spans multiple content-block lines with identical usage;
-		// count it once. Lines without a message id (rare, e.g. synthetic)
-		// can't be deduped, so they're always counted.
-		if id := line.Message.ID; id != "" {
-			k := usageKey{id, line.RequestID}
-			if seen[k] {
-				continue
-			}
-			seen[k] = true
+		if seen.Dup(line) {
+			return
 		}
 		u := line.Message.Usage
 		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 		totals.CachedInput += u.CacheReadInputTokens
 		totals.Output += u.OutputTokens
-	}
+	})
 	return totals, last
 }
 
