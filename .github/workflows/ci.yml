@@ -30,3 +30,47 @@ jobs:
         with:
           version: "~> v2"
           args: check
+
+  # Exercise the real npm install path (npm pack → global install → postinstall
+  # download, checksum verification, tar/zip extraction, bin shim → `tacho
+  # version`) on every supported OS, since the extraction tooling differs (GNU
+  # tar on Linux, bsdtar on macOS/Windows) and the test job only covers ubuntu.
+  # Installs the release matching npm/package.json's version, so on a
+  # release-prep PR (version bumped, tag not pushed yet) it skips instead of
+  # failing on a download that cannot exist yet.
+  npm-smoke:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Check whether this version's release exists
+        id: release
+        run: |
+          version="$(node -p "require('./npm/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if curl -fsSLI -o /dev/null "https://github.com/kosako/tachograph/releases/download/v${version}/checksums.txt"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::release v${version} not published yet (release-prep PR?); skipping npm install smoke"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pack and install the wrapper globally
+        if: steps.release.outputs.exists == 'true'
+        working-directory: npm
+        run: |
+          npm pack
+          npm install -g "./tachograph-${{ steps.release.outputs.version }}.tgz"
+      - name: Run the installed binary
+        if: steps.release.outputs.exists == 'true'
+        run: |
+          out="$(tacho version)"
+          echo "$out"
+          test "$out" = "tacho v${{ steps.release.outputs.version }}"
