@@ -186,8 +186,6 @@ func resolveCost(t *schema.Tool, scope []string) string {
 	return Missing
 }
 
-// effortShort compacts a reasoning-effort level for the status line. Unknown
-// (future) levels are passed through verbatim rather than dropped.
 // formatCredits renders a credit balance compactly, trimming trailing
 // zeros: 23.50 → "23.5", 1234.00 → "1234".
 func formatCredits(v float64) string {
@@ -196,6 +194,8 @@ func formatCredits(v float64) string {
 	return strings.TrimRight(s, ".")
 }
 
+// effortShort compacts a reasoning-effort level for the status line. Unknown
+// (future) levels are passed through verbatim rather than dropped.
 func effortShort(level string) string {
 	switch level {
 	case "medium":
