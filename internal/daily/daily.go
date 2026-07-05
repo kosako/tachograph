@@ -6,6 +6,8 @@ package daily
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,11 +70,11 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 // ClaudeTotals sums today's new tokens and estimated cost across every Claude
 // transcript message under <root>/projects. root defaults to CLAUDE_CONFIG_DIR
 // or ~/.claude.
-func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
+func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
 	var ok bool
 	root, ok = agentpath.ClaudeRoot(root)
 	if !ok {
-		return Totals{}
+		return Totals{}, errors.New("claude root could not be resolved")
 	}
 	day := now.Local().Format("2006-01-02")
 	var out Totals
@@ -82,8 +84,11 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Totals{}, nil // no sessions yet: a real zero, not unknown
+	}
 	if err != nil {
-		return Totals{}
+		return Totals{}, err // unknown total; callers keep daily null, not 0
 	}
 	for _, d := range dirs {
 		if !d.IsDir() {
@@ -107,7 +112,7 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) Totals {
 			continue
 		}
 	}
-	return out
+	return out, nil
 }
 
 // claudeFileTotals sums one transcript's today entries into out, recording
@@ -156,11 +161,11 @@ const codexScanDays = 3
 // cumulative per session, so each session contributes its growth since local
 // midnight: the last cumulative snapshot minus the last snapshot before today
 // (zero for sessions started today).
-func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
+func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
 	var ok bool
 	root, ok = agentpath.CodexRoot(root)
 	if !ok {
-		return Totals{}
+		return Totals{}, errors.New("codex root could not be resolved")
 	}
 	local := now.Local()
 	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
@@ -175,8 +180,11 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 		day := local.AddDate(0, 0, -back)
 		dayDir := filepath.Join(root, "sessions", day.Format("2006"), day.Format("01"), day.Format("02"))
 		entries, err := os.ReadDir(dayDir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // days without sessions have no directory
+		}
 		if err != nil {
-			continue
+			return Totals{}, err // unknown total; callers keep daily null, not 0
 		}
 		for _, e := range entries {
 			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
@@ -207,7 +215,7 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) Totals {
 		out.Tokens += t.Tokens
 		out.Cost += t.Cost
 	}
-	return out
+	return out, nil
 }
 
 // mergeCodexRollout folds one rollout into its session's entry. Cumulative

@@ -46,7 +46,7 @@ func TestCodexTotalsCrossMidnightCountsTodayPortion(t *testing.T) {
 	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-019e5933-2289-7e72-88fd-cccccccccccc.jsonl"),
 		codexSessionAt([2]any{beforeMidnight, 100000}, [2]any{afterMidnight, 150000}), now)
 
-	if got := CodexTotals(root, now, noPrices).Tokens; got != 50000 {
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 50000 {
 		t.Errorf("CodexTotals.Tokens = %d, want 50000 (today's portion of the cross-midnight session)", got)
 	}
 }
@@ -61,7 +61,7 @@ func TestCodexTotalsIgnoresSessionFinishedYesterday(t *testing.T) {
 	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T10-00-00-019e5933-2289-7e72-88fd-dddddddddddd.jsonl"),
 		codexSessionAt([2]any{ts, 80000}), now)
 
-	if got := CodexTotals(root, now, noPrices).Tokens; got != 0 {
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 0 {
 		t.Errorf("CodexTotals.Tokens = %d, want 0 (session ended yesterday)", got)
 	}
 }
@@ -83,7 +83,7 @@ func TestCodexTotalsCrossMidnightResumeCountsOnce(t *testing.T) {
 	writeFile(t, filepath.Join(codexDayDir(root, now, 0), "rollout-2026-07-04T01-00-00-019e5933-2289-7e72-88fd-eeeeeeeeeeee.jsonl"),
 		codexSessionAt([2]any{resumed, 120000}, [2]any{latest, 150000}), now)
 
-	if got := CodexTotals(root, now, noPrices).Tokens; got != 50000 {
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 50000 {
 		t.Errorf("CodexTotals.Tokens = %d, want 50000 (150000 latest - 100000 pre-midnight, counted once)", got)
 	}
 }

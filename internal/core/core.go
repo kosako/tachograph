@@ -41,8 +41,10 @@ func assemble(opts Options) schema.Status {
 	claudeT := claudeTool(opts)
 	codexT := codex.Collect(codex.Options{Root: opts.CodexRoot, Now: opts.Now})
 	addCodexSessionCost(&codexT, prices)
-	addDaily(&claudeT, daily.ClaudeTotals(opts.ClaudeRoot, opts.Now, prices))
-	addDaily(&codexT, daily.CodexTotals(opts.CodexRoot, opts.Now, prices))
+	claudeDaily, claudeDailyErr := daily.ClaudeTotals(opts.ClaudeRoot, opts.Now, prices)
+	addDaily(&claudeT, claudeDaily, claudeDailyErr)
+	codexDaily, codexDailyErr := daily.CodexTotals(opts.CodexRoot, opts.Now, prices)
+	addDaily(&codexT, codexDaily, codexDailyErr)
 	AddSessionToday(&claudeT, opts.Now, prices)
 	return schema.Status{
 		SchemaVersion: schema.Version,
@@ -52,9 +54,10 @@ func assemble(opts Options) schema.Status {
 }
 
 // addDaily attaches today's aggregate to an available tool. Cost is set only
-// when non-zero (a priced model was seen).
-func addDaily(t *schema.Tool, tot daily.Totals) {
-	if !t.Available || t.Error != nil {
+// when non-zero (a priced model was seen). A scan error means the total is
+// unknown, so Daily stays null instead of reading as zero usage.
+func addDaily(t *schema.Tool, tot daily.Totals, err error) {
+	if !t.Available || t.Error != nil || err != nil {
 		return
 	}
 	t.Daily = tot.Schema()
