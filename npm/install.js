@@ -16,6 +16,21 @@ const { assetFor, downloadURL, checksumsURL, checksumFor } = require("./asset");
 const { version } = require("./package.json");
 const binDir = path.join(__dirname, "bin");
 
+// tarBin picks the extractor. On Windows the zip asset needs bsdtar, but PATH
+// can resolve Git for Windows' GNU tar, which cannot read zip archives
+// ("This does not look like a tar archive"). System32's tar.exe is bsdtar on
+// Windows 10 1803+, so prefer it explicitly; elsewhere the system tar handles
+// our tar.gz (bsdtar on macOS, GNU tar on Linux).
+function tarBin() {
+  if (process.platform !== "win32") return "tar";
+  const sys = path.join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32",
+    "tar.exe",
+  );
+  return fs.existsSync(sys) ? sys : "tar";
+}
+
 async function main() {
   const { asset, binary } = assetFor(process.platform, process.arch);
   const url = downloadURL(version, asset);
@@ -47,11 +62,11 @@ async function main() {
   try {
     fs.writeFileSync(path.join(tmp, asset), buf);
 
-    // bsdtar/GNU tar both extract by extension. Run inside tmp with relative
-    // names only: GNU tar (which can shadow bsdtar in PATH, e.g. Git for
-    // Windows' usr/bin) parses the colon in absolute Windows paths ("C:\...")
-    // as a remote host:path spec and fails with "Cannot connect to C:".
-    execFileSync("tar", ["-xf", asset], { cwd: tmp, stdio: "inherit" });
+    // Run inside tmp with relative names only: GNU tar (which can shadow
+    // bsdtar in PATH, e.g. Git for Windows' usr/bin) parses the colon in
+    // absolute Windows paths ("C:\...") as a remote host:path spec and fails
+    // with "Cannot connect to C:".
+    execFileSync(tarBin(), ["-xf", asset], { cwd: tmp, stdio: "inherit" });
 
     const extracted = path.join(tmp, binary);
     if (!fs.existsSync(extracted)) {
