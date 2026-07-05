@@ -43,24 +43,27 @@ async function main() {
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tacho-"));
-  fs.writeFileSync(path.join(tmp, asset), buf);
-
-  // bsdtar/GNU tar both extract by extension. Run inside tmp with relative
-  // names only: GNU tar (which can shadow bsdtar in PATH, e.g. Git for
-  // Windows' usr/bin) parses the colon in absolute Windows paths ("C:\...")
-  // as a remote host:path spec and fails with "Cannot connect to C:".
-  execFileSync("tar", ["-xf", asset], { cwd: tmp, stdio: "inherit" });
-
-  const extracted = path.join(tmp, binary);
-  if (!fs.existsSync(extracted)) {
-    throw new Error(`extracted archive but ${binary} not found in it`);
-  }
-  // Copy just the binary; the archive also carries LICENSE/README, which
-  // don't belong in bin/.
-  fs.mkdirSync(binDir, { recursive: true });
   const binPath = path.join(binDir, binary);
-  fs.copyFileSync(extracted, binPath);
-  fs.rmSync(tmp, { recursive: true, force: true });
+  try {
+    fs.writeFileSync(path.join(tmp, asset), buf);
+
+    // bsdtar/GNU tar both extract by extension. Run inside tmp with relative
+    // names only: GNU tar (which can shadow bsdtar in PATH, e.g. Git for
+    // Windows' usr/bin) parses the colon in absolute Windows paths ("C:\...")
+    // as a remote host:path spec and fails with "Cannot connect to C:".
+    execFileSync("tar", ["-xf", asset], { cwd: tmp, stdio: "inherit" });
+
+    const extracted = path.join(tmp, binary);
+    if (!fs.existsSync(extracted)) {
+      throw new Error(`extracted archive but ${binary} not found in it`);
+    }
+    // Copy just the binary; the archive also carries LICENSE/README, which
+    // don't belong in bin/.
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.copyFileSync(extracted, binPath);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
   if (process.platform !== "win32") {
     fs.chmodSync(binPath, 0o755);
   }
