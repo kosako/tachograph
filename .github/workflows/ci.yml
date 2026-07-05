@@ -40,6 +40,9 @@ jobs:
   # failing on a download that cannot exist yet.
   npm-smoke:
     strategy:
+      # Keep the other OSes running when one fails: the OS-specific extraction
+      # differences are exactly what this job exists to diagnose.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -56,11 +59,19 @@ jobs:
         run: |
           version="$(node -p "require('./npm/package.json').version")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if curl -fsSLI -o /dev/null "https://github.com/kosako/tachograph/releases/download/v${version}/checksums.txt"; then
+          url="https://github.com/kosako/tachograph/releases/download/v${version}/checksums.txt"
+          # Only an explicit 404 means "not published yet"; DNS/TLS failures
+          # abort via the command substitution's exit code, and any other
+          # status fails the job rather than silently skipping the smoke.
+          code="$(curl -sSLI -o /dev/null -w '%{http_code}' "$url")"
+          if [ "$code" = "200" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "$code" = "404" ]; then
             echo "::notice::release v${version} not published yet (release-prep PR?); skipping npm install smoke"
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::unexpected HTTP ${code} checking ${url}"
+            exit 1
           fi
       - name: Pack and install the wrapper globally
         if: steps.release.outputs.exists == 'true'
