@@ -22,6 +22,8 @@ func testStatus() schema.Status {
 	claude.SessionToday = &schema.Daily{Tokens: todayTokens, CostUSD: &todayCost}
 	cwd := "/Users/example/dev/project"
 	claude.Session.CWD = &cwd
+	credits := 23.50
+	claude.Credits = &credits
 
 	codex := schema.Unavailable(schema.ToolCodex)
 	return schema.Status{Tools: []schema.Tool{claude, codex}}
@@ -62,6 +64,8 @@ func TestTemplateBasics(t *testing.T) {
 		"{codex.5h.pct}":                Missing,
 		"{codex.5h.bar:4}":              "░░░░", // bars keep their width when absent
 		"{claude.plan}":                 Missing,
+		"{claude.credits}":              "23.5", // trailing zeros trimmed
+		"{codex.credits}":               Missing,
 		"{claude.nope}":                 Missing,
 		"{nope.model}":                  Missing,
 	}

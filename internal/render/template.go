@@ -110,6 +110,11 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 			return Missing
 		}
 		return DisplayText(*t.Plan)
+	case "credits":
+		if t.Credits == nil {
+			return Missing
+		}
+		return formatCredits(*t.Credits)
 	case "cwd":
 		if t.Session == nil || t.Session.CWD == nil {
 			return Missing
@@ -179,6 +184,14 @@ func resolveCost(t *schema.Tool, scope []string) string {
 		return fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD)
 	}
 	return Missing
+}
+
+// formatCredits renders a credit balance compactly, trimming trailing
+// zeros: 23.50 → "23.5", 1234.00 → "1234".
+func formatCredits(v float64) string {
+	s := fmt.Sprintf("%.2f", v)
+	s = strings.TrimRight(s, "0")
+	return strings.TrimRight(s, ".")
 }
 
 // effortShort compacts a reasoning-effort level for the status line. Unknown
