@@ -47,3 +47,24 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publishes the npm wrapper via trusted publishing (OIDC), so no npm token
+  # exists anywhere. Must run after goreleaser: install.js downloads binaries
+  # from the GitHub Release, so publishing first would make every `npm i` 404
+  # until the release assets exist.
+  npm-publish:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      # Trusted publishing requires npm >= 11.5.1; the runner's bundled npm
+      # may be older.
+      - run: npm install -g npm@11
+      - run: npm publish
+        working-directory: npm
