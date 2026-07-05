@@ -202,6 +202,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `cost.session.today` | **current session, today only** estimated cost (Claude only), `$1.84` |
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
+| `credits` | credit balance (from Codex's `rate_limits.credits`; `--` when the tool/plan has none), `23.5` |
 | `cwd` | session working directory (basename) |
 | `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty (Codex has no live feed and its limit windows stay valid for hours, so it goes stale after 5 hours) |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |

@@ -168,6 +168,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `cost.session.today` | **現セッションの当日分**推定コスト(Claudeのみ)、`$1.84` |
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
 | `plan` | プラン名(`prolite` 等) |
+| `credits` | クレジット残高(Codex の `rate_limits.credits` 由来。値が無いツール/プランでは `--`)、`23.5` |
 | `cwd` | 作業ディレクトリ(basename) |
 | `stale` | 60分超で `⚠1h `(印+経過時間)、それ以外は空(Codexはライブ入力が無く、リミット枠が数時間有効なため5時間超で stale) |
 | `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
