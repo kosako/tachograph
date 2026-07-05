@@ -85,14 +85,14 @@ func TestClaudeTokens(t *testing.T) {
 	writeFile(t, filepath.Join(root, "projects", "p", "old.jsonl"),
 		claudeMsg(yesterday, 1000, 0, 0, 1000)+"\n", yesterday)
 
-	got := ClaudeTotals(root, now, noPrices).Tokens
+	got := mustClaudeTotals(t, root, now, noPrices).Tokens
 	if want := int64(5500 + 1156); got != want {
 		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got, want)
 	}
 
 	// With a price for the model, cost is summed across today's messages.
 	prices := pricing.Table{"claude-fable": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}}
-	cost := ClaudeTotals(root, now, prices).Cost
+	cost := mustClaudeTotals(t, root, now, prices).Cost
 	// msg1: (100*15 + 5000*18.75 + 30000*1.5 + 400*75)/1e6
 	// msg2: (2*15 + 673*18.75 + 39451*1.5 + 481*75)/1e6
 	want := (100*15.0+5000*18.75+30000*1.5+400*75)/1e6 +
@@ -110,8 +110,8 @@ func TestClaudeTotalsUsesClaudeConfigDir(t *testing.T) {
 	writeFile(t, filepath.Join(root, "projects", "p", "today.jsonl"),
 		claudeMsg(now, 10, 20, 100, 5)+"\n", now)
 
-	if got := ClaudeTotals("", now, noPrices).Tokens; got != 35 {
-		t.Errorf("ClaudeTotals(empty root).Tokens = %d, want 35 from CLAUDE_CONFIG_DIR", got)
+	if got := mustClaudeTotals(t, "", now, noPrices).Tokens; got != 35 {
+		t.Errorf("mustClaudeTotals(t, empty root).Tokens = %d, want 35 from CLAUDE_CONFIG_DIR", got)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestClaudeCostWithCacheCreationTTL(t *testing.T) {
 		claudeMsgCacheCreation(now, 100, 200, 300, 1000, 10)+"\n", now)
 
 	prices := pricing.Table{"claude-fable": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}}
-	got := ClaudeTotals(root, now, prices)
+	got := mustClaudeTotals(t, root, now, prices)
 	if got.Tokens != 100+200+300+10 {
 		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got.Tokens, 100+200+300+10)
 	}
@@ -141,7 +141,7 @@ func TestClaudeCostClampsInconsistentCacheCreationTTL(t *testing.T) {
 		claudeMsgCacheCreationTotal(now, 100, 250, 200, 300, 1000, 10)+"\n", now)
 
 	prices := pricing.Table{"claude-fable": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}}
-	got := ClaudeTotals(root, now, prices)
+	got := mustClaudeTotals(t, root, now, prices)
 	if got.Tokens != 100+250+10 {
 		t.Errorf("ClaudeTotals.Tokens = %d, want %d", got.Tokens, 100+250+10)
 	}
@@ -195,7 +195,7 @@ func TestClaudeTotalsIncludesSubagentsAndWorkflows(t *testing.T) {
 	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "old-agent.jsonl"),
 		claudeMsg(yesterday, 1000, 1000, 1000, 1000)+"\n", yesterday)
 
-	if got := ClaudeTotals(root, now, noPrices).Tokens; got != int64(35+6+15) {
+	if got := mustClaudeTotals(t, root, now, noPrices).Tokens; got != int64(35+6+15) {
 		t.Errorf("ClaudeTotals.Tokens = %d, want %d (main + subagent + workflow)", got, 35+6+15)
 	}
 
@@ -203,7 +203,7 @@ func TestClaudeTotalsIncludesSubagentsAndWorkflows(t *testing.T) {
 	wantCost := (10*15.0+20*18.75+100*1.5+5*75)/1e6 +
 		(1*15.0+2*18.75+50*1.5+3*75)/1e6 +
 		(4*15.0+5*18.75+60*1.5+6*75)/1e6
-	if cost := ClaudeTotals(root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
+	if cost := mustClaudeTotals(t, root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
 		t.Errorf("ClaudeTotals.Cost = %v, want %v", cost, wantCost)
 	}
 	if got := ClaudeSessionToday(mainPath, now, noPrices).Tokens; got != int64(35+6+15) {
@@ -227,14 +227,14 @@ func TestClaudeDedup(t *testing.T) {
 	// A second file re-includes response A (resume copies the prior turn).
 	writeFile(t, filepath.Join(root, "projects", "p", "s2.jsonl"), a+"\n", now)
 
-	if got := ClaudeTotals(root, now, noPrices).Tokens; got != int64(35+6) {
+	if got := mustClaudeTotals(t, root, now, noPrices).Tokens; got != int64(35+6) {
 		t.Errorf("ClaudeTotals.Tokens = %d, want %d (A once + B once)", got, 35+6)
 	}
 
 	// Cost dedups identically: A + B priced once each.
 	prices := pricing.Table{"claude-fable": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}}
 	wantCost := (10*15.0+20*18.75+100*1.5+5*75)/1e6 + (1*15.0+2*18.75+50*1.5+3*75)/1e6
-	if cost := ClaudeTotals(root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
+	if cost := mustClaudeTotals(t, root, now, prices).Cost; cost-wantCost > 1e-9 || cost-wantCost < -1e-9 {
 		t.Errorf("ClaudeTotals.Cost = %v, want %v", cost, wantCost)
 	}
 
@@ -261,12 +261,12 @@ func TestCodexTotals(t *testing.T) {
 	yDir := filepath.Join(root, "sessions", y.Local().Format("2006"), y.Local().Format("01"), y.Local().Format("02"))
 	writeFile(t, filepath.Join(yDir, "old.jsonl"), codexSession(9999), y)
 
-	if got := CodexTotals(root, now, noPrices).Tokens; got != 1500 {
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 1500 {
 		t.Errorf("CodexTotals.Tokens = %d, want 1500", got)
 	}
 	// input=1000/500 all non-cached, priced at In=2/Mtok → (1000+500)*2/1e6.
 	prices := pricing.Table{"gpt-5": {In: 2}}
-	if cost := CodexTotals(root, now, prices).Cost; cost != 1500*2.0/1e6 {
+	if cost := mustCodexTotals(t, root, now, prices).Cost; cost != 1500*2.0/1e6 {
 		t.Errorf("CodexTotals.Cost = %v, want %v", cost, 1500*2.0/1e6)
 	}
 }
@@ -279,8 +279,8 @@ func TestCodexTotalsUsesCodexHome(t *testing.T) {
 	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
 	writeFile(t, filepath.Join(dayDir, "s1.jsonl"), codexSession(1000), now)
 
-	if got := CodexTotals("", now, noPrices).Tokens; got != 1000 {
-		t.Errorf("CodexTotals(empty root).Tokens = %d, want 1000 from CODEX_HOME", got)
+	if got := mustCodexTotals(t, "", now, noPrices).Tokens; got != 1000 {
+		t.Errorf("mustCodexTotals(t, empty root).Tokens = %d, want 1000 from CODEX_HOME", got)
 	}
 }
 
@@ -298,16 +298,75 @@ func TestCodexTotalsDedupSession(t *testing.T) {
 	// A distinct session adds 500.
 	writeFile(t, filepath.Join(dayDir, "rollout-2026-05-24T12-00-00-019e0000-0000-7000-8000-000000000000.jsonl"), codexSession(500), now)
 
-	if got := CodexTotals(root, now, noPrices).Tokens; got != int64(1500+500) {
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != int64(1500+500) {
 		t.Errorf("CodexTotals.Tokens = %d, want %d (resumed session counted once at max cumulative + distinct)", got, 1500+500)
 	}
 }
 
 func TestEmptyRoots(t *testing.T) {
-	if got := ClaudeTotals(t.TempDir(), time.Now(), noPrices); got.Tokens != 0 || got.Cost != 0 {
-		t.Errorf("ClaudeTotals(empty) = %+v", got)
+	if got := mustClaudeTotals(t, t.TempDir(), time.Now(), noPrices); got.Tokens != 0 || got.Cost != 0 {
+		t.Errorf("mustClaudeTotals(t, empty) = %+v", got)
 	}
-	if got := CodexTotals(t.TempDir(), time.Now(), noPrices); got.Tokens != 0 || got.Cost != 0 {
-		t.Errorf("CodexTotals(empty) = %+v", got)
+	if got := mustCodexTotals(t, t.TempDir(), time.Now(), noPrices); got.Tokens != 0 || got.Cost != 0 {
+		t.Errorf("mustCodexTotals(t, empty) = %+v", got)
+	}
+}
+
+// mustClaudeTotals / mustCodexTotals unwrap the error for the happy-path
+// tests, which all operate on readable roots.
+func mustClaudeTotals(t *testing.T, root string, now time.Time, prices pricing.Table) Totals {
+	t.Helper()
+	tot, err := ClaudeTotals(root, now, prices)
+	if err != nil {
+		t.Fatalf("ClaudeTotals(%q) error: %v", root, err)
+	}
+	return tot
+}
+
+func mustCodexTotals(t *testing.T, root string, now time.Time, prices pricing.Table) Totals {
+	t.Helper()
+	tot, err := CodexTotals(root, now, prices)
+	if err != nil {
+		t.Fatalf("CodexTotals(%q) error: %v", root, err)
+	}
+	return tot
+}
+
+func TestClaudeTotalsZeroWhenProjectsMissing(t *testing.T) {
+	now := time.Now()
+	tot, err := ClaudeTotals(t.TempDir(), now, noPrices)
+	if err != nil {
+		t.Fatalf("ClaudeTotals error: %v (a missing projects dir is a real zero, not unknown)", err)
+	}
+	if tot.Tokens != 0 {
+		t.Errorf("Tokens = %d, want 0", tot.Tokens)
+	}
+}
+
+func TestClaudeTotalsErrorWhenProjectsUnreadable(t *testing.T) {
+	root := t.TempDir()
+	// projects as a regular file makes os.ReadDir fail with a non-NotExist
+	// error on every platform — the "unknown, keep daily null" case.
+	if err := os.WriteFile(filepath.Join(root, "projects"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClaudeTotals(root, time.Now(), noPrices); err == nil {
+		t.Fatal("ClaudeTotals error = nil, want error for unreadable projects dir")
+	}
+}
+
+func TestCodexTotalsErrorWhenDayDirUnreadable(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	monthDir := filepath.Join(root, "sessions", now.Format("2006"), now.Format("01"))
+	if err := os.MkdirAll(monthDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Today's day directory as a regular file: non-NotExist ReadDir error.
+	if err := os.WriteFile(filepath.Join(monthDir, now.Format("02")), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CodexTotals(root, now, noPrices); err == nil {
+		t.Fatal("CodexTotals error = nil, want error for unreadable day dir")
 	}
 }

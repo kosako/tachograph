@@ -64,7 +64,7 @@
     "session_tokens": 989120,
     "estimated_cost_usd": null
   },
-  "daily": {                          // 当日(ローカル日付)の全セッション合計
+  "daily": {                          // 当日(ローカル日付)の全セッション合計。ログの走査に失敗したとき(集計値が不明のとき)は null(0 と区別)
     "tokens": 12704565,               // 新規トークン(cache_read等の再読込は除外)
     "cost_usd": null                  // 料金表ベースの推定コスト(未確定時null)
   },
@@ -104,7 +104,8 @@
 Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`
 の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
 `daily` は `projects` 配下の通常セッションに加え、同セッション配下の subagents / workflows
-transcript も集計する。`session_today` も現セッション transcript と、その同名セッション
+transcript も集計する。ログディレクトリの走査自体に失敗したとき(データ未生成の
+「実在する 0」と区別できないとき)は `daily` を null にする(不明は null 原則)。`session_today` も現セッション transcript と、その同名セッション
 ディレクトリ配下の subagents / workflows transcript を集計する。
 
 ## バージョニング
