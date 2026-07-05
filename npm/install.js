@@ -41,6 +41,21 @@ async function fetchBuffer(url, what) {
   }
 }
 
+// tarBin picks the extractor. On Windows the zip asset needs bsdtar, but PATH
+// can resolve Git for Windows' GNU tar, which cannot read zip archives
+// ("This does not look like a tar archive"). System32's tar.exe is bsdtar on
+// Windows 10 1803+, so prefer it explicitly; elsewhere the system tar handles
+// our tar.gz (bsdtar on macOS, GNU tar on Linux).
+function tarBin() {
+  if (process.platform !== "win32") return "tar";
+  const sys = path.join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32",
+    "tar.exe",
+  );
+  return fs.existsSync(sys) ? sys : "tar";
+}
+
 async function main() {
   const { asset, binary } = assetFor(process.platform, process.arch);
 
@@ -60,17 +75,26 @@ async function main() {
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tacho-"));
-  const archive = path.join(tmp, asset);
-  fs.writeFileSync(archive, buf);
-
-  fs.mkdirSync(binDir, { recursive: true });
-  // bsdtar/GNU tar both extract by extension; -C lands the binary in bin/.
-  execFileSync("tar", ["-xf", archive, "-C", binDir], { stdio: "inherit" });
-  fs.rmSync(tmp, { recursive: true, force: true });
-
   const binPath = path.join(binDir, binary);
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`extracted archive but ${binary} not found in ${binDir}`);
+  try {
+    fs.writeFileSync(path.join(tmp, asset), buf);
+
+    // Run inside tmp with relative names only: GNU tar (which can shadow
+    // bsdtar in PATH, e.g. Git for Windows' usr/bin) parses the colon in
+    // absolute Windows paths ("C:\...") as a remote host:path spec and fails
+    // with "Cannot connect to C:".
+    execFileSync(tarBin(), ["-xf", asset], { cwd: tmp, stdio: "inherit" });
+
+    const extracted = path.join(tmp, binary);
+    if (!fs.existsSync(extracted)) {
+      throw new Error(`extracted archive but ${binary} not found in it`);
+    }
+    // Copy just the binary; the archive also carries LICENSE/README, which
+    // don't belong in bin/.
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.copyFileSync(extracted, binPath);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
   if (process.platform !== "win32") {
     fs.chmodSync(binPath, 0o755);
