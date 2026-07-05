@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -204,5 +205,31 @@ func TestStatusLines(t *testing.T) {
 	got := StatusLines(s, time.Now(), plain)
 	if len(strings.Split(got, "\n")) != 2 {
 		t.Errorf("StatusLines = %q, want 2 lines", got)
+	}
+}
+
+func TestToolLineColumnsRuneAligned(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.Local)
+	fresh := limitsTool()
+	stale := limitsTool()
+	stale.Stale = true
+	collected := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	stale.CollectedAt = &collected
+
+	freshLine := ToolLine(fresh, now, plain)
+	staleLine := ToolLine(stale, now, plain)
+
+	// The ⚠ mark is one rune but three bytes; byte-based padding used to
+	// shift every column after it on stale lines.
+	freshCtx := strings.Index(freshLine, "ctx ")
+	staleCtx := strings.Index(staleLine, "ctx ")
+	if freshCtx < 0 || staleCtx < 0 {
+		t.Fatalf("ctx column missing: fresh=%q stale=%q", freshLine, staleLine)
+	}
+	fCols := utf8.RuneCountInString(freshLine[:freshCtx])
+	sCols := utf8.RuneCountInString(staleLine[:staleCtx])
+	if fCols != sCols {
+		t.Errorf("ctx column drifts: fresh at rune %d, stale at rune %d\nfresh: %q\nstale: %q",
+			fCols, sCols, freshLine, staleLine)
 	}
 }

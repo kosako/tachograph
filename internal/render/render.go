@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -211,13 +212,24 @@ func DisplayText(s string) string {
 	}, s)
 }
 
+// pad left-justifies s to width, counting runes rather than bytes so
+// multi-byte characters (the ⚠ stale mark, non-ASCII model names) don't skew
+// the columns the way fmt's %-Ns byte padding does. Double-cell (CJK) glyphs
+// would still mis-align, but none appear in tool names or marks.
+func pad(s string, width int) string {
+	if n := utf8.RuneCountInString(s); n < width {
+		return s + strings.Repeat(" ", width-n)
+	}
+	return s
+}
+
 // ToolLine renders one tool as a single compact line.
 func ToolLine(t schema.Tool, now time.Time, st Style) string {
 	name := t.Tool
 	if name == schema.ToolClaudeCode {
 		name = "claude"
 	}
-	head := fmt.Sprintf("%-6s %-14s %-4s", name, ModelShort(t.Model), staleMark(t, now))
+	head := pad(name, 6) + " " + pad(ModelShort(t.Model), 14) + " " + pad(staleMark(t, now), 4)
 
 	if !t.Available {
 		return head + st.dim(" (not found)")
