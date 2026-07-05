@@ -16,24 +16,41 @@ const { assetFor, downloadURL, checksumsURL, checksumFor } = require("./asset");
 const { version } = require("./package.json");
 const binDir = path.join(__dirname, "bin");
 
+// Abort hung downloads instead of letting `npm install` block forever; the
+// timeout covers headers and body, and the catch at the bottom points users
+// at the go-install fallback.
+const FETCH_TIMEOUT_MS = 120_000;
+
+// fetchBuffer downloads url fully and maps failures (HTTP errors, timeouts)
+// to messages that name what was being fetched.
+async function fetchBuffer(url, what) {
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`${what} failed: ${res.status} ${res.statusText} for ${url}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    if (err.name === "TimeoutError") {
+      throw new Error(`${what} timed out after ${FETCH_TIMEOUT_MS / 1000}s for ${url}`);
+    }
+    throw err;
+  }
+}
+
 async function main() {
   const { asset, binary } = assetFor(process.platform, process.arch);
-  const url = downloadURL(version, asset);
 
-  const res = await fetch(url, { redirect: "follow" });
-  if (!res.ok) {
-    throw new Error(`download failed: ${res.status} ${res.statusText} for ${url}`);
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
+  const buf = await fetchBuffer(downloadURL(version, asset), "download");
 
   // Verify the archive against GoReleaser's published checksums.txt before
   // extracting and running it, so a corrupted/tampered/partial download is
   // caught rather than executed.
-  const sums = await fetch(checksumsURL(version), { redirect: "follow" });
-  if (!sums.ok) {
-    throw new Error(`checksums download failed: ${sums.status} ${sums.statusText}`);
-  }
-  const want = checksumFor(await sums.text(), asset);
+  const sums = await fetchBuffer(checksumsURL(version), "checksums download");
+  const want = checksumFor(sums.toString("utf8"), asset);
   if (!want) {
     throw new Error(`no checksum listed for ${asset}`);
   }
