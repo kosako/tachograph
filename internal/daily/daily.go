@@ -165,18 +165,14 @@ func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnk
 		float64(out)*r.Out) / 1_000_000
 }
 
-// codexScanDays is how many day directories (today and previous) CodexTotals
-// scans. Rollouts live in their session's START-day directory, so a session
-// running past midnight keeps writing to an older day's file; reading only
-// today's directory would miss its today-portion entirely (#133). Matches the
-// collector's cross-day comparison window.
-const codexScanDays = 3
-
 // CodexTotals sums today's new tokens and estimated cost across Codex
 // sessions. root defaults to CODEX_HOME or ~/.codex. total_token_usage is
 // cumulative per session, so each session contributes its growth since local
 // midnight: the last cumulative snapshot minus the last snapshot before today
-// (zero for sessions started today).
+// (zero for sessions started today). Rollouts live in their session's
+// START-day directory however long the session runs (#133, #188), so
+// candidates come from file mtime, not the directory date: only a file
+// modified today can hold today's growth.
 func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
 	var ok bool
 	root, ok = agentpath.CodexRoot(root)
@@ -185,6 +181,20 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 	}
 	local := now.Local()
 	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+	sessions := filepath.Join(root, "sessions")
+	todayDir := filepath.Join(sessions, local.Format("2006"), local.Format("01"), local.Format("02"))
+
+	// Today's directory must be listable when it exists: it holds today's
+	// sessions by default, so "can't list" means the total is unknown, not
+	// zero (#180) — the tree walk below skips non-directory entries silently.
+	if _, err := os.ReadDir(todayDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Totals{}, err
+	}
+
+	files, err := codexRolloutFiles(sessions)
+	if err != nil {
+		return Totals{}, err // unknown total; callers keep daily null, not 0
+	}
 
 	var out Totals
 	// Dedup by session id (the UUID in the rollout filename) keeping the
@@ -192,47 +202,118 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 	// into a second file isn't counted twice. Files without a parseable id
 	// can't be deduped and are summed as-is.
 	bySession := map[string]*codexRollout{}
-	for back := 0; back < codexScanDays; back++ {
-		day := local.AddDate(0, 0, -back)
-		dayDir := filepath.Join(root, "sessions", day.Format("2006"), day.Format("01"), day.Format("02"))
-		entries, err := os.ReadDir(dayDir)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // days without sessions have no directory
+	var old []codexRolloutFile
+	for _, f := range files {
+		if f.mod.Before(dayStart) {
+			old = append(old, f)
+			continue
 		}
+		ro, err := codexRolloutUsage(f.path, dayStart)
 		if err != nil {
 			return Totals{}, err // unknown total; callers keep daily null, not 0
 		}
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-				continue
-			}
-			ro, err := codexRolloutUsage(filepath.Join(dayDir, e.Name()), dayStart)
-			if err != nil {
-				return Totals{}, err // unknown total; callers keep daily null, not 0
-			}
-			if ro.last == nil {
-				continue
-			}
-			// Without any parsable timestamp the cumulative can't be split
-			// at midnight; attribute it to the file's own day directory
-			// (count fully in today's directory, ignore in older ones).
-			if !ro.tsParsed && back != 0 {
-				continue
-			}
-			id, ok := codex.SessionID(e.Name())
-			if !ok {
-				t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
-				out.Tokens += t.Tokens
-				out.Cost += t.Cost
-				continue
-			}
-			mergeCodexRollout(bySession, id, ro)
+		if ro.last == nil {
+			continue
 		}
+		// Without any parsable timestamp the cumulative can't be split
+		// at midnight; attribute it to the file's own day directory
+		// (count fully in today's directory, ignore in older ones).
+		if !ro.tsParsed && f.day != todayDir {
+			continue
+		}
+		id, ok := codex.SessionID(filepath.Base(f.path))
+		if !ok {
+			t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+			out.Tokens += t.Tokens
+			out.Cost += t.Cost
+			continue
+		}
+		mergeCodexRollout(bySession, id, ro)
+	}
+	// A session resumed today carries its cumulative forward from an earlier
+	// file last written before midnight; that file holds the delta base (the
+	// last pre-midnight snapshot). Only files sharing a session id seen today
+	// can contribute, so only those are read.
+	for _, f := range old {
+		id, ok := codex.SessionID(filepath.Base(f.path))
+		if !ok || bySession[id] == nil {
+			continue
+		}
+		ro, err := codexRolloutUsage(f.path, dayStart)
+		if err != nil {
+			return Totals{}, err // unknown total; callers keep daily null, not 0
+		}
+		if ro.last == nil || !ro.tsParsed {
+			continue
+		}
+		mergeCodexRollout(bySession, id, ro)
 	}
 	for _, ro := range bySession {
 		t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
 		out.Tokens += t.Tokens
 		out.Cost += t.Cost
+	}
+	return out, nil
+}
+
+// codexRolloutFile is one rollout candidate: its path, the day directory
+// holding it, and its mtime.
+type codexRolloutFile struct {
+	path string
+	day  string
+	mod  time.Time
+}
+
+// codexRolloutFiles lists every rollout under sessions/YYYY/MM/DD with its
+// mtime. Listing or stat failures make a day's contents unknown, so they are
+// errors (callers keep daily null) rather than silent gaps (#187). Non-.jsonl
+// and non-directory entries are skipped.
+func codexRolloutFiles(sessions string) ([]codexRolloutFile, error) {
+	years, err := os.ReadDir(sessions)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil // no sessions yet: a real zero, not unknown
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []codexRolloutFile
+	for _, y := range years {
+		if !y.IsDir() {
+			continue
+		}
+		months, err := os.ReadDir(filepath.Join(sessions, y.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range months {
+			if !m.IsDir() {
+				continue
+			}
+			days, err := os.ReadDir(filepath.Join(sessions, y.Name(), m.Name()))
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range days {
+				if !d.IsDir() {
+					continue
+				}
+				day := filepath.Join(sessions, y.Name(), m.Name(), d.Name())
+				entries, err := os.ReadDir(day)
+				if err != nil {
+					return nil, err
+				}
+				for _, e := range entries {
+					if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+						continue
+					}
+					info, err := e.Info()
+					if err != nil {
+						return nil, err
+					}
+					out = append(out, codexRolloutFile{filepath.Join(day, e.Name()), day, info.ModTime()})
+				}
+			}
+		}
 	}
 	return out, nil
 }

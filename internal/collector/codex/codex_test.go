@@ -235,18 +235,23 @@ func tcLine(ts string, total int64) string {
 
 // Collect must pick the session whose last token_count is the most recent, not
 // the newest file by mtime — a later turn in an older-mtime file still wins.
+// (mtimes stay realistic — a file is at least as new as its last event — since
+// that invariant is what lets the walk prune older files.)
 func TestCollectPicksLatestTokenCountNotMtime(t *testing.T) {
 	root := t.TempDir()
 	day := filepath.Join(root, "sessions", "2026", "05", "24")
 	if err := os.MkdirAll(day, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Session A: last token_count at 10:05 (model gpt-a), but OLDER file mtime.
+	// Session A: last token_count at 10:05 (model gpt-a), file written then.
 	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
-		ctxLine("2026-05-24T10:00:00.000Z", "gpt-a", "/a")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150), time.Unix(1000, 0))
-	// Session B: last token_count at 10:02 (older), but NEWER file mtime.
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-a", "/a")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150),
+		time.Date(2026, 5, 24, 10, 5, 30, 0, time.UTC))
+	// Session B: last token_count at 10:02 (older), but NEWER file mtime
+	// (e.g. still streaming events that carry no token_count).
 	writeRollout(t, day, "rollout-2026-05-24T10-01-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
-		ctxLine("2026-05-24T10:01:00.000Z", "gpt-b", "/b")+"\n"+tcLine("2026-05-24T10:02:00.000Z", 99), time.Unix(2000, 0))
+		ctxLine("2026-05-24T10:01:00.000Z", "gpt-b", "/b")+"\n"+tcLine("2026-05-24T10:02:00.000Z", 99),
+		time.Date(2026, 5, 24, 10, 7, 0, 0, time.UTC))
 
 	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
 	got := Collect(Options{Root: root, Now: now})
@@ -255,6 +260,60 @@ func TestCollectPicksLatestTokenCountNotMtime(t *testing.T) {
 	}
 	if got.Model == nil || got.Model.ID != "gpt-a" {
 		t.Errorf("Model = %+v, want gpt-a (freshest token_count wins over newer mtime)", got.Model)
+	}
+}
+
+// Regression for #188: a session that has been running for days lives in a
+// day directory far behind several newer rollout-holding days. A day-count
+// cutoff (the old extraDaysCompared = 2) stopped before reaching it; mtime
+// ordering must find it regardless of how many days sit in between.
+func TestCollectFindsLongRunningSessionPastNewerDays(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+
+	// Long-running session: started on 05-19, freshest token_count today
+	// (05-24 10:05) — its file mtime moved forward with the appends.
+	oldDay := filepath.Join(sessions, "2026", "05", "19")
+	if err := os.MkdirAll(oldDay, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, oldDay, "rollout-2026-05-19T09-00-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
+		ctxLine("2026-05-19T09:00:00.000Z", "gpt-long", "/long")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 999),
+		time.Date(2026, 5, 24, 10, 5, 0, 0, time.UTC))
+
+	// Three newer days each hold a finished session, so a day-count cutoff
+	// exhausts its budget before reaching 05-19.
+	for i, d := range []string{"21", "22", "23"} {
+		day := filepath.Join(sessions, "2026", "05", d)
+		if err := os.MkdirAll(day, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ts := fmt.Sprintf("2026-05-%sT12:00:00.000Z", d)
+		writeRollout(t, day, fmt.Sprintf("rollout-2026-05-%sT12-00-00-019e5933-2289-7e72-88fd-%012d.jsonl", d, i),
+			ctxLine(ts, "gpt-"+d, "/x")+"\n"+tcLine(ts, 100),
+			time.Date(2026, 5, 21+i, 12, 0, 0, 0, time.UTC))
+	}
+
+	// Today: a one-off run whose token_count is older than the long-running
+	// session's latest.
+	today := filepath.Join(sessions, "2026", "05", "24")
+	if err := os.MkdirAll(today, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, today, "rollout-2026-05-24T09-00-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
+		ctxLine("2026-05-24T09:00:00.000Z", "gpt-today", "/t")+"\n"+tcLine("2026-05-24T09:01:00.000Z", 50),
+		time.Date(2026, 5, 24, 9, 1, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-long" {
+		t.Errorf("Model = %+v, want gpt-long (freshest token_count sits 5 day-dirs back)", got.Model)
+	}
+	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 999 {
+		t.Errorf("Session.Tokens = %+v, want the long-running session's 999", got.Session)
 	}
 }
 

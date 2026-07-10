@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
@@ -64,44 +65,78 @@ type pick struct {
 	readErr error // last read error, surfaced only when no usable session was found
 }
 
-// extraDaysCompared is how many additional older day directories (that hold
-// rollouts) are still compared by token_count timestamp after the newest
-// usable day. Rollouts live in their session's START-day directory, so a
-// session running past midnight keeps appending fresher token_counts to an
-// older day's file; the newest day directory alone cannot be trusted (#133).
-// Two extra days cover a session spanning a skipped-day gap (e.g. started
-// Friday, still running Monday).
-const extraDaysCompared = 2
-
-// pickSession walks the YYYY/MM/DD tree newest-first and returns the rollout
-// with the freshest token_count by event timestamp. Every Codex surface
-// (interactive TUI, codex exec, desktop app, IDE extension) writes a rollout
-// into its start-day directory; the freshest token_count — not the newest file
-// by mtime, nor the newest day directory — is the current one (rate limits are
-// account-global, so any session's latest token_count is valid). It backtracks
-// past days whose rollouts all lack a token_count, and once one is found it
-// compares extraDaysCompared more rollout-holding days so a cross-midnight
-// session in an older directory can outrank a one-off run in today's.
+// pickSession returns the rollout with the freshest token_count by event
+// timestamp across every day directory. Every Codex surface (interactive
+// TUI, codex exec, desktop app, IDE extension) writes a rollout into its
+// START-day directory and keeps appending there however long the session
+// runs (#133, #188), so recency comes from file mtime, not the directory
+// date. Candidates are visited newest-mtime-first and the walk stops at the
+// first file older than the freshest token_count found: appends move mtime
+// forward, so a file's events are never newer than its mtime and such a file
+// cannot win. The freshest token_count — not the newest file by mtime — is
+// still what decides (rate limits are account-global, so any session's
+// latest token_count is valid); a rollout without a token_count yet
+// (just-started session) is skipped so it can't hide older valid data.
 func pickSession(dir string) pick {
-	var acc pick
-	extra := 0
-	for _, day := range dayDirsDesc(dir) {
-		p := pickFromDay(day)
-		if acc.tc != nil && p.sawFile {
-			extra++
-		}
-		acc.sawFile = acc.sawFile || p.sawFile
-		if p.readErr != nil {
-			acc.readErr = p.readErr
-		}
-		if p.tc != nil && (acc.tc == nil || p.ts.After(acc.ts)) {
-			acc.tc, acc.turn, acc.path, acc.ts = p.tc, p.turn, p.path, p.ts
-		}
-		if acc.tc != nil && extra >= extraDaysCompared {
+	files := rolloutsByMtime(dir)
+	acc := pick{sawFile: len(files) > 0}
+	for _, f := range files {
+		if acc.tc != nil && f.mod.Before(acc.ts) {
 			break
+		}
+		tc, turn, err := sessionEvents(f.path)
+		if err != nil {
+			acc.readErr = err
+			continue
+		}
+		if tc == nil {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
+		if err != nil {
+			continue
+		}
+		if acc.tc == nil || ts.After(acc.ts) {
+			acc.tc, acc.turn, acc.path, acc.ts = tc, turn, f.path, ts
 		}
 	}
 	return acc
+}
+
+// rolloutFile is one .jsonl candidate with its modification time.
+type rolloutFile struct {
+	path string
+	mod  time.Time
+}
+
+// rolloutsByMtime lists every rollout under the YYYY/MM/DD tree, newest
+// mtime first. Equal mtimes tie-break by path (descending) so selection is
+// deterministic rather than dependent on directory read order.
+func rolloutsByMtime(dir string) []rolloutFile {
+	var out []rolloutFile
+	for _, day := range dayDirsDesc(dir) {
+		entries, err := os.ReadDir(day)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			out = append(out, rolloutFile{filepath.Join(day, e.Name()), info.ModTime()})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].mod.Equal(out[j].mod) {
+			return out[i].path > out[j].path
+		}
+		return out[i].mod.After(out[j].mod)
+	})
+	return out
 }
 
 // dayDirsDesc lists the YYYY/MM/DD leaf directories under dir, newest first by
@@ -126,33 +161,6 @@ func subdirsDesc(dir string) []string {
 	for i := len(entries) - 1; i >= 0; i-- {
 		if entries[i].IsDir() {
 			out = append(out, filepath.Join(dir, entries[i].Name()))
-		}
-	}
-	return out
-}
-
-// pickFromDay returns the rollout with the latest token_count directly inside
-// day, or a token_count-less pick (sawFile set if any .jsonl existed) when none
-// has one. A rollout with no token_count yet (just-started session) is skipped
-// so it can't hide an older session's still-valid data.
-func pickFromDay(day string) pick {
-	files := jsonlFiles(day)
-	out := pick{sawFile: len(files) > 0}
-	for _, p := range files {
-		tc, turn, err := sessionEvents(p)
-		if err != nil {
-			out.readErr = err
-			continue
-		}
-		if tc == nil {
-			continue
-		}
-		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
-		if err != nil {
-			continue
-		}
-		if out.tc == nil || ts.After(out.ts) {
-			out.tc, out.turn, out.path, out.ts = tc, turn, p, ts
 		}
 	}
 	return out
@@ -183,23 +191,6 @@ func errTool(code, msg string) schema.Tool {
 	t.Available = true
 	t.Error = &schema.Error{Code: code, Message: msg}
 	return t
-}
-
-// jsonlFiles returns the .jsonl rollout paths directly inside day (unordered),
-// or nil when the directory holds none.
-func jsonlFiles(day string) []string {
-	entries, err := os.ReadDir(day)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-			continue
-		}
-		out = append(out, filepath.Join(day, e.Name()))
-	}
-	return out
 }
 
 func tailLines(path string) ([][]byte, error) {

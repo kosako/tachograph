@@ -66,6 +66,46 @@ func TestCodexTotalsIgnoresSessionFinishedYesterday(t *testing.T) {
 	}
 }
 
+// Regression for #188: a session started well before any fixed scan window
+// (5 days ago) and still running today keeps appending to its start-day
+// file. Candidates come from mtime, so today's growth is still counted.
+func TestCodexTotalsCountsSessionOlderThanScanWindow(t *testing.T) {
+	root := t.TempDir()
+	now, dayStart := codexDayClock()
+	beforeMidnight := dayStart.Add(-10 * time.Minute).Format(time.RFC3339)
+	afterMidnight := dayStart.Add(90 * time.Minute).Format(time.RFC3339)
+
+	writeFile(t, filepath.Join(codexDayDir(root, now, 5), "rollout-2026-06-29T08-00-00-019e5933-2289-7e72-88fd-ffffffffffff.jsonl"),
+		codexSessionAt([2]any{beforeMidnight, 100000}, [2]any{afterMidnight, 150000}), now)
+
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 50000 {
+		t.Errorf("CodexTotals.Tokens = %d, want 50000 (today's growth of a 5-day-old session)", got)
+	}
+}
+
+// The pre-midnight file of a resumed session was last written days ago
+// (mtime before today), so it is read only because today's resumed file
+// shares its session id — and without it the whole cumulative would be
+// misread as today's growth.
+func TestCodexTotalsResumeReadsOldFileBySessionID(t *testing.T) {
+	root := t.TempDir()
+	now, dayStart := codexDayClock()
+	final := dayStart.Add(-30 * time.Hour) // last write: the day before yesterday
+	resumed := dayStart.Add(60 * time.Minute).Format(time.RFC3339)
+	latest := dayStart.Add(110 * time.Minute).Format(time.RFC3339)
+
+	// Same session UUID: the old file holds the delta base (100000), the
+	// resumed file carries the cumulative forward to 150000.
+	writeFile(t, filepath.Join(codexDayDir(root, now, 3), "rollout-2026-07-01T20-00-00-019e5933-2289-7e72-88fd-abababababab.jsonl"),
+		codexSessionAt([2]any{final.Format(time.RFC3339), 100000}), final)
+	writeFile(t, filepath.Join(codexDayDir(root, now, 0), "rollout-2026-07-04T01-00-00-019e5933-2289-7e72-88fd-abababababab.jsonl"),
+		codexSessionAt([2]any{resumed, 120000}, [2]any{latest, 150000}), now)
+
+	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 50000 {
+		t.Errorf("CodexTotals.Tokens = %d, want 50000 (150000 latest - 100000 base from the old file)", got)
+	}
+}
+
 // A cross-midnight session that RESUMED into a second rollout today carries
 // its cumulative total forward. The session must be counted once: growth from
 // the pre-midnight snapshot (yesterday's file) to the resumed file's latest,

@@ -10,7 +10,8 @@ import (
 // crossMidnightRoot builds the #133 scenario: a main session that started
 // yesterday and kept running past midnight (its rollout stays in YESTERDAY's
 // directory), plus a one-off `codex exec` after midnight in TODAY's directory.
-// mainLastTC / execTC are the sessions' latest token_count timestamps.
+// mainLastTC / execTC are the sessions' latest token_count timestamps; each
+// file's mtime follows its own last event, as a live rollout's would.
 func crossMidnightRoot(t *testing.T, mainLastTC, execTC string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -25,12 +26,24 @@ func crossMidnightRoot(t *testing.T, mainLastTC, execTC string) string {
 		ctxLine("2026-07-03T22:00:00.000Z", "gpt-main", "/main")+"\n"+
 			tcLine("2026-07-03T23:50:00.000Z", 100000)+"\n"+
 			tcLine(mainLastTC, 150000),
-		time.Date(2026, 7, 4, 1, 30, 0, 0, time.UTC))
+		mtimeFor(t, mainLastTC))
 	writeRollout(t, newDay, "rollout-2026-07-04T00-10-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
 		ctxLine("2026-07-04T00:10:00.000Z", "gpt-exec", "/exec")+"\n"+
 			tcLine(execTC, 500),
-		time.Date(2026, 7, 4, 0, 10, 30, 0, time.UTC))
+		mtimeFor(t, execTC))
 	return root
+}
+
+// mtimeFor turns an event timestamp into the mtime a live rollout would
+// carry: appends move mtime forward, so a file is at least as new as its
+// last event.
+func mtimeFor(t *testing.T, ts string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Add(time.Second)
 }
 
 // Regression for issue #133 (1): the cross-midnight main session's fresher
@@ -67,8 +80,8 @@ func TestCollectCrossMidnightNewerExecStillWins(t *testing.T) {
 }
 
 // A session spanning a skipped-day gap (started Friday, still running Monday
-// with no rollouts in between) must still be compared: the extra-day window
-// counts only directories that hold rollouts.
+// with no rollouts in between) must still be compared: candidate order comes
+// from file mtime, so the empty days in between don't matter.
 func TestCollectCrossMidnightSkipsEmptyDayGap(t *testing.T) {
 	root := t.TempDir()
 	friday := filepath.Join(root, "sessions", "2026", "07", "03")
