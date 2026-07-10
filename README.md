@@ -77,7 +77,7 @@ tacho version    # 現在の版を確認(tacho doctor でも先頭に表示)
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
-バージョンを固定したい場合は、npm なら `tachograph@0.2.10`、go なら `@v0.2.10` のように指定します。`tacho version` はインストール時に埋め込んだ版(タグ)を表示します — タグ無しのローカルビルドはコミットベースの擬似バージョンになります。
+バージョンを固定したい場合は、npm なら `tachograph@0.3.0`、go なら `@v0.3.0` のように指定します。`tacho version` はインストール時に埋め込んだ版(タグ)を表示します — タグ無しのローカルビルドはコミットベースの擬似バージョンになります。
 
 ## 使い方
 
