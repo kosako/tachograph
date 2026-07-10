@@ -133,7 +133,7 @@ func TestSnapshot(t *testing.T) {
 	tool := schema.Unavailable(schema.ToolClaudeCode)
 	tool.Available = true
 	tool.CollectedAt = &collected
-	if err := WriteSnapshot(tool); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,6 +154,119 @@ func TestSnapshot(t *testing.T) {
 	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute))
 	if !ok || !got.Stale {
 		t.Errorf("ReadSnapshot stale recompute: got %+v, %v", got, ok)
+	}
+}
+
+// ReadSnapshotLimits ages limits from their original observation, not the
+// snapshot's CollectedAt, so re-saved snapshots can't extend them (#186).
+func TestReadSnapshotLimits(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+
+	pct := 42.0
+	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	observed := now.Add(-29 * 24 * time.Hour)
+	if err := WriteSnapshot(tool, observed); err != nil {
+		t.Fatal(err)
+	}
+
+	limits, backend, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	if !ok || len(limits) != 1 || backend != schema.BackendSubscription {
+		t.Fatalf("ReadSnapshotLimits = %+v, %q, %v", limits, backend, ok)
+	}
+	if !got.Equal(observed) {
+		t.Errorf("observed = %v, want %v", got, observed)
+	}
+
+	// The snapshot file is 2 minutes old, but the limits observation is 29
+	// days old: 2 more days puts it past SnapshotMaxAge.
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(2*24*time.Hour)); ok {
+		t.Error("limits past maxAge from their observation were returned")
+	}
+}
+
+// The display path must not show limits past their observation ceiling
+// either: a fresh snapshot whose limits observation has expired keeps its
+// other fields but drops the limits (#186).
+func TestReadSnapshotDropsExpiredLimits(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+
+	pct := 42.0
+	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	if !ok || !got.Available {
+		t.Fatalf("ReadSnapshot = %+v, %v (a fresh snapshot must still be served)", got, ok)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want nil past the observation ceiling", got.Limits)
+	}
+	if got.Backend != schema.BackendSubscription {
+		t.Errorf("Backend = %q, want the other fields preserved", got.Backend)
+	}
+}
+
+// Snapshots written before limits_collected_at existed (or with an unknown
+// observation) fall back to CollectedAt as the observation time.
+func TestReadSnapshotLimitsFallsBackToCollectedAt(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+
+	pct := 42.0
+	collectedTime := now.Add(-time.Hour)
+	collected := collectedTime.Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	if !ok {
+		t.Fatal("ReadSnapshotLimits = not ok, want CollectedAt fallback")
+	}
+	if got.Format(time.RFC3339) != collected {
+		t.Errorf("observed = %v, want CollectedAt %s", got, collected)
+	}
+}
+
+func TestReadSnapshotLimitsWithoutLimits(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now()
+
+	collected := now.Format(time.RFC3339)
+	tool := schema.Unavailable(schema.ToolClaudeCode)
+	tool.Available = true
+	tool.CollectedAt = &collected
+	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+		t.Error("ReadSnapshotLimits returned ok for a snapshot without limits")
 	}
 }
 

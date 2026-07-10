@@ -22,6 +22,11 @@ const SnapshotMaxAge = 30 * 24 * time.Hour
 
 type snapshotFile struct {
 	SchemaVersion string `json:"schema_version"`
+	// LimitsCollectedAt is when Limits were originally observed from a live
+	// statusline payload. Re-saves that merely carry limits forward keep the
+	// original time, so preserved limits age out from their real observation
+	// instead of being re-stamped fresh on every rewrite (#186).
+	LimitsCollectedAt *string `json:"limits_collected_at,omitempty"`
 	schema.Tool
 }
 
@@ -67,16 +72,80 @@ func WriteStatus(s *schema.Status) error {
 // WriteSnapshot persists a single tool's collected state outside the TTL
 // cache. Used by `tacho statusline` to piggyback Claude Code's push so
 // other renderers can show rate limits without a statusline stdin.
-func WriteSnapshot(t schema.Tool) error {
-	return writeJSON("snapshot-"+t.Tool+".json", snapshotFile{
-		SchemaVersion: schema.Version,
-		Tool:          t,
-	})
+// limitsObserved is when t.Limits were actually observed live: now for a
+// payload that carried them, the original observation for limits preserved
+// from a previous snapshot. With no limits (or a zero time) the field stays
+// unset.
+func WriteSnapshot(t schema.Tool, limitsObserved time.Time) error {
+	f := snapshotFile{SchemaVersion: schema.Version, Tool: t}
+	if len(t.Limits) > 0 && !limitsObserved.IsZero() {
+		s := limitsObserved.Local().Format(time.RFC3339)
+		f.LimitsCollectedAt = &s
+	}
+	return writeJSON("snapshot-"+t.Tool+".json", f)
 }
 
 // ReadSnapshot returns a tool snapshot no older than maxAge, with its
-// stale flag recomputed against now.
+// stale flag recomputed against now. Rate limits age out separately, from
+// their original observation time: a snapshot that preserved old limits
+// shortly before its writer went quiet would otherwise keep showing them
+// past the ceiling for up to another maxAge (#186).
 func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Tool, bool) {
+	snap, ok := readSnapshotFile(tool)
+	if !ok || snap.CollectedAt == nil {
+		return nil, false
+	}
+	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
+	if err != nil || now.Sub(ts) > maxAge {
+		return nil, false
+	}
+	t := snap.Tool
+	t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
+	if len(t.Limits) > 0 {
+		observed, ok := snap.limitsObservedAt()
+		if !ok || now.Sub(observed) > maxAge {
+			t.Limits = nil
+		}
+	}
+	return &t, true
+}
+
+// ReadSnapshotLimits returns the snapshot's rate limits together with the
+// backend they were observed under and their original observation time, for
+// callers deciding whether to carry them into a payload that lacks limits.
+// maxAge is measured from that observation, so limits that are only being
+// carried forward still age out (#186).
+func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time) ([]schema.Limit, string, time.Time, bool) {
+	snap, ok := readSnapshotFile(tool)
+	if !ok || len(snap.Limits) == 0 {
+		return nil, "", time.Time{}, false
+	}
+	observed, ok := snap.limitsObservedAt()
+	if !ok || now.Sub(observed) > maxAge {
+		return nil, "", time.Time{}, false
+	}
+	return snap.Limits, snap.Backend, observed, true
+}
+
+// limitsObservedAt resolves when the snapshot's limits were originally
+// observed: limits_collected_at, or collected_at for snapshots written
+// before the field existed.
+func (s *snapshotFile) limitsObservedAt() (time.Time, bool) {
+	str := s.CollectedAt
+	if s.LimitsCollectedAt != nil {
+		str = s.LimitsCollectedAt
+	}
+	if str == nil {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, *str)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
+}
+
+func readSnapshotFile(tool string) (*snapshotFile, bool) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, false
@@ -86,16 +155,10 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Too
 		return nil, false
 	}
 	var snap snapshotFile
-	if json.Unmarshal(b, &snap) != nil || snap.SchemaVersion != schema.Version || snap.CollectedAt == nil {
+	if json.Unmarshal(b, &snap) != nil || snap.SchemaVersion != schema.Version {
 		return nil, false
 	}
-	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
-	if err != nil || now.Sub(ts) > maxAge {
-		return nil, false
-	}
-	t := snap.Tool
-	t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
-	return &t, true
+	return &snap, true
 }
 
 func writeJSON(name string, v any) error {
