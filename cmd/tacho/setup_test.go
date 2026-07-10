@@ -177,3 +177,21 @@ func TestPathTachoIsSelf(t *testing.T) {
 		t.Error("a PATH symlink to this binary should count as self")
 	}
 }
+
+// When the running binary can't be resolved, setup must fail without writing
+// anything — the empty-exe fallback used to produce a bare command that could
+// configure a different install (#199 must).
+func TestSetupRefusesUnresolvableBinary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	orig := resolveExe
+	resolveExe = func() string { return "" }
+	t.Cleanup(func() { resolveExe = orig })
+
+	if code := runSetup([]string{"claude", "--write"}); code != 1 {
+		t.Fatalf("runSetup with unresolvable binary = %d, want 1", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
+		t.Fatal("settings.json was written despite the unresolvable binary")
+	}
+}

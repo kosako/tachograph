@@ -96,8 +96,9 @@ func runSetup(args []string) int {
 }
 
 // resolveExe returns the absolute path to the running binary, following
-// symlinks so the snippet points at the real file.
-func resolveExe() string {
+// symlinks so the snippet points at the real file. It's a var so tests can
+// simulate an unresolvable binary.
+var resolveExe = func() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
