@@ -98,7 +98,8 @@ type rlWindow struct {
 // would mask the last valid session's limits at exactly the moment they
 // matter most (#205).
 func (tc *TokenCount) Usable() bool {
-	if tc.Info != nil {
+	if i := tc.Info; i != nil &&
+		(i.TotalTokenUsage != nil || i.LastTokenUsage != nil || i.ModelContextWindow != nil) {
 		return true
 	}
 	rl := tc.RateLimits
