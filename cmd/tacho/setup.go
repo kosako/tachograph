@@ -186,7 +186,11 @@ func writeFileAtomic(path string, b []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 // claudeStatusLineCommand extracts the configured statusLine command, or a
@@ -233,10 +237,24 @@ func firstToken(command string) string {
 		return ""
 	}
 	if command[0] == '"' {
-		if i := strings.IndexByte(command[1:], '"'); i >= 0 {
-			return command[1 : 1+i]
+		// Undo the double-quote escaping setup.Command applies (\" \$ \` \\),
+		// so a quoted path round-trips into the real binary path (#194 L-01).
+		var b strings.Builder
+		for i := 1; i < len(command); i++ {
+			c := command[i]
+			if c == '\\' && i+1 < len(command) {
+				if n := command[i+1]; n == '"' || n == '$' || n == '`' || n == '\\' {
+					b.WriteByte(n)
+					i++
+					continue
+				}
+			}
+			if c == '"' {
+				return b.String()
+			}
+			b.WriteByte(c)
 		}
-		return strings.Trim(command, `"`)
+		return b.String() // unterminated quote: best effort
 	}
 	if i := strings.IndexAny(command, " \t"); i >= 0 {
 		return command[:i]
