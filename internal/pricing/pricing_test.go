@@ -39,6 +39,9 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 		{"gpt-5.5", tab["gpt-5.5"]},                              // first-party → version key
 		{"gpt-5-codex", tab["gpt-5"]},                            // no version → gpt-5 base
 		{"gpt-5.4-codex", tab["gpt-5.4"]},                        // -codex variant → 5.4 base
+		{"gpt-5.6-sol", tab["gpt-5.6"]},                          // Sol tier id → base alias
+		{"gpt-5.6-codex", tab["gpt-5.6"]},                        // -codex variant → 5.6 base (Sol)
+		{"openai.gpt-5.6-terra", tab["gpt-5.6-terra"]},           // Bedrock OpenAI → tier key
 		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
 	}
 	for _, c := range cases {
@@ -72,6 +75,10 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
+		{"gpt-5.6", Rate{5, 30, 0.5, 6.25}},     // Sol (default tier)
+		{"gpt-5.6-sol", Rate{5, 30, 0.5, 6.25}}, // full Sol id → base alias
+		{"gpt-5.6-terra", Rate{2.5, 15, 0.25, 3.125}},
+		{"gpt-5.6-luna", Rate{1, 6, 0.1, 1.25}},
 		{"gpt-5.5", Rate{5, 30, 0.5, 5}}, // and openai.gpt-5.5 via canonical
 		{"gpt-5.5-pro", Rate{30, 180, 3, 30}},
 		{"gpt-5.4", Rate{2.5, 15, 0.25, 2.5}},

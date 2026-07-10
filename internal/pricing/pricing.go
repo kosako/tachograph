@@ -33,17 +33,24 @@ var defaults = map[string]Rate{
 	"claude-haiku":    {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25},    // Haiku 4.5
 	"claude-fable":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},    // Fable 5
 	"claude-mythos":   {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},    // Mythos 5
-	// gpt-5.4 / gpt-5.5 and their variants are priced separately from the
-	// original gpt-5; the more specific keys win by longest-prefix match.
+	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
+	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.
-	"gpt-5.5":      {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 5},
-	"gpt-5.5-pro":  {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30}, // cached input unpublished; 0.1x convention
-	"gpt-5.4":      {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
-	"gpt-5.4-mini": {In: 0.75, Out: 4.5, CacheRead: 0.075, CacheWrite: 0.75},
-	"gpt-5.4-nano": {In: 0.2, Out: 1.25, CacheRead: 0.02, CacheWrite: 0.2},
-	"gpt-5.4-pro":  {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30},        // cached input unpublished; 0.1x convention
-	"gpt-5":        {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
-	"codex":        {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // fallback for "codex*" ids
+	// gpt-5.6 ships Sol/Terra/Luna tiers; bare "gpt-5.6" is OpenAI's alias for
+	// the default Sol tier, and Codex logs the full "gpt-5.6-sol" id (which
+	// prefix-matches this base). Unlike earlier gpt-5.x, 5.6 publishes a
+	// cache-write price at 1.25x input.
+	"gpt-5.6":       {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 6.25}, // Sol (default tier); alias of gpt-5.6-sol
+	"gpt-5.6-terra": {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 3.125},
+	"gpt-5.6-luna":  {In: 1, Out: 6, CacheRead: 0.1, CacheWrite: 1.25},
+	"gpt-5.5":       {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 5},
+	"gpt-5.5-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30}, // cached input unpublished; 0.1x convention
+	"gpt-5.4":       {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
+	"gpt-5.4-mini":  {In: 0.75, Out: 4.5, CacheRead: 0.075, CacheWrite: 0.75},
+	"gpt-5.4-nano":  {In: 0.2, Out: 1.25, CacheRead: 0.02, CacheWrite: 0.2},
+	"gpt-5.4-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30},        // cached input unpublished; 0.1x convention
+	"gpt-5":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
+	"codex":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // fallback for "codex*" ids
 	// Bare aliases some tools record instead of the full model id (e.g. a
 	// transcript that logs just "sonnet"). Same rate as the matching claude-* tier.
 	"opus":   {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},
