@@ -2,7 +2,7 @@
 // docs/schema.md is the authoritative specification.
 package schema
 
-const Version = "0.1"
+const Version = "0.2"
 
 // Tool name values.
 const (
