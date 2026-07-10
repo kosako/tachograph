@@ -1,7 +1,7 @@
 {
   "hook_event_name": "Status",
   "session_id": "abc12345-1234-5678-9abc-def012345678",
-  "transcript_path": "/Users/example/.claude/projects/-Users-example-dev-project/abc12345.jsonl",
+  "transcript_path": "testdata/clauderoot/projects/-Users-example-dev-project/abc12345-1234-5678-9abc-def012345678.jsonl",
   "cwd": "/Users/example/dev/project",
   "model": {
     "id": "claude-fable-5",

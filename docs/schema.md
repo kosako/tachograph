@@ -95,7 +95,7 @@
 |---|---|---|
 | `model` | statusline stdin JSON / transcripts の `message.model` | sessions JSONL `turn_context.payload.model` |
 | `model.effort` | statusline `effort.level`(ライブ値、`/effort` 変更も反映。transcripts経路や非対応モデルでは null) | —(null) |
-| `session.tokens` | statusline `context_window.total_*` / transcripts の `message.usage` 集計 | `token_count.payload.info.total_token_usage` |
+| `session.tokens` | transcript の `message.usage` 集計(statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary` |
 | `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |

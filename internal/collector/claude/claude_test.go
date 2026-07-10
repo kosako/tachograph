@@ -58,13 +58,14 @@ func TestFromStatusline(t *testing.T) {
 	if s.ContextUsedPct == nil || *s.ContextUsedPct != 8 {
 		t.Errorf("ContextUsedPct = %v", s.ContextUsedPct)
 	}
-	if s.Tokens == nil || s.Tokens.Input != 15500 || s.Tokens.Output != 1200 {
-		t.Errorf("Tokens = %+v", s.Tokens)
+	// Cumulative usage comes from the transcript (same aggregation as the
+	// transcript route), not from context_window.total_* — those mean
+	// "currently in the context window" since Claude Code v2.1.132 (#185).
+	if s.Tokens == nil || s.Tokens.Input != 75226 || s.Tokens.Output != 881 || s.Tokens.Total != 76107 {
+		t.Errorf("Tokens = %+v, want transcript cumulative (Input=75226, Output=881, Total=76107)", s.Tokens)
 	}
-	// statusline has no session-total cache field, so the per-turn
-	// current_usage.cache_read (2000 in testdata) must not leak in.
-	if s.Tokens.CachedInput != 0 {
-		t.Errorf("CachedInput = %d, want 0 (no session-total cache via statusline)", s.Tokens.CachedInput)
+	if s.Tokens.CachedInput != 69451 {
+		t.Errorf("CachedInput = %d, want 69451 (cache_read sum from transcript)", s.Tokens.CachedInput)
 	}
 
 	if len(got.Limits) != 2 {
@@ -84,6 +85,71 @@ func TestFromStatusline(t *testing.T) {
 
 	if got.Fallback == nil || got.Fallback.EstimatedCostUSD == nil || *got.Fallback.EstimatedCostUSD != 0.01234 {
 		t.Errorf("Fallback = %+v", got.Fallback)
+	}
+	if got.Fallback.SessionTokens == nil || *got.Fallback.SessionTokens != 76107 {
+		t.Errorf("Fallback.SessionTokens = %v, want 76107 (transcript cumulative)", got.Fallback.SessionTokens)
+	}
+}
+
+// statuslineInputWithTranscript returns the statusline fixture with its
+// transcript_path swapped for path.
+func statuslineInputWithTranscript(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/statusline_input.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["transcript_path"] = path
+	out, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// When the transcript can't be read there is no cumulative source, and tokens
+// must stay null (unknown) rather than carry context_window.total_* — those
+// mean "currently in the context window" since Claude Code v2.1.132 (#185).
+func TestFromStatuslineTranscriptUnreadable(t *testing.T) {
+	input := statuslineInputWithTranscript(t, filepath.Join(t.TempDir(), "missing.jsonl"))
+	got := Collect(Options{Root: "testdata/clauderoot", StatuslineInput: input, Getenv: noEnv})
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
+	}
+	if got.Session == nil || got.Session.Tokens != nil {
+		t.Errorf("Session.Tokens = %+v, want nil for an unreadable transcript", got.Session)
+	}
+	if got.Fallback == nil || got.Fallback.SessionTokens != nil {
+		t.Errorf("Fallback.SessionTokens = %+v, want nil for an unreadable transcript", got.Fallback)
+	}
+	// The rest of the statusline payload still renders.
+	if got.Session.ContextWindow == nil || *got.Session.ContextWindow != 200000 {
+		t.Errorf("ContextWindow = %v, want 200000", got.Session.ContextWindow)
+	}
+	if got.Fallback.EstimatedCostUSD == nil || *got.Fallback.EstimatedCostUSD != 0.01234 {
+		t.Errorf("EstimatedCostUSD = %v, want 0.01234", got.Fallback.EstimatedCostUSD)
+	}
+}
+
+// A transcript with no assistant usage yet (session just opened) has no
+// cumulative evidence either: tokens stay null, not zero.
+func TestFromStatuslineTranscriptNoUsage(t *testing.T) {
+	dir := t.TempDir()
+	writeTranscript(t, dir, "s.jsonl", `{"timestamp":"2026-06-12T12:00:00Z","type":"user"}`, time.Unix(1000, 0))
+	input := statuslineInputWithTranscript(t, filepath.Join(dir, "s.jsonl"))
+	got := Collect(Options{Root: "testdata/clauderoot", StatuslineInput: input, Getenv: noEnv})
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
+	}
+	if got.Session == nil || got.Session.Tokens != nil {
+		t.Errorf("Session.Tokens = %+v, want nil for a usage-less transcript", got.Session)
+	}
+	if got.Fallback == nil || got.Fallback.SessionTokens != nil {
+		t.Errorf("Fallback.SessionTokens = %+v, want nil for a usage-less transcript", got.Fallback)
 	}
 }
 
