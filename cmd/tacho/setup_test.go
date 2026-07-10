@@ -127,14 +127,12 @@ func TestSwiftBarPluginCandidates(t *testing.T) {
 // different tacho on the PATH would silently serve the statusline instead of
 // the binary being configured (#193).
 func TestPathTachoIsSelf(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH lookup and symlinks differ on windows")
-	}
 	dir := t.TempDir()
 	selfDir := filepath.Join(dir, "self")
 	otherDir := filepath.Join(dir, "other")
+	emptyDir := filepath.Join(dir, "empty")
 	linkDir := filepath.Join(dir, "link")
-	for _, d := range []string{selfDir, otherDir, linkDir} {
+	for _, d := range []string{selfDir, otherDir, emptyDir, linkDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -146,13 +144,28 @@ func TestPathTachoIsSelf(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink(self, filepath.Join(linkDir, "tacho")); err != nil {
-		t.Fatal(err)
-	}
 
+	// The negative cases must hold on every platform: an unverifiable or
+	// mismatching PATH lookup never claims the bare command.
+	if pathTachoIsSelf("") {
+		t.Error("an unknown running binary must never claim the bare command")
+	}
+	t.Setenv("PATH", emptyDir)
+	if pathTachoIsSelf(self) {
+		t.Error("no tacho on PATH must not count as self")
+	}
 	t.Setenv("PATH", otherDir)
 	if pathTachoIsSelf(self) {
 		t.Error("a different tacho on PATH must not count as self")
+	}
+
+	// The positive cases need unix PATH lookup semantics (no PATHEXT) and
+	// unprivileged symlinks.
+	if runtime.GOOS == "windows" {
+		t.Skip("positive cases need unix PATH lookup and symlinks")
+	}
+	if err := os.Symlink(self, filepath.Join(linkDir, "tacho")); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("PATH", selfDir)
 	if !pathTachoIsSelf(self) {
@@ -162,8 +175,5 @@ func TestPathTachoIsSelf(t *testing.T) {
 	t.Setenv("PATH", linkDir)
 	if !pathTachoIsSelf(self) {
 		t.Error("a PATH symlink to this binary should count as self")
-	}
-	if pathTachoIsSelf("") {
-		t.Error("an unknown running binary must never claim the bare command")
 	}
 }

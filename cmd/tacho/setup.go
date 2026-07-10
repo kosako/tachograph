@@ -27,6 +27,12 @@ func runSetup(args []string) int {
 	fs.Parse(args[1:])
 
 	exe := resolveExe()
+	if exe == "" {
+		// Without a resolved self there is no safe command to write: a bare
+		// `tacho` could be a different install shadowing this one (#193).
+		fmt.Fprintln(os.Stderr, "tacho: cannot determine the running binary's path; nothing safe to configure")
+		return 1
+	}
 	command := setup.Command(pathTachoIsSelf(exe), exe)
 	snippet := setup.Snippet(command)
 	path := claudeSettingsPath()

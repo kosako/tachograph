@@ -107,7 +107,7 @@ tacho setup claude --write   # ~/.claude/settings.json にマージ(既存設定
 tacho setup claude           # 貼り付け用スニペットを表示するだけ(自動編集しない)
 ```
 
-PATHが通っていれば `tacho statusline`、通っていなければ解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json` に追加:
+PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusline`、そうでなければ(PATH 未通、または別のインストールが PATH にある場合)解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json` に追加:
 
 ```json
 {

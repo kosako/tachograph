@@ -129,8 +129,9 @@ tacho setup claude --write   # merge into ~/.claude/settings.json (keeps existin
 tacho setup claude           # just print the snippet to paste (no file edits)
 ```
 
-It uses a bare `tacho statusline` when tacho is on your PATH, or bakes in the
-resolved absolute path when it isn't. To edit by hand, add to
+It uses a bare `tacho statusline` when the `tacho` on your PATH is this very
+binary, or bakes in the resolved absolute path otherwise (not on PATH, or a
+different install shadows it). To edit by hand, add to
 `~/.claude/settings.json`:
 
 ```json
