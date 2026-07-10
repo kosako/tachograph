@@ -21,7 +21,7 @@ func TestCommand(t *testing.T) {
 		{"double quote escaped", false, `/Users/x/my"dir/tacho`, `"/Users/x/my\"dir/tacho" statusline`},
 		{"dollar escaped", false, "/Users/x/$HOME-ish/tacho", `"/Users/x/\$HOME-ish/tacho" statusline`},
 		{"backtick escaped", false, "/Users/x/back`tick/tacho", "\"/Users/x/back\\`tick/tacho\" statusline"},
-		{"windows backslashes untouched", false, `C:\Users\x\tacho.exe`, `C:\Users\x\tacho.exe statusline`},
+		{"windows path quoted, separators unescaped", false, `C:\Users\x\tacho.exe`, `"C:\Users\x\tacho.exe" statusline`},
 		{"windows path with spaces keeps separators", false, `C:\Program Files\tacho.exe`, `"C:\Program Files\tacho.exe" statusline`},
 		{"semicolon quoted", false, "/Users/x/semi;colon/tacho", `"/Users/x/semi;colon/tacho" statusline`},
 		{"backslash before dollar escaped", false, `/Users/x/back\$lash/tacho`, `"/Users/x/back\\\$lash/tacho" statusline`},
@@ -103,6 +103,8 @@ func TestCommandShellRoundTrip(t *testing.T) {
 		`/Users/x/double\\slash$x/tacho`,
 		"/Users/x/paren(sub)>redir/tacho",
 		"/Users/x/tilde~and*glob?/tacho",
+		`/tmp/back\slash/tacho`,
+		`C:\Users\x\tacho.exe`,
 	}
 	for _, p := range paths {
 		cmd := Command(false, p)

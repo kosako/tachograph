@@ -31,10 +31,12 @@ func Command(bareIsSelf bool, exe string) string {
 }
 
 // safeExe matches paths that no shell reinterprets when unquoted: letters,
-// digits, and the punctuation real install paths use — including Windows
-// drive colons and backslash separators, which must stay unquoted and
-// unescaped for cmd-style interpreters.
-var safeExe = regexp.MustCompile(`^[A-Za-z0-9_./:\\-]+$`)
+// digits, and the inert punctuation real install paths use. Backslash is
+// deliberately excluded — a bare backslash is an escape in POSIX shells —
+// so Windows paths get double-quoted, which both cmd-style interpreters and
+// POSIX shells read as the literal path (quoteExe leaves backslashes before
+// ordinary characters unescaped).
+var safeExe = regexp.MustCompile(`^[A-Za-z0-9_./:-]+$`)
 
 // quoteExe serializes a path as one POSIX-shell double-quoted argument.
 // Inside double quotes only " $ ` and \ keep meaning — and \ only when it
