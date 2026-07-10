@@ -79,7 +79,7 @@
 
 | フィールド | 規約 |
 |---|---|
-| `available` | データソース自体の有無。`false` のとき他フィールドはすべて null |
+| `available` | データソース自体の有無。`false` のときデータ由来の nullable フィールドはすべて null(`tool` / `available` / `stale` などの必須フィールドは除く) |
 | `error` | 取得を試みて失敗したときのみ非null。`available:false`(未インストール等)はエラーではない |
 | `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |

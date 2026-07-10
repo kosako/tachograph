@@ -18,6 +18,11 @@ const DefaultTemplate = "{claude.model} {claude.effort}{claude.stale}ctx {claude
 // Missing is rendered for placeholders whose value is absent.
 const Missing = "--"
 
+// maxWidth caps placeholder width modifiers: bars are statusline furniture,
+// and a typo like {tool.5h.bar:100000} must not flood the terminal with
+// hundreds of kilobytes (#194 L-05).
+const maxWidth = 120
+
 // FirstTemplateLine returns the first usable line of a statusline.tmpl file:
 // the first line that is non-empty after trimming and does not start with '#'.
 // This lets the shipped example file carry several commented presets so users
@@ -61,6 +66,9 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 		width := 0
 		if widthStr != "" {
 			width, _ = strconv.Atoi(widthStr)
+			if width > maxWidth {
+				width = maxWidth
+			}
 		}
 		parts := strings.Split(key, ".")
 		tool, ok := tools[parts[0]]
@@ -95,7 +103,7 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		if !t.Available || t.Model == nil || t.Model.Effort == nil || *t.Model.Effort == "" {
 			return ""
 		}
-		return "⚡" + effortShort(*t.Model.Effort) + " "
+		return "⚡" + DisplayText(effortShort(*t.Model.Effort)) + " "
 	case "ctx":
 		if t.Session == nil || t.Session.ContextUsedPct == nil {
 			return Missing
@@ -119,7 +127,9 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		if t.Session == nil || t.Session.CWD == nil {
 			return Missing
 		}
-		return filepath.Base(*t.Session.CWD)
+		// The statusline goes straight to a terminal: strip control
+		// characters from log-sourced text (#194 L-05).
+		return DisplayText(filepath.Base(*t.Session.CWD))
 	case "5h", "wk":
 		return resolveLimit(t, path, width, now, st)
 	}

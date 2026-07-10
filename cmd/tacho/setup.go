@@ -75,18 +75,14 @@ func runSetup(args []string) int {
 	// lose the user's pre-tacho statusLine. Keep the first .bak.
 	if bak := path + ".bak"; len(existing) > 0 {
 		if _, err := os.Stat(bak); os.IsNotExist(err) {
-			if err := os.WriteFile(bak, existing, 0o600); err != nil {
+			if err := writeFileAtomic(bak, existing); err != nil {
 				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 				return 1
 			}
 			fmt.Println("Backed up existing settings to " + bak)
 		}
 	}
-	if err := os.WriteFile(path, merged, 0o600); err != nil {
-		fmt.Fprintln(os.Stderr, "tacho:", err)
-		return 1
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := writeFileAtomic(path, merged); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
@@ -172,6 +168,31 @@ func claudeSettingsPath() string {
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
+// writeFileAtomic writes b via a temp file + rename in the target directory,
+// so an interrupted write can't leave a truncated settings.json behind
+// (#194 L-02, the same contract as the cache writes). CreateTemp's 0600 mode
+// carries over to the renamed file, matching the previous explicit chmod.
+func writeFileAtomic(path string, b []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
 // claudeStatusLineCommand extracts the configured statusLine command, or a
 // sentinel string describing why there isn't one.
 func claudeStatusLineCommand(path string) string {
@@ -216,10 +237,24 @@ func firstToken(command string) string {
 		return ""
 	}
 	if command[0] == '"' {
-		if i := strings.IndexByte(command[1:], '"'); i >= 0 {
-			return command[1 : 1+i]
+		// Undo the double-quote escaping setup.Command applies (\" \$ \` \\),
+		// so a quoted path round-trips into the real binary path (#194 L-01).
+		var b strings.Builder
+		for i := 1; i < len(command); i++ {
+			c := command[i]
+			if c == '\\' && i+1 < len(command) {
+				if n := command[i+1]; n == '"' || n == '$' || n == '`' || n == '\\' {
+					b.WriteByte(n)
+					i++
+					continue
+				}
+			}
+			if c == '"' {
+				return b.String()
+			}
+			b.WriteByte(c)
 		}
-		return strings.Trim(command, `"`)
+		return b.String() // unterminated quote: best effort
 	}
 	if i := strings.IndexAny(command, " \t"); i >= 0 {
 		return command[:i]
