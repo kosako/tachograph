@@ -48,7 +48,9 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 	}
 	day := now.Local().Format("2006-01-02")
 	seen := claude.UsageSet{}
-	out := claudeFileTotals(transcriptPath, day, prices, seen)
+	// session_today has no unknown-vs-zero contract (unlike daily, #187): an
+	// unreadable transcript contributes nothing rather than nulling the value.
+	out, _ := claudeFileTotals(transcriptPath, day, prices, seen)
 
 	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
 	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
@@ -59,7 +61,10 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 		if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
 			return nil
 		}
-		ft := claudeFileTotals(path, day, prices, seen)
+		ft, err := claudeFileTotals(path, day, prices, seen)
+		if err != nil {
+			return nil
+		}
 		out.Tokens += ft.Tokens
 		out.Cost += ft.Cost
 		return nil
@@ -96,31 +101,42 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, err
 		}
 		projectDir := filepath.Join(projects, d.Name())
 		err := filepath.WalkDir(projectDir, func(path string, f os.DirEntry, err error) error {
-			if err != nil || f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+			if err != nil {
+				return err // a listed entry we can't descend into: total is unknown
+			}
+			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
 				return nil
 			}
 			info, err := f.Info()
-			if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
+			if err != nil {
+				return err // can't check the mtime filter: total is unknown
+			}
+			if info.ModTime().Local().Format("2006-01-02") != day {
 				return nil // only files touched today can hold today's messages
 			}
-			ft := claudeFileTotals(path, day, prices, seen)
+			ft, err := claudeFileTotals(path, day, prices, seen)
+			if err != nil {
+				return err
+			}
 			out.Tokens += ft.Tokens
 			out.Cost += ft.Cost
 			return nil
 		})
 		if err != nil {
-			continue
+			return Totals{}, err // unknown total; callers keep daily null, not 0
 		}
 	}
 	return out, nil
 }
 
 // claudeFileTotals sums one transcript's today entries into out, recording
-// counted responses in seen so the caller can dedup across files.
-func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageSet) Totals {
+// counted responses in seen so the caller can dedup across files. A read
+// failure is an error: a transcript that was listed but can't be read means
+// the day's total is unknown, not smaller.
+func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageSet) (Totals, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Totals{}
+		return Totals{}, err
 	}
 	var out Totals
 	claude.EachUsageLine(b, func(line claude.TranscriptLine) {
@@ -138,7 +154,7 @@ func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageS
 			out.Cost += claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 		}
 	})
-	return out
+	return out, nil
 }
 
 func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
@@ -190,7 +206,10 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 				continue
 			}
-			ro := codexRolloutUsage(filepath.Join(dayDir, e.Name()), dayStart)
+			ro, err := codexRolloutUsage(filepath.Join(dayDir, e.Name()), dayStart)
+			if err != nil {
+				return Totals{}, err // unknown total; callers keep daily null, not 0
+			}
 			if ro.last == nil {
 				continue
 			}
@@ -272,11 +291,13 @@ type codexRollout struct {
 
 // codexRolloutUsage extracts one rollout's cumulative usage snapshots around
 // dayStart. Events are appended in order, so a forward scan keeps the latest
-// snapshot on each side of midnight and the latest turn_context model.
-func codexRolloutUsage(path string, dayStart time.Time) codexRollout {
+// snapshot on each side of midnight and the latest turn_context model. A read
+// failure is an error: a rollout that was listed but can't be read means the
+// day's total is unknown, not smaller.
+func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return codexRollout{}
+		return codexRollout{}, err
 	}
 	var ro codexRollout
 	for _, raw := range bytes.Split(b, []byte("\n")) {
@@ -309,7 +330,7 @@ func codexRolloutUsage(path string, dayStart time.Time) codexRollout {
 			}
 		}
 	}
-	return ro
+	return ro, nil
 }
 
 // sameDay reports whether an RFC 3339 timestamp falls on the given local day.
