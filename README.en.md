@@ -27,7 +27,8 @@ window you have burned, when it resets, and what is currently running.
 ## Design principles
 
 1. **An instrument, not an observability platform.** No log accumulation, no
-   cost analytics, no dashboards. Optimized for the quick glance.
+   dashboards. Optimized for the quick glance (a single estimated daily cost
+   figure is the one exception).
 2. **Collectors and renderers are separate.** The core emits a single unified
    JSON schema (`tacho status --json`); display targets are pluggable.
 3. **No resident daemon.** On-demand collection with a short-lived file cache.
@@ -199,7 +200,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
 | `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
-| `cost` / `cost.session` | **current session** estimated cost, `$0.05` (Claude's own figure in the status line) |
+| `cost` / `cost.session` | **current session** estimated cost, `$0.05` (the estimate Claude Code passes to the status line) |
 | `cost.session.today` | **current session, today only** estimated cost (Claude only), `$1.84` |
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
 | `plan` | plan name (`prolite`, …) |
@@ -261,7 +262,7 @@ The **Settings** submenu at the bottom picks values from a list (the current
 choice is check-marked):
 
 - **Display**: meter (gauge) or number
-- **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure)
+- **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure). cost / tokens show today's total (marked `/d`) and fall back to the current session's value (no `/d`) when the daily total is unknown
 - **Tools**: Claude / Codex (checkboxes)
 
 Or via the CLI (config lives in `~/.config/tachograph/config.json`):

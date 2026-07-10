@@ -16,15 +16,26 @@ import (
 // form is safe; otherwise the absolute path is baked in so the snippet runs
 // the binary that generated it — never a different install shadowing it on
 // the PATH (#193). Callers must pass a non-empty exe. A path containing
-// spaces is double-quoted so the shell treats it as one argument.
+// whitespace or shell-special characters is double-quoted so the shell
+// treats it as one literal argument (#194 L-01).
 func Command(bareIsSelf bool, exe string) string {
 	if bareIsSelf {
 		return "tacho statusline"
 	}
-	if strings.ContainsAny(exe, " \t") {
-		return `"` + exe + `" statusline`
+	if strings.ContainsAny(exe, " \t\"$`") {
+		return quoteExe(exe) + " statusline"
 	}
 	return exe + " statusline"
+}
+
+// quoteExe double-quotes a path for the shell that runs the statusLine
+// command, escaping the characters that stay special inside double quotes
+// (" $ `). Backslashes are left alone: POSIX shells keep them literal in
+// double quotes unless they precede a special character, and escaping them
+// would corrupt Windows paths.
+func quoteExe(exe string) string {
+	r := strings.NewReplacer(`"`, `\"`, "$", `\$`, "`", "\\`")
+	return `"` + r.Replace(exe) + `"`
 }
 
 // statusLine mirrors the Claude Code settings block we manage.

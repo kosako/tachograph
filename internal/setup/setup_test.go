@@ -16,6 +16,10 @@ func TestCommand(t *testing.T) {
 		{"bare tacho is this binary", true, "/Users/x/go/bin/tacho", "tacho statusline"},
 		{"different or no PATH tacho: absolute", false, "/Users/x/go/bin/tacho", "/Users/x/go/bin/tacho statusline"},
 		{"absolute path with spaces", false, "/Users/My Name/go/bin/tacho", `"/Users/My Name/go/bin/tacho" statusline`},
+		{"double quote escaped", false, `/Users/x/my"dir/tacho`, `"/Users/x/my\"dir/tacho" statusline`},
+		{"dollar escaped", false, "/Users/x/$HOME-ish/tacho", `"/Users/x/\$HOME-ish/tacho" statusline`},
+		{"backtick escaped", false, "/Users/x/back`tick/tacho", "\"/Users/x/back\\`tick/tacho\" statusline"},
+		{"windows backslashes untouched", false, `C:\Users\x\tacho.exe`, `C:\Users\x\tacho.exe statusline`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
