@@ -334,19 +334,21 @@ func reportFile(label, path string) {
 // pricing.json is visible here instead of being silently ignored by the
 // lenient render-path loaders.
 func reportJSONFile(label, path string) {
+	fmt.Println("  " + label + ":  " + jsonFileState(path))
+}
+
+// jsonFileState classifies a JSON config file for the doctor report.
+func jsonFileState(path string) string {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Println("  " + label + ":  (default)")
-		return
+		return "(default)"
 	}
 	if err != nil {
-		fmt.Println("  " + label + ":  unreadable — " + err.Error())
-		return
+		return "unreadable — " + err.Error()
 	}
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
-		fmt.Println("  " + label + ":  present but INVALID JSON (ignored) — " + err.Error())
-		return
+		return "present but INVALID JSON (ignored) — " + err.Error()
 	}
-	fmt.Println("  " + label + ":  present")
+	return "present"
 }

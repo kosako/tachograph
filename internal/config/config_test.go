@@ -150,3 +150,44 @@ func TestLoadStrictReportsInvalidFile(t *testing.T) {
 		t.Errorf("Load on broken file = %+v, want defaults", got)
 	}
 }
+
+// LoadStrict's full contract: a missing file is defaults with no error, a
+// file that starts as valid JSON but breaks mid-way must not leak the
+// partially unmarshaled values, and an unreadable file (directory in place
+// of the file) is an error.
+func TestLoadStrictContract(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+
+	// Missing file: plain defaults, no error.
+	c, err := LoadStrict()
+	if err != nil || len(c.Tools) != 2 {
+		t.Errorf("missing file: got %+v, %v; want defaults, nil", c, err)
+	}
+
+	// Partial unmarshal: "tools" decodes before the syntax error, and that
+	// partial value must not leak into the returned defaults.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"tools": ["codex"], INVALID`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err = LoadStrict()
+	if err == nil {
+		t.Fatal("partial unmarshal: error = nil, want parse error")
+	}
+	if len(c.Tools) != 2 {
+		t.Errorf("partial unmarshal leaked into fallback: Tools = %v, want defaults", c.Tools)
+	}
+
+	// Unreadable file: a directory in place of config.json fails ReadFile on
+	// every platform.
+	if err := os.Remove(filepath.Join(dir, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "config.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadStrict(); err == nil {
+		t.Error("unreadable file: error = nil, want read error")
+	}
+}
