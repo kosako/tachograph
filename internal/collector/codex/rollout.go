@@ -91,6 +91,28 @@ type rlWindow struct {
 	ResetsAt      int64   `json:"resets_at"` // epoch seconds
 }
 
+// Usable reports whether the token_count carries anything a renderer can
+// show: usage info, a rate-limit window, a plan, or a numeric credits
+// balance. Codex also writes an empty token_count (info null, no windows)
+// when a request is refused for a hit usage limit; selecting it as current
+// would mask the last valid session's limits at exactly the moment they
+// matter most (#205).
+func (tc *TokenCount) Usable() bool {
+	if i := tc.Info; i != nil &&
+		(i.TotalTokenUsage != nil || i.LastTokenUsage != nil || i.ModelContextWindow != nil) {
+		return true
+	}
+	rl := tc.RateLimits
+	if rl == nil {
+		return false
+	}
+	if rl.Primary != nil || rl.Secondary != nil || rl.PlanType != nil {
+		return true
+	}
+	_, isFloat := rl.Credits.(float64)
+	return isFloat
+}
+
 // TurnContext is a turn_context event's payload (emitted at turn start).
 type TurnContext struct {
 	CWD   string `json:"cwd"`
