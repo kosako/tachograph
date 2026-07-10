@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -119,5 +120,50 @@ func TestSwiftBarPluginCandidates(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("swiftBarPluginCandidates() missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+// The bare-command decision must check identity, not mere presence: a
+// different tacho on the PATH would silently serve the statusline instead of
+// the binary being configured (#193).
+func TestPathTachoIsSelf(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH lookup and symlinks differ on windows")
+	}
+	dir := t.TempDir()
+	selfDir := filepath.Join(dir, "self")
+	otherDir := filepath.Join(dir, "other")
+	linkDir := filepath.Join(dir, "link")
+	for _, d := range []string{selfDir, otherDir, linkDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	self := filepath.Join(selfDir, "tacho")
+	other := filepath.Join(otherDir, "tacho")
+	for _, p := range []string{self, other} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(self, filepath.Join(linkDir, "tacho")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", otherDir)
+	if pathTachoIsSelf(self) {
+		t.Error("a different tacho on PATH must not count as self")
+	}
+	t.Setenv("PATH", selfDir)
+	if !pathTachoIsSelf(self) {
+		t.Error("the same tacho on PATH should count as self")
+	}
+	// A symlink on the PATH pointing at this binary is still this binary.
+	t.Setenv("PATH", linkDir)
+	if !pathTachoIsSelf(self) {
+		t.Error("a PATH symlink to this binary should count as self")
+	}
+	if pathTachoIsSelf("") {
+		t.Error("an unknown running binary must never claim the bare command")
 	}
 }

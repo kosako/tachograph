@@ -35,6 +35,9 @@ func runDoctor(args []string) int {
 	if onPath {
 		if p, err := exec.LookPath("tacho"); err == nil {
 			fmt.Println("  on PATH:   yes (" + p + ")")
+			if exe != "" && !sameExecutable(p, exe) {
+				fmt.Println("  warning:   the `tacho` on PATH is a different binary than the one running")
+			}
 		} else {
 			fmt.Println("  on PATH:   yes")
 		}
