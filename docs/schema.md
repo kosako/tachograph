@@ -1,4 +1,4 @@
-# 統一JSONスキーマ v0.1
+# 統一JSONスキーマ v1.0
 
 `tacho status --json` が出力する、コレクタ層とレンダラ層の境界となるスキーマ。
 本ファイルが仕様の正本。Goの型定義は `internal/schema/schema.go`。
@@ -15,7 +15,7 @@
 
 ```jsonc
 {
-  "schema_version": "0.1",
+  "schema_version": "1.0",
   "generated_at": "2026-06-12T21:00:00+09:00",  // この JSON を生成した時刻
   "tools": [ /* ツールごとのエントリ。検出されないツールも available:false で常に載る */ ]
 }
@@ -112,3 +112,13 @@ transcript も集計する。ログディレクトリの走査自体に失敗し
 
 - 後方互換の追加(フィールド追加)はマイナー更新: `0.1` → `0.2`
 - 既存フィールドの意味変更・削除はメジャー更新とし、`schema_version` で判定可能にする
+
+### 変更履歴
+
+基準は初版 commit の v0.1(`credits` は初版から存在)。
+
+- `1.0`: v0.1 のまま出荷されてきた追加と意味変更を版に反映
+  - 追加(後方互換): `tool.daily`、`tool.session_today`、`session.transcript_path`、`model.effort`
+  - 意味変更(メジャー要因): `stale` の閾値(15分 → Claude 60分 / Codex 5時間)、
+    `daily` の走査失敗時の扱い(0 → null、#180)
+- `0.1`: 初版
