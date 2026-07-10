@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -212,7 +213,7 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 		}
 		id, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok {
-			t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+			t := codexRolloutTotals(ro, prices)
 			out.Tokens += t.Tokens
 			out.Cost += t.Cost
 			return
@@ -278,7 +279,7 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 		mergeCodexRollout(bySession, id, ro)
 	}
 	for _, ro := range bySession {
-		t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+		t := codexRolloutTotals(*ro, prices)
 		out.Tokens += t.Tokens
 		out.Cost += t.Cost
 	}
@@ -362,6 +363,22 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
 	}
+	// Order across files doesn't matter here: codexEventCost sorts by the
+	// cumulative total, which restores emission order within a session.
+	prev.events = append(prev.events, ro.events...)
+}
+
+// codexRolloutTotals turns one session's (or standalone rollout's) merged
+// snapshots into today's totals. Cost is priced per token_count event when
+// event timestamps were available, so a mid-session model switch charges
+// each portion at the model that produced it (#191); timestamp-less rollouts
+// fall back to pricing the whole delta at the last-seen model.
+func codexRolloutTotals(ro codexRollout, prices pricing.Table) Totals {
+	out := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+	if len(ro.events) > 0 {
+		out.Cost = codexEventCost(ro.events, ro.before, prices)
+	}
+	return out
 }
 
 // codexDeltaTotals prices the growth from before (nil = session started
@@ -382,6 +399,41 @@ func codexDeltaTotals(model string, before, last *codex.TokenUsage, prices prici
 	return out
 }
 
+// codexEventCost prices each today snapshot's growth at the model that was
+// current when it was emitted, so a mid-session model switch doesn't reprice
+// earlier turns at the newer model's rate (#191). base is the session's last
+// cumulative before midnight (nil for sessions started today). Events may
+// span resumed files; cumulative totals only grow within a session, so
+// ordering by total restores the emission order across files. An event
+// without a model (a resumed file's snapshot before its first turn_context)
+// inherits the previous event's.
+func codexEventCost(events []codexTC, base *codex.TokenUsage, prices pricing.Table) float64 {
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].usage.TotalTokens < events[j].usage.TotalTokens
+	})
+	var prev codex.TokenUsage
+	if base != nil {
+		prev = *base
+	}
+	model := ""
+	var cost float64
+	for _, e := range events {
+		if e.model != "" {
+			model = e.model
+		}
+		in := clamp0(e.usage.InputTokens - prev.InputTokens)
+		cached := clamp0(e.usage.CachedInputTokens - prev.CachedInputTokens)
+		outTok := clamp0(e.usage.OutputTokens - prev.OutputTokens)
+		if r, ok := prices.For(model); ok {
+			cost += r.Cost(clamp0(in-cached), 0, cached, outTok)
+		}
+		if e.usage.TotalTokens >= prev.TotalTokens {
+			prev = e.usage
+		}
+	}
+	return cost
+}
+
 func clamp0(v int64) int64 {
 	if v < 0 {
 		return 0
@@ -389,14 +441,23 @@ func clamp0(v int64) int64 {
 	return v
 }
 
+// codexTC is one today token_count snapshot with the model that was current
+// when it was emitted.
+type codexTC struct {
+	usage codex.TokenUsage
+	model string
+}
+
 // codexRollout is what one rollout file contributes to today's totals: the
 // last cumulative snapshot strictly before local midnight (nil when the file
-// has none) and the last snapshot overall, plus the session's model.
+// has none), the last snapshot overall, the session's model, and every
+// today snapshot with its then-current model (for per-event pricing, #191).
 type codexRollout struct {
 	model    string
 	before   *codex.TokenUsage
 	last     *codex.TokenUsage
 	tsParsed bool // at least one token_count carried a parsable timestamp
+	events   []codexTC
 }
 
 // codexRolloutUsage extracts one rollout's cumulative usage snapshots around
@@ -436,6 +497,10 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 				ro.tsParsed = true
 				if ts.Before(dayStart) {
 					ro.before = ro.last
+				} else {
+					// ro.model is the running last-seen turn_context, i.e.
+					// the model this snapshot's growth was produced under.
+					ro.events = append(ro.events, codexTC{usage: *ro.last, model: ro.model})
 				}
 			}
 		}

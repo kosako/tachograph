@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kosako/tachograph/internal/pricing"
 )
 
 // codexSessionAt builds a rollout with explicit event timestamps, so a file
@@ -63,6 +65,83 @@ func TestCodexTotalsIgnoresSessionFinishedYesterday(t *testing.T) {
 
 	if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 0 {
 		t.Errorf("CodexTotals.Tokens = %d, want 0 (session ended yesterday)", got)
+	}
+}
+
+// codexModelSwitchSession builds a rollout whose turn_context lines are
+// interleaved with token_count snapshots, so a test can switch models
+// mid-session. Each entry is either ["ctx", model] or ["tc", ts, total].
+func codexModelSwitchSession(entries ...[]any) string {
+	out := ""
+	for _, e := range entries {
+		switch e[0] {
+		case "ctx":
+			out += fmt.Sprintf(`{"type":"turn_context","payload":{"model":%q}}`+"\n", e[1])
+		case "tc":
+			out += fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":0,"total_tokens":%d}}}}`+"\n",
+				e[1], e[2], e[2])
+		}
+	}
+	return out
+}
+
+// Regression for #191: a mid-session model switch prices each token_count
+// delta at the model current when it was emitted, not the whole day's delta
+// at the last model.
+func TestCodexTotalsModelSwitchPricesPerEvent(t *testing.T) {
+	root := t.TempDir()
+	now, dayStart := codexDayClock()
+	t1 := dayStart.Add(30 * time.Minute).Format(time.RFC3339)
+	t2 := dayStart.Add(60 * time.Minute).Format(time.RFC3339)
+
+	writeFile(t, filepath.Join(codexDayDir(root, now, 0), "rollout-2026-07-04T00-10-00-019e5933-2289-7e72-88fd-111111111111.jsonl"),
+		codexModelSwitchSession(
+			[]any{"ctx", "gpt-a"}, []any{"tc", t1, int64(1_000_000)},
+			[]any{"ctx", "gpt-b"}, []any{"tc", t2, int64(2_000_000)},
+		), now)
+
+	prices := pricing.Table{"gpt-a": {In: 1}, "gpt-b": {In: 10}}
+	got := mustCodexTotals(t, root, now, prices)
+	// 1M tokens at gpt-a ($1/M) + 1M at gpt-b ($10/M). Pricing the whole 2M
+	// at the last model (gpt-b) would read $20.
+	if got.Cost != 11.0 {
+		t.Errorf("Cost = %v, want 11.0 (per-event pricing across the switch)", got.Cost)
+	}
+	if got.Tokens != 2_000_000 {
+		t.Errorf("Tokens = %d, want 2000000 (token accounting unchanged)", got.Tokens)
+	}
+}
+
+// The per-event pricing also holds across midnight and a resumed file: the
+// pre-midnight snapshot is the delta base, and each today event is priced at
+// its own then-current model even when the events live in different files.
+func TestCodexTotalsModelSwitchAcrossResume(t *testing.T) {
+	root := t.TempDir()
+	now, dayStart := codexDayClock()
+	beforeMidnight := dayStart.Add(-10 * time.Minute).Format(time.RFC3339)
+	after1 := dayStart.Add(30 * time.Minute).Format(time.RFC3339)
+	after2 := dayStart.Add(90 * time.Minute).Format(time.RFC3339)
+
+	// Yesterday's file: 100k before midnight, grows to 150k today, all gpt-a.
+	writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-019e5933-2289-7e72-88fd-222222222222.jsonl"),
+		codexModelSwitchSession(
+			[]any{"ctx", "gpt-a"}, []any{"tc", beforeMidnight, int64(100_000)}, []any{"tc", after1, int64(150_000)},
+		), now)
+	// Resumed today on gpt-b, carrying the cumulative forward to 250k.
+	writeFile(t, filepath.Join(codexDayDir(root, now, 0), "rollout-2026-07-04T01-00-00-019e5933-2289-7e72-88fd-222222222222.jsonl"),
+		codexModelSwitchSession(
+			[]any{"ctx", "gpt-b"}, []any{"tc", after2, int64(250_000)},
+		), now)
+
+	prices := pricing.Table{"gpt-a": {In: 1}, "gpt-b": {In: 10}}
+	got := mustCodexTotals(t, root, now, prices)
+	// gpt-a: 150k-100k = 50k at $1/M = $0.05; gpt-b: 250k-150k = 100k at
+	// $10/M = $1.00.
+	if got.Cost != 1.05 {
+		t.Errorf("Cost = %v, want 1.05 (0.05 gpt-a + 1.00 gpt-b)", got.Cost)
+	}
+	if got.Tokens != 150_000 {
+		t.Errorf("Tokens = %d, want 150000 (250k latest - 100k pre-midnight)", got.Tokens)
 	}
 }
 
