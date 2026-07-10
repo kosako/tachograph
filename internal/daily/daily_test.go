@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -368,5 +369,42 @@ func TestCodexTotalsErrorWhenDayDirUnreadable(t *testing.T) {
 	}
 	if _, err := CodexTotals(root, now, noPrices); err == nil {
 		t.Fatal("CodexTotals error = nil, want error for unreadable day dir")
+	}
+}
+
+// A transcript that is listed but can't be read must make the whole total
+// unknown (error), not silently smaller (#187). A dangling symlink reproduces
+// the read failure portably without chmod (which is a no-op as root).
+func TestClaudeTotalsErrorWhenTranscriptUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	root := t.TempDir()
+	now := time.Now()
+	writeFile(t, filepath.Join(root, "projects", "p", "ok.jsonl"),
+		claudeMsg(now, 10, 0, 0, 0)+"\n", now)
+	if err := os.Symlink(filepath.Join(root, "gone"), filepath.Join(root, "projects", "p", "broken.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClaudeTotals(root, now, noPrices); err == nil {
+		t.Fatal("ClaudeTotals error = nil, want error when one transcript can't be read")
+	}
+}
+
+// Same contract on the Codex side: one unreadable rollout in a scanned day
+// directory means the total is unknown, not partial (#187).
+func TestCodexTotalsErrorWhenRolloutUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	root := t.TempDir()
+	now := time.Now()
+	dayDir := filepath.Join(root, "sessions", now.Local().Format("2006"), now.Local().Format("01"), now.Local().Format("02"))
+	writeFile(t, filepath.Join(dayDir, "ok.jsonl"), codexSession(1000), now)
+	if err := os.Symlink(filepath.Join(root, "gone"), filepath.Join(dayDir, "broken.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CodexTotals(root, now, noPrices); err == nil {
+		t.Fatal("CodexTotals error = nil, want error when one rollout can't be read")
 	}
 }
