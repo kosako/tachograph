@@ -63,6 +63,10 @@ func addDaily(t *schema.Tool, tot daily.Totals, err error) {
 	t.Daily = tot.Schema()
 }
 
+// addCodexSessionCost estimates the session cost as current model x whole
+// cumulative usage. token_count only carries cumulative totals, so a
+// mid-session model switch is approximated at the current model's rate —
+// daily.cost_usd is the per-event precise figure (#191).
 func addCodexSessionCost(t *schema.Tool, prices pricing.Table) {
 	if t.Tool != schema.ToolCodex || !t.Available || t.Error != nil ||
 		t.Model == nil || t.Session == nil || t.Session.Tokens == nil {
