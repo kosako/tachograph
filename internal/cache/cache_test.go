@@ -192,6 +192,38 @@ func TestReadSnapshotLimits(t *testing.T) {
 	}
 }
 
+// The display path must not show limits past their observation ceiling
+// either: a fresh snapshot whose limits observation has expired keeps its
+// other fields but drops the limits (#186).
+func TestReadSnapshotDropsExpiredLimits(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+
+	pct := 42.0
+	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	if !ok || !got.Available {
+		t.Fatalf("ReadSnapshot = %+v, %v (a fresh snapshot must still be served)", got, ok)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want nil past the observation ceiling", got.Limits)
+	}
+	if got.Backend != schema.BackendSubscription {
+		t.Errorf("Backend = %q, want the other fields preserved", got.Backend)
+	}
+}
+
 // Snapshots written before limits_collected_at existed (or with an unknown
 // observation) fall back to CollectedAt as the observation time.
 func TestReadSnapshotLimitsFallsBackToCollectedAt(t *testing.T) {

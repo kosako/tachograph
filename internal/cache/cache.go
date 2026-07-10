@@ -86,7 +86,10 @@ func WriteSnapshot(t schema.Tool, limitsObserved time.Time) error {
 }
 
 // ReadSnapshot returns a tool snapshot no older than maxAge, with its
-// stale flag recomputed against now.
+// stale flag recomputed against now. Rate limits age out separately, from
+// their original observation time: a snapshot that preserved old limits
+// shortly before its writer went quiet would otherwise keep showing them
+// past the ceiling for up to another maxAge (#186).
 func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Tool, bool) {
 	snap, ok := readSnapshotFile(tool)
 	if !ok || snap.CollectedAt == nil {
@@ -98,32 +101,48 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Too
 	}
 	t := snap.Tool
 	t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
+	if len(t.Limits) > 0 {
+		observed, ok := snap.limitsObservedAt()
+		if !ok || now.Sub(observed) > maxAge {
+			t.Limits = nil
+		}
+	}
 	return &t, true
 }
 
 // ReadSnapshotLimits returns the snapshot's rate limits together with the
 // backend they were observed under and their original observation time, for
 // callers deciding whether to carry them into a payload that lacks limits.
-// maxAge is measured from that observation (limits_collected_at, falling
-// back to collected_at for snapshots written before the field existed), so
-// limits that are only being carried forward still age out (#186).
+// maxAge is measured from that observation, so limits that are only being
+// carried forward still age out (#186).
 func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time) ([]schema.Limit, string, time.Time, bool) {
 	snap, ok := readSnapshotFile(tool)
 	if !ok || len(snap.Limits) == 0 {
 		return nil, "", time.Time{}, false
 	}
-	observedStr := snap.CollectedAt
-	if snap.LimitsCollectedAt != nil {
-		observedStr = snap.LimitsCollectedAt
-	}
-	if observedStr == nil {
-		return nil, "", time.Time{}, false
-	}
-	observed, err := time.Parse(time.RFC3339, *observedStr)
-	if err != nil || now.Sub(observed) > maxAge {
+	observed, ok := snap.limitsObservedAt()
+	if !ok || now.Sub(observed) > maxAge {
 		return nil, "", time.Time{}, false
 	}
 	return snap.Limits, snap.Backend, observed, true
+}
+
+// limitsObservedAt resolves when the snapshot's limits were originally
+// observed: limits_collected_at, or collected_at for snapshots written
+// before the field existed.
+func (s *snapshotFile) limitsObservedAt() (time.Time, bool) {
+	str := s.CollectedAt
+	if s.LimitsCollectedAt != nil {
+		str = s.LimitsCollectedAt
+	}
+	if str == nil {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, *str)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
 }
 
 func readSnapshotFile(tool string) (*snapshotFile, bool) {

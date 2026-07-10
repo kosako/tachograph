@@ -76,6 +76,36 @@ func TestStatusPrefersClaudeSnapshot(t *testing.T) {
 	}
 }
 
+// The display path ages limits from their original observation: a snapshot
+// re-saved recently but carrying limits observed too long ago serves the
+// session data without the limits (#186).
+func TestStatusDropsSnapshotLimitsPastObservationCeiling(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	pct := 42.0
+	snap := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := cache.WriteSnapshot(snap, now.Add(-cache.SnapshotMaxAge-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	s := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true})
+	got := s.Tools[0]
+	if !got.Available {
+		t.Fatalf("Tool = %+v, want the snapshot served", got)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want nil (observation past SnapshotMaxAge)", got.Limits)
+	}
+}
+
 func TestAddCodexSessionCost(t *testing.T) {
 	tool := schema.Tool{
 		Tool:      schema.ToolCodex,
