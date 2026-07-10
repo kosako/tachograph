@@ -73,6 +73,8 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-opus-4-8", Rate{5, 25, 0.5, 6.25}},
 		{"claude-opus-4-1-20250805", Rate{15, 75, 1.5, 18.75}}, // 4.1 kept the older price; not shadowed by claude-opus
 		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
+		{"claude-sonnet-5", Rate{2, 10, 0.2, 2.5}},          // introductory pricing through 2026-08-31
+		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
 		{"gpt-5.6", Rate{5, 30, 0.5, 6.25}},     // Sol (default tier)
