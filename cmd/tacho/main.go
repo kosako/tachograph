@@ -164,8 +164,15 @@ func runConfig(args []string) int {
 	}
 	switch sub {
 	case "show":
-		b, _ := json.MarshalIndent(config.Load(), "", "  ")
+		c, err := config.LoadStrict()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tacho: invalid config, showing defaults:", err)
+		}
+		b, _ := json.MarshalIndent(c, "", "  ")
 		fmt.Println(string(b))
+		if err != nil {
+			return 1
+		}
 		return 0
 	case "path":
 		fmt.Println(config.Path())
@@ -196,7 +203,11 @@ func configToggleTool(name string) int {
 		fmt.Fprintf(os.Stderr, "tacho: unknown tool %q\n", name)
 		return 2
 	}
-	c := config.Load()
+	c, err := config.LoadStrict()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tacho: refusing to overwrite an unreadable config, fix or remove it first:", err)
+		return 1
+	}
 	enabled := map[string]bool{}
 	for _, t := range c.Tools {
 		enabled[t] = true
@@ -253,7 +264,11 @@ func configStatuslinePreset(args []string) int {
 }
 
 func configSet(key, val string) int {
-	c := config.Load()
+	c, err := config.LoadStrict()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tacho: refusing to overwrite an unreadable config, fix or remove it first:", err)
+		return 1
+	}
 	switch key {
 	case "tools":
 		tools := []string{} // non-nil so an empty selection persists as [] (not null → defaults)

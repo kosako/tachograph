@@ -67,3 +67,29 @@ func TestConfigSetMenubarMetricRejectsContext(t *testing.T) {
 		t.Errorf("configSet menubar.metric cost returned %d, want 0", code)
 	}
 }
+
+// A config.json that fails to parse must not be clobbered by write commands:
+// configSet / configToggleTool refuse instead of saving defaults over the
+// user's (fixable) file.
+func TestConfigWritesRefuseInvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "config.json")
+	broken := []byte(`{"tools": ["claude-code"], INVALID`)
+	if err := os.WriteFile(path, broken, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := configSet("menubar.style", "number"); code != 1 {
+		t.Fatalf("configSet on broken config returned %d, want 1", code)
+	}
+	if code := configToggleTool("codex"); code != 1 {
+		t.Fatalf("configToggleTool on broken config returned %d, want 1", code)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, broken) {
+		t.Fatalf("broken config was rewritten:\n%s", got)
+	}
+}
