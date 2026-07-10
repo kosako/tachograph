@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -47,9 +49,9 @@ func runDoctor(args []string) int {
 	fmt.Println()
 
 	fmt.Println("config (" + config.Dir() + "):")
-	reportFile("config.json", filepath.Join(config.Dir(), "config.json"))
+	reportJSONFile("config.json", filepath.Join(config.Dir(), "config.json"))
 	reportFile("statusline.tmpl", filepath.Join(config.Dir(), "statusline.tmpl"))
-	reportFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"))
+	reportJSONFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"))
 	fmt.Println()
 
 	reportDataSources(now)
@@ -326,4 +328,27 @@ func reportFile(label, path string) {
 	} else {
 		fmt.Println("  " + label + ":  (default)")
 	}
+}
+
+// reportJSONFile is reportFile plus a syntax check, so a broken config.json /
+// pricing.json is visible here instead of being silently ignored by the
+// lenient render-path loaders.
+func reportJSONFile(label, path string) {
+	fmt.Println("  " + label + ":  " + jsonFileState(path))
+}
+
+// jsonFileState classifies a JSON config file for the doctor report.
+func jsonFileState(path string) string {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "(default)"
+	}
+	if err != nil {
+		return "unreadable — " + err.Error()
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return "present but INVALID JSON (ignored) — " + err.Error()
+	}
+	return "present"
 }

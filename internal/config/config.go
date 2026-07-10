@@ -4,7 +4,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -64,23 +66,43 @@ func Path() string {
 }
 
 // Load returns the saved config merged over defaults. A missing or invalid
-// file yields defaults so the tool always renders something sensible.
+// file yields defaults so the tool always renders something sensible. Write
+// paths must use LoadStrict instead, so a broken file is surfaced rather
+// than silently replaced with defaults.
 func Load() Config {
+	c, _ := load()
+	return c
+}
+
+// LoadStrict is Load for write paths and diagnostics: it also reports a
+// config file that exists but can't be read or parsed (the returned Config
+// is the defaults in that case).
+func LoadStrict() (Config, error) {
+	return load()
+}
+
+func load() (Config, error) {
 	c := Default()
 	p := Path()
 	if p == "" {
-		return c
+		return c, nil
 	}
 	b, err := os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return c, nil // no file yet: plain defaults
+	}
 	if err != nil {
-		return c
+		return c, err
 	}
 	// Unmarshal onto the defaults: absent keys keep their default values. A
 	// JSON array (including an explicit empty []) replaces Tools, so "show
 	// nothing" is honored; only an absent/null tools key leaves it nil and
 	// falls back to defaults. The writers persist [] (not null) for an empty
 	// selection so that distinction survives a round-trip.
-	_ = json.Unmarshal(b, &c)
+	if err := json.Unmarshal(b, &c); err != nil {
+		// A partial unmarshal may have touched c; hand back clean defaults.
+		return Default(), fmt.Errorf("%s: %w", p, err)
+	}
 	if c.Tools == nil {
 		c.Tools = Default().Tools
 	}
@@ -90,7 +112,7 @@ func Load() Config {
 	if c.Menubar.Metric == "" {
 		c.Menubar.Metric = DefaultMetric
 	}
-	return c
+	return c, nil
 }
 
 // Save writes the config atomically (tmp file + rename).
