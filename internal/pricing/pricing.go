@@ -23,9 +23,11 @@ type Rate struct {
 // defaults are approximate first-party API prices (USD per million tokens),
 // matched by model-id prefix. Cache rates follow each provider's convention:
 // Anthropic cache read = 0.1x input, write (5-min ephemeral) = 1.25x input;
-// OpenAI uses its published cached-input price (and bills cache writes at the
-// input rate). Long-context premiums (Opus >200K, GPT-5.5 >272K) are not modeled
-// — this is a flat table. Override or extend via the pricing.json file.
+// OpenAI uses its published cached-input price for reads. For cache writes,
+// gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
+// separately), while gpt-5.6 and later publish a 1.25x-input write price.
+// Long-context premiums (Opus >200K, GPT-5.5 >272K) are not modeled — this is a
+// flat table. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
 	"claude-opus":     {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},   // Opus 4.5+
 	"claude-opus-4-1": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // Opus 4.1 kept the older $15/$75
