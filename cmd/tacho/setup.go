@@ -27,7 +27,13 @@ func runSetup(args []string) int {
 	fs.Parse(args[1:])
 
 	exe := resolveExe()
-	command := setup.Command(tachoOnPath(), exe)
+	if exe == "" {
+		// Without a resolved self there is no safe command to write: a bare
+		// `tacho` could be a different install shadowing this one (#193).
+		fmt.Fprintln(os.Stderr, "tacho: cannot determine the running binary's path; nothing safe to configure")
+		return 1
+	}
+	command := setup.Command(pathTachoIsSelf(exe), exe)
 	snippet := setup.Snippet(command)
 	path := claudeSettingsPath()
 
@@ -37,9 +43,9 @@ func runSetup(args []string) int {
 		fmt.Println(snippet)
 		fmt.Println()
 		if strings.HasPrefix(command, "tacho ") {
-			fmt.Println("(tacho is on your PATH, so the bare command works.)")
+			fmt.Println("(the tacho on your PATH is this binary, so the bare command works.)")
 		} else {
-			fmt.Println("(tacho is not on your PATH, so the absolute path is baked in.)")
+			fmt.Println("(this binary doesn't resolve as `tacho` on your PATH, so the absolute path is baked in.)")
 		}
 		fmt.Println("Re-run with --write to merge it in automatically.")
 		return 0
@@ -90,8 +96,9 @@ func runSetup(args []string) int {
 }
 
 // resolveExe returns the absolute path to the running binary, following
-// symlinks so the snippet points at the real file.
-func resolveExe() string {
+// symlinks so the snippet points at the real file. It's a var so tests can
+// simulate an unresolvable binary.
+var resolveExe = func() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
@@ -106,6 +113,36 @@ func resolveExe() string {
 func tachoOnPath() bool {
 	_, err := exec.LookPath("tacho")
 	return err == nil
+}
+
+// pathTachoIsSelf reports whether the bare `tacho` on the PATH resolves to
+// this very binary. Mere presence isn't enough: a different (often older)
+// install on the PATH would make a bare snippet silently run that one instead
+// of the binary the user just invoked (#193).
+func pathTachoIsSelf(exe string) bool {
+	if exe == "" {
+		return false
+	}
+	p, err := exec.LookPath("tacho")
+	if err != nil {
+		return false
+	}
+	return sameExecutable(p, exe)
+}
+
+// sameExecutable reports whether two paths refer to the same file after
+// following symlinks (so a /usr/local/bin symlink to the real install still
+// counts as the same binary).
+func sameExecutable(a, b string) bool {
+	if r, err := filepath.EvalSymlinks(a); err == nil {
+		a = r
+	}
+	if r, err := filepath.EvalSymlinks(b); err == nil {
+		b = r
+	}
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
 // goBin reports where `go install` places binaries: $(go env GOPATH)/bin,

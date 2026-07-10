@@ -12,11 +12,13 @@ import (
 )
 
 // Command builds the shell command Claude Code runs for the status line.
-// When tacho is on the PATH a bare "tacho statusline" is enough; otherwise we
-// bake in the absolute path so the command resolves regardless of PATH. A path
-// containing spaces is double-quoted so the shell treats it as one argument.
-func Command(onPath bool, exe string) string {
-	if onPath || exe == "" {
+// When the bare `tacho` on the PATH is the running binary itself, the short
+// form is safe; otherwise the absolute path is baked in so the snippet runs
+// the binary that generated it — never a different install shadowing it on
+// the PATH (#193). Callers must pass a non-empty exe. A path containing
+// spaces is double-quoted so the shell treats it as one argument.
+func Command(bareIsSelf bool, exe string) string {
+	if bareIsSelf {
 		return "tacho statusline"
 	}
 	if strings.ContainsAny(exe, " \t") {

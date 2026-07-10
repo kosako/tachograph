@@ -8,20 +8,19 @@ import (
 
 func TestCommand(t *testing.T) {
 	cases := []struct {
-		name   string
-		onPath bool
-		exe    string
-		want   string
+		name       string
+		bareIsSelf bool
+		exe        string
+		want       string
 	}{
-		{"on path", true, "/Users/x/go/bin/tacho", "tacho statusline"},
-		{"off path absolute", false, "/Users/x/go/bin/tacho", "/Users/x/go/bin/tacho statusline"},
-		{"off path with spaces", false, "/Users/My Name/go/bin/tacho", `"/Users/My Name/go/bin/tacho" statusline`},
-		{"empty exe falls back to bare", false, "", "tacho statusline"},
+		{"bare tacho is this binary", true, "/Users/x/go/bin/tacho", "tacho statusline"},
+		{"different or no PATH tacho: absolute", false, "/Users/x/go/bin/tacho", "/Users/x/go/bin/tacho statusline"},
+		{"absolute path with spaces", false, "/Users/My Name/go/bin/tacho", `"/Users/My Name/go/bin/tacho" statusline`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := Command(c.onPath, c.exe); got != c.want {
-				t.Errorf("Command(%v, %q) = %q, want %q", c.onPath, c.exe, got, c.want)
+			if got := Command(c.bareIsSelf, c.exe); got != c.want {
+				t.Errorf("Command(%v, %q) = %q, want %q", c.bareIsSelf, c.exe, got, c.want)
 			}
 		})
 	}
