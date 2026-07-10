@@ -374,6 +374,85 @@ func TestCollectEqualMtimeAndTimestampTieBreak(t *testing.T) {
 	}
 }
 
+// emptyTcLine is the token_count Codex writes when a request is refused for
+// a hit usage limit: info null and no rate-limit windows (#205).
+func emptyTcLine(ts string) string {
+	return `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","primary":null,"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":null,"rate_limit_reached_type":null}}}`
+}
+
+// Regression for #205: a usage-limit-refused run writes an empty
+// token_count. It must not be selected as current — the previous session's
+// valid data (here: the one that just hit 100%) keeps showing.
+func TestCollectSkipsEmptyTokenCountFromRefusedRun(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Valid session: last usable token_count at 10:05.
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-valid", "/v")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150),
+		time.Date(2026, 5, 24, 10, 5, 0, 0, time.UTC))
+	// Refused run right after: fresher mtime, but its only token_count is empty.
+	writeRollout(t, day, "rollout-2026-05-24T10-06-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
+		ctxLine("2026-05-24T10:06:00.000Z", "gpt-refused", "/r")+"\n"+emptyTcLine("2026-05-24T10:06:01.000Z"),
+		time.Date(2026, 5, 24, 10, 6, 1, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-valid" {
+		t.Errorf("Model = %+v, want gpt-valid (the empty token_count must not win)", got.Model)
+	}
+	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 150 {
+		t.Errorf("Session.Tokens = %+v, want the valid session's 150", got.Session)
+	}
+}
+
+// The same session can hit the limit mid-file: an empty token_count appended
+// after valid ones must fall back to the file's own last valid snapshot.
+func TestCollectFallsBackPastEmptyTokenCountInFile(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-cccccccccccc.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-x", "/x")+"\n"+
+			tcLine("2026-05-24T10:05:00.000Z", 150)+"\n"+
+			emptyTcLine("2026-05-24T10:06:00.000Z"),
+		time.Date(2026, 5, 24, 10, 6, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 150 {
+		t.Errorf("Session.Tokens = %+v, want 150 from the last valid token_count", got.Session)
+	}
+}
+
+// With nothing but empty token_counts there is genuinely no usable data:
+// surface no_token_count rather than rendering an all-null tool.
+func TestCollectNoTokenCountWhenAllEmpty(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-dddddddddddd.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-r", "/r")+"\n"+emptyTcLine("2026-05-24T10:00:01.000Z"),
+		time.Date(2026, 5, 24, 10, 0, 1, 0, time.UTC))
+
+	got := Collect(Options{Root: root})
+	if got.Error == nil || got.Error.Code != "no_token_count" {
+		t.Fatalf("Error = %+v, want no_token_count when only empty token_counts exist", got.Error)
+	}
+}
+
 // A rollout that is listed but cannot be read must surface as read_error,
 // not read as an absent tool: "exists but unreadable" is unknown, not
 // missing. A dangling symlink reproduces the failure portably.

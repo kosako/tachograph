@@ -239,8 +239,10 @@ func allLines(path string) ([][]byte, error) {
 	return bytes.Split(b, []byte("\n")), nil
 }
 
-// lastEvents scans backwards for the most recent token_count and
-// turn_context. ok reports whether a token_count was found.
+// lastEvents scans backwards for the most recent usable token_count and
+// turn_context. ok reports whether a usable token_count was found: an empty
+// token_count (a usage-limit-refused request, #205) is skipped so it can't
+// hide the session's — or an older session's — last valid data.
 func lastEvents(lines [][]byte) (tc *TokenCount, turn *TurnContext, ok bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		ev, evOK := ParseEvent(lines[i])
@@ -248,7 +250,9 @@ func lastEvents(lines [][]byte) (tc *TokenCount, turn *TurnContext, ok bool) {
 			continue
 		}
 		if tc == nil {
-			tc = ev.TokenCount()
+			if c := ev.TokenCount(); c != nil && c.Usable() {
+				tc = c
+			}
 		}
 		if turn == nil {
 			turn = ev.TurnContext()
