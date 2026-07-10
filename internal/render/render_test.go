@@ -155,6 +155,26 @@ func TestToolLineFallback(t *testing.T) {
 	}
 }
 
+// The statusline route can carry a cost with null session tokens (unreadable
+// transcript, #185); the cost must still render on limit-less backends.
+func TestToolLineFallbackCostWithoutTokens(t *testing.T) {
+	cost := 1.5
+	tool := schema.Tool{
+		Tool:      schema.ToolClaudeCode,
+		Available: true,
+		Backend:   schema.BackendBedrock,
+		Model:     &schema.Model{ID: "claude-fable-5"},
+		Fallback:  &schema.Fallback{EstimatedCostUSD: &cost},
+	}
+	got := ToolLine(tool, time.Now(), plain)
+	if !strings.Contains(got, "$1.50") {
+		t.Errorf("ToolLine = %q, missing cost without session tokens", got)
+	}
+	if strings.Contains(got, "tokens") {
+		t.Errorf("ToolLine = %q, has a tokens part with nil SessionTokens", got)
+	}
+}
+
 func TestToolLineUnavailableAndStale(t *testing.T) {
 	got := ToolLine(schema.Unavailable(schema.ToolCodex), time.Now(), plain)
 	if !strings.Contains(got, "(not found)") {

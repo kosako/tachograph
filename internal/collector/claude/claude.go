@@ -100,8 +100,6 @@ type StatuslineInput struct {
 		TotalCostUSD float64 `json:"total_cost_usd"`
 	} `json:"cost"`
 	ContextWindow *struct {
-		TotalInputTokens  int64    `json:"total_input_tokens"`
-		TotalOutputTokens int64    `json:"total_output_tokens"`
 		ContextWindowSize int64    `json:"context_window_size"`
 		UsedPercentage    *float64 `json:"used_percentage"`
 		CurrentUsage      *Usage   `json:"current_usage"`
@@ -165,17 +163,22 @@ func fromStatusline(opts Options) schema.Tool {
 			sess.ContextWindow = &cw.ContextWindowSize
 		}
 		sess.ContextUsedPct = cw.UsedPercentage
-		// cached_input is the session-total cached input by contract. The
-		// statusline JSON has no session-total cache figure: current_usage is
-		// per-turn and total_input_tokens can't be decomposed. Leave it unset
-		// rather than leak a per-turn value under a session-total field.
-		sess.Tokens = &schema.Tokens{
-			Input:  cw.TotalInputTokens,
-			Output: cw.TotalOutputTokens,
-			Total:  cw.TotalInputTokens + cw.TotalOutputTokens,
+	}
+	// session.tokens is the session's cumulative usage by contract. Since
+	// Claude Code v2.1.132 the statusline's context_window.total_* mean
+	// "currently in the context window" (the figure shrinks on /compact), so
+	// the cumulative totals come from the transcript instead, with the same
+	// aggregation as the transcript route. An unreadable or usage-less
+	// transcript leaves tokens null (unknown, never a wrong-semantics
+	// substitute) — see #185.
+	if in.TranscriptPath != "" {
+		if b, err := os.ReadFile(in.TranscriptPath); err == nil {
+			if totals, last := usageFromTranscript(b); last != nil {
+				totals.Total = totals.Input + totals.Output
+				sess.Tokens = &totals
+				fb.SessionTokens = &totals.Total
+			}
 		}
-		total := sess.Tokens.Total
-		fb.SessionTokens = &total
 	}
 	t.Session = sess
 	if in.Cost != nil {
