@@ -202,6 +202,23 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 	// into a second file isn't counted twice. Files without a parseable id
 	// can't be deduped and are summed as-is.
 	bySession := map[string]*codexRollout{}
+	// addToday folds one today-modified rollout into the totals. Without any
+	// parsable timestamp the cumulative can't be split at midnight, so it is
+	// attributed to the file's own day directory (counted fully in today's
+	// directory, ignored elsewhere).
+	addToday := func(f codexRolloutFile, ro codexRollout) {
+		if ro.last == nil || (!ro.tsParsed && f.day != todayDir) {
+			return
+		}
+		id, ok := codex.SessionID(filepath.Base(f.path))
+		if !ok {
+			t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
+			out.Tokens += t.Tokens
+			out.Cost += t.Cost
+			return
+		}
+		mergeCodexRollout(bySession, id, ro)
+	}
 	var old []codexRolloutFile
 	for _, f := range files {
 		if f.mod.Before(dayStart) {
@@ -212,29 +229,41 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 		if err != nil {
 			return Totals{}, err // unknown total; callers keep daily null, not 0
 		}
-		if ro.last == nil {
+		addToday(f, ro)
+	}
+	// The classification mtime is from enumeration and these are live
+	// sessions: re-stat each old file and count those appended past midnight
+	// since as today files after all (their content, not their mtime,
+	// decides the midnight split). This runs before base-linking so a
+	// promoted session's own delta base isn't skipped by ordering.
+	var bases []codexRolloutFile
+	for _, f := range old {
+		info, err := os.Stat(f.path)
+		if err != nil {
+			// Can't confirm an append: keep the enumeration-time "old"
+			// classification instead of erroring, so long-dead junk (e.g. a
+			// dangling symlink in an ancient day directory) doesn't null the
+			// daily forever. If the file matters — it shares a session id
+			// with a today rollout — the linking pass reads it and surfaces
+			// the failure.
+			bases = append(bases, f)
 			continue
 		}
-		// Without any parsable timestamp the cumulative can't be split
-		// at midnight; attribute it to the file's own day directory
-		// (count fully in today's directory, ignore in older ones).
-		if !ro.tsParsed && f.day != todayDir {
+		if info.ModTime().Before(dayStart) {
+			bases = append(bases, f)
 			continue
 		}
-		id, ok := codex.SessionID(filepath.Base(f.path))
-		if !ok {
-			t := codexDeltaTotals(ro.model, ro.before, ro.last, prices)
-			out.Tokens += t.Tokens
-			out.Cost += t.Cost
-			continue
+		ro, err := codexRolloutUsage(f.path, dayStart)
+		if err != nil {
+			return Totals{}, err // unknown total; callers keep daily null, not 0
 		}
-		mergeCodexRollout(bySession, id, ro)
+		addToday(f, ro)
 	}
 	// A session resumed today carries its cumulative forward from an earlier
 	// file last written before midnight; that file holds the delta base (the
 	// last pre-midnight snapshot). Only files sharing a session id seen today
 	// can contribute, so only those are read.
-	for _, f := range old {
+	for _, f := range bases {
 		id, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok || bySession[id] == nil {
 			continue

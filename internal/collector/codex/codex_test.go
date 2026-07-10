@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -314,6 +315,85 @@ func TestCollectFindsLongRunningSessionPastNewerDays(t *testing.T) {
 	}
 	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 999 {
 		t.Errorf("Session.Tokens = %+v, want the long-running session's 999", got.Session)
+	}
+}
+
+// Equal mtimes must not prune each other: the tie-broken visit order (path
+// descending) reads gpt-b first, and gpt-a — same mtime, fresher
+// token_count — must still be read and win, not be skipped. This pins the
+// strict Before() cutoff: only files strictly older than the freshest
+// token_count are skipped.
+func TestCollectEqualMtimeReadsBoth(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mod := time.Date(2026, 5, 24, 10, 10, 0, 0, time.UTC)
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-a", "/a")+"\n"+tcLine("2026-05-24T10:05:00.000Z", 150), mod)
+	writeRollout(t, day, "rollout-2026-05-24T10-01-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
+		ctxLine("2026-05-24T10:01:00.000Z", "gpt-b", "/b")+"\n"+tcLine("2026-05-24T10:02:00.000Z", 99), mod)
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:11:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-a" {
+		t.Errorf("Model = %+v, want gpt-a (equal mtime must not be pruned)", got.Model)
+	}
+}
+
+// With identical mtimes AND identical token_count timestamps the pick is
+// deterministic: the path tie-break (descending) visits gpt-b first, and a
+// merely-equal timestamp does not displace it. (A strictly fresher
+// token_count at the exact mtime boundary is impossible by the invariant —
+// events are never newer than their file — so equality is the boundary's
+// only case.)
+func TestCollectEqualMtimeAndTimestampTieBreak(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mod := time.Date(2026, 5, 24, 10, 5, 0, 0, time.UTC)
+	ts := "2026-05-24T10:05:00.000Z"
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-aaaaaaaaaaaa.jsonl",
+		ctxLine(ts, "gpt-a", "/a")+"\n"+tcLine(ts, 150), mod)
+	writeRollout(t, day, "rollout-2026-05-24T10-01-00-019e5933-2289-7e72-88fd-bbbbbbbbbbbb.jsonl",
+		ctxLine(ts, "gpt-b", "/b")+"\n"+tcLine(ts, 99), mod)
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-b" {
+		t.Errorf("Model = %+v, want gpt-b (deterministic path tie-break)", got.Model)
+	}
+}
+
+// A rollout that is listed but cannot be read must surface as read_error,
+// not read as an absent tool: "exists but unreadable" is unknown, not
+// missing. A dangling symlink reproduces the failure portably.
+func TestCollectReadErrorWhenOnlyRolloutUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "gone"),
+		filepath.Join(day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-cccccccccccc.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Collect(Options{Root: root})
+	if got.Error == nil || got.Error.Code != "read_error" {
+		t.Fatalf("Error = %+v, want read_error for a listed-but-unreadable rollout", got.Error)
 	}
 }
 

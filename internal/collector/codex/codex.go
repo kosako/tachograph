@@ -70,19 +70,29 @@ type pick struct {
 // TUI, codex exec, desktop app, IDE extension) writes a rollout into its
 // START-day directory and keeps appending there however long the session
 // runs (#133, #188), so recency comes from file mtime, not the directory
-// date. Candidates are visited newest-mtime-first and the walk stops at the
-// first file older than the freshest token_count found: appends move mtime
-// forward, so a file's events are never newer than its mtime and such a file
-// cannot win. The freshest token_count — not the newest file by mtime — is
-// still what decides (rate limits are account-global, so any session's
-// latest token_count is valid); a rollout without a token_count yet
-// (just-started session) is skipped so it can't hide older valid data.
+// date. Candidates are visited newest-mtime-first; once a token_count is
+// found, files whose mtime predates it are skipped without reading —
+// appends move mtime forward, so a file's events are never newer than its
+// mtime and such a file cannot win. The skip re-stats at decision time
+// because these are live sessions: an append landing after enumeration
+// moves the file's current mtime past the cutoff and it is read after all.
+// The freshest token_count — not the newest file by mtime — is still what
+// decides (rate limits are account-global, so any session's latest
+// token_count is valid); a rollout without a token_count yet (just-started
+// session) is skipped so it can't hide older valid data.
 func pickSession(dir string) pick {
 	files := rolloutsByMtime(dir)
 	acc := pick{sawFile: len(files) > 0}
 	for _, f := range files {
-		if acc.tc != nil && f.mod.Before(acc.ts) {
-			break
+		if acc.tc != nil {
+			info, err := os.Stat(f.path)
+			if err != nil {
+				acc.readErr = err
+				continue
+			}
+			if info.ModTime().Before(acc.ts) {
+				continue
+			}
 		}
 		tc, turn, err := sessionEvents(f.path)
 		if err != nil {
@@ -111,7 +121,10 @@ type rolloutFile struct {
 
 // rolloutsByMtime lists every rollout under the YYYY/MM/DD tree, newest
 // mtime first. Equal mtimes tie-break by path (descending) so selection is
-// deterministic rather than dependent on directory read order.
+// deterministic rather than dependent on directory read order. An entry
+// whose stat fails stays listed with a zero mtime (sorting last): the mtime
+// only orders the visit, and the caller's stat/read surfaces the error so a
+// listed-but-unreadable rollout reads as read_error, not as absent.
 func rolloutsByMtime(dir string) []rolloutFile {
 	var out []rolloutFile
 	for _, day := range dayDirsDesc(dir) {
@@ -123,11 +136,11 @@ func rolloutsByMtime(dir string) []rolloutFile {
 			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 				continue
 			}
-			info, err := e.Info()
-			if err != nil {
-				continue
+			var mod time.Time
+			if info, err := e.Info(); err == nil {
+				mod = info.ModTime()
 			}
-			out = append(out, rolloutFile{filepath.Join(day, e.Name()), info.ModTime()})
+			out = append(out, rolloutFile{filepath.Join(day, e.Name()), mod})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
