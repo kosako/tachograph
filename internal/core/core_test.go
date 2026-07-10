@@ -65,7 +65,7 @@ func TestStatusPrefersClaudeSnapshot(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := cache.WriteSnapshot(snap); err != nil {
+	if err := cache.WriteSnapshot(snap, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 

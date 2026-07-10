@@ -383,8 +383,8 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	// it from the transcript so {claude.*.session.today} works.
 	core.AddSessionToday(&claudeTool, now, pricing.Load())
 	if shouldWriteStatuslineSnapshot(input, claudeTool) {
-		preserveSnapshotLimits(&claudeTool, now)
-		_ = cache.WriteSnapshot(claudeTool)
+		limitsObserved := preserveSnapshotLimits(&claudeTool, now)
+		_ = cache.WriteSnapshot(claudeTool, limitsObserved)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
 	for i := range s.Tools {
@@ -431,13 +431,27 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 	return false
 }
 
-func preserveSnapshotLimits(t *schema.Tool, now time.Time) {
+// preserveSnapshotLimits carries rate limits from the cached snapshot into a
+// live payload that lacks them, so one limit-less payload doesn't erase the
+// limits other renderers show. It returns when the tool's limits were
+// originally observed — now for live limits, the snapshot's own observation
+// for preserved ones, zero when the tool ends up without limits — so the
+// snapshot rewrite can't re-stamp old limits as fresh. Limits are carried
+// only between subscription payloads: bedrock/api/vertex keep limits null by
+// the collector contract (#186).
+func preserveSnapshotLimits(t *schema.Tool, now time.Time) time.Time {
 	if len(t.Limits) > 0 {
-		return
+		return now
 	}
-	if snap, ok := cache.ReadSnapshot(t.Tool, cache.SnapshotMaxAge, now); ok && len(snap.Limits) > 0 {
-		t.Limits = snap.Limits
+	if t.Backend != schema.BackendSubscription {
+		return time.Time{}
 	}
+	limits, backend, observed, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now)
+	if !ok || backend != schema.BackendSubscription {
+		return time.Time{}
+	}
+	t.Limits = limits
+	return observed
 }
 
 func runCmux(args []string) int {
