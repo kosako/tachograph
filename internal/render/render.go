@@ -237,12 +237,17 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 		for _, l := range t.Limits {
 			parts = append(parts, limitPart(l, now, inner))
 		}
-	} else if fb := t.Fallback; fb != nil && fb.SessionTokens != nil {
-		s := "tokens " + FormatTokens(*fb.SessionTokens)
-		if fb.EstimatedCostUSD != nil {
-			s += fmt.Sprintf(" $%.2f", *fb.EstimatedCostUSD)
+	} else if fb := t.Fallback; fb != nil && (fb.SessionTokens != nil || fb.EstimatedCostUSD != nil) {
+		// Tokens and cost are independent: the statusline route can have a
+		// cost but null tokens when the session transcript is unreadable.
+		var seg []string
+		if fb.SessionTokens != nil {
+			seg = append(seg, "tokens "+FormatTokens(*fb.SessionTokens))
 		}
-		parts = append(parts, s)
+		if fb.EstimatedCostUSD != nil {
+			seg = append(seg, fmt.Sprintf("$%.2f", *fb.EstimatedCostUSD))
+		}
+		parts = append(parts, strings.Join(seg, " "))
 	}
 	line := strings.Join(parts, "  ")
 	if t.Stale {
