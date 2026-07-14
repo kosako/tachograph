@@ -132,7 +132,7 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
-	frac, _ := render.Metric(t, metric)
+	frac, _ := render.MenubarMetric(t, metric)
 	var pct float64
 	hasPct := frac != nil
 	if hasPct {

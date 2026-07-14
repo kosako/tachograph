@@ -135,6 +135,43 @@ func TestRenderNumberStyle(t *testing.T) {
 	}
 }
 
+// weeklyOnlyTool mirrors Codex after OpenAI's 2026-07 5h-limit removal: the
+// payload reports only a weekly window.
+func weeklyOnlyTool(pctW float64) schema.Tool {
+	c := tool(schema.ToolCodex, false, 0, pctW)
+	c.Limits = c.Limits[1:] // drop the 5h window, keep weekly
+	return c
+}
+
+// A tool without the configured limit window must fall back to its available
+// window with a tag, not show "--" (issue #210).
+func TestRenderNumberStyleLimitFallback(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{
+		tool(schema.ToolClaudeCode, false, 24, 41),
+		weeklyOnlyTool(15),
+	}}
+	cfg := config.Default()
+	cfg.Menubar.Style = config.StyleNumber
+	cfg.Menubar.Metric = render.MetricLimit5h
+	title := strings.SplitN(Render(s, now, true, cfg), "\n", 2)[0]
+	if title != "C 24%  X wk15%" {
+		t.Errorf("number title = %q, want \"C 24%%  X wk15%%\"", title)
+	}
+}
+
+// The moon-dial text title falls back the same way instead of showing the
+// missing dial.
+func TestRenderTextTitleMoonFallback(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{weeklyOnlyTool(60)}}
+	title := strings.SplitN(Render(s, now, true, config.Default()), "\n", 2)[0]
+	if title != "X"+render.Moon(60) {
+		t.Errorf("text title = %q, want %q", title, "X"+render.Moon(60))
+	}
+}
+
 func TestRenderSettingsMenu(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}

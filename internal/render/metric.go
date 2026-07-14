@@ -97,6 +97,42 @@ func Metric(t schema.Tool, metric string) (frac *float64, text string) {
 	return nil, Missing
 }
 
+// MenubarMetric resolves the menu bar's per-tool value. It behaves like
+// Metric, except that a limit metric whose window the tool does not report
+// falls back to the tool's first reported limit window, prefixed with that
+// window's short tag (e.g. "wk17%") so the number style stays unambiguous.
+// Rationale: providers add and drop windows server-side — OpenAI temporarily
+// removed Codex's 5h window in 2026-07 — and the menu bar should keep showing
+// the limit pressure that does exist instead of "--". The fallback self-
+// reverts once the configured window reappears in the payload.
+func MenubarMetric(t schema.Tool, metric string) (frac *float64, text string) {
+	frac, text = Metric(t, metric)
+	if !isLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
+		return frac, text
+	}
+	for _, l := range t.Limits {
+		if l.UsedPct == nil {
+			continue
+		}
+		f, txt := pctMetric(*l.UsedPct)
+		return f, windowShort(l.Window) + txt
+	}
+	return frac, text
+}
+
+func isLimitMetric(metric string) bool {
+	return metric == MetricLimit5h || metric == MetricLimitWeekly
+}
+
+// windowShort is the compact window tag shown when the menu bar falls back to
+// a window other than the configured one ("wk" matches the one-shot CLI).
+func windowShort(window string) string {
+	if window == schema.WindowWeekly {
+		return "wk"
+	}
+	return window
+}
+
 func limitMetric(t schema.Tool, window string) (*float64, string) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
