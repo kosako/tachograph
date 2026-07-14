@@ -84,6 +84,40 @@ func TestFillScalesWithUsage(t *testing.T) {
 	}
 }
 
+// A tool reporting only a weekly window must still fill the ring when the
+// menu bar metric is limit_5h — the ring falls back to the available window
+// (Codex dropped its 5h window in 2026-07, issue #210).
+func TestFallbackFillsRingFromAvailableWindow(t *testing.T) {
+	ink := func(pctW float64) int {
+		mW := 10080
+		weeklyOnly := schema.Tool{
+			Tool:      schema.ToolCodex,
+			Available: true,
+			Backend:   schema.BackendSubscription,
+			Limits:    []schema.Limit{{Window: "weekly", WindowMinutes: &mW, UsedPct: &pctW}},
+		}
+		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{weeklyOnly}}, true, render.MetricLimit5h)
+		if !ok {
+			t.Fatal("not ok")
+		}
+		raw, _ := base64.StdEncoding.DecodeString(b64)
+		img, _ := png.Decode(bytes.NewReader(raw))
+		var sum int
+		b := img.Bounds()
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				_, _, _, a := img.At(x, y).RGBA()
+				sum += int(a >> 8)
+			}
+		}
+		return sum
+	}
+	low, high := ink(10), ink(90)
+	if high <= low {
+		t.Errorf("expected the weekly fallback to drive the ring: ink at 90%% (%d) should exceed 10%% (%d)", high, low)
+	}
+}
+
 func TestUnavailableRendersTrackOnly(t *testing.T) {
 	// An unavailable tool still produces a gauge (dim track + dim logo),
 	// so the image dimensions stay stable.

@@ -173,7 +173,7 @@ func numberTitle(s schema.Status, metric string) string {
 		if t.Tool == schema.ToolClaudeCode {
 			initial = "C"
 		}
-		_, text := render.Metric(t, metric)
+		_, text := render.MenubarMetric(t, metric)
 		parts = append(parts, initial+" "+text)
 	}
 	if len(parts) == 0 {
@@ -182,7 +182,9 @@ func numberTitle(s schema.Status, metric string) string {
 	return strings.Join(parts, "  ")
 }
 
-// title is the menu bar text fallback: tool initial + 5h moon dial, "C🌒 X🌑".
+// title is the menu bar text fallback: tool initial + moon dial, "C🌒 X🌑".
+// The moon tracks 5h usage, or the tool's first reported limit window when
+// no 5h window exists (same fallback as the ring and the number style).
 func title(s schema.Status) string {
 	var parts []string
 	for _, t := range s.Tools {
@@ -193,8 +195,8 @@ func title(s schema.Status) string {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		if pct := fiveHourPct(t); pct != nil {
-			parts = append(parts, initial+render.Moon(*pct))
+		if frac, _ := render.MenubarMetric(t, render.MetricLimit5h); frac != nil {
+			parts = append(parts, initial+render.Moon(*frac*100))
 		} else {
 			parts = append(parts, initial+render.DialMissing)
 		}
@@ -203,15 +205,6 @@ func title(s schema.Status) string {
 		return "tacho " + render.DialMissing
 	}
 	return strings.Join(parts, " ")
-}
-
-func fiveHourPct(t schema.Tool) *float64 {
-	for _, l := range t.Limits {
-		if l.Window == schema.WindowFiveHour {
-			return l.UsedPct
-		}
-	}
-	return nil
 }
 
 // enableParams attach a harmless no-op action so the menu item is "enabled":

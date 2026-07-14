@@ -75,3 +75,44 @@ func TestMetricUnavailable(t *testing.T) {
 		t.Errorf("unavailable text = %q, want %q", text, Missing)
 	}
 }
+
+// A limit metric whose window the tool no longer reports falls back to the
+// first reported limit, tagged with its window — OpenAI dropped Codex's 5h
+// window in 2026-07, and the menu bar should show weekly pressure, not "--".
+func TestMenubarMetricFallback(t *testing.T) {
+	wk := 15.0
+	weeklyOnly := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Limits:    []schema.Limit{{Window: schema.WindowWeekly, UsedPct: &wk}},
+	}
+	frac, text := MenubarMetric(weeklyOnly, MetricLimit5h)
+	if text != "wk15%" {
+		t.Errorf("MenubarMetric(5h, weekly-only) text = %q, want \"wk15%%\"", text)
+	}
+	if frac == nil || *frac < 0.14 || *frac > 0.16 {
+		t.Errorf("MenubarMetric(5h, weekly-only) frac = %v, want ~0.15", frac)
+	}
+
+	// The configured window wins when present: no tag, identical to Metric.
+	if _, text := MenubarMetric(metricTool(), MetricLimit5h); text != "24%" {
+		t.Errorf("MenubarMetric(5h present) text = %q, want \"24%%\"", text)
+	}
+	// The fallback works in both directions (weekly configured, only 5h).
+	if _, text := MenubarMetric(metricTool(), MetricLimitWeekly); text != "5h24%" {
+		t.Errorf("MenubarMetric(weekly, 5h-only) text = %q, want \"5h24%%\"", text)
+	}
+	// No reported limits at all stays "--".
+	if _, text := MenubarMetric(schema.Tool{Tool: schema.ToolCodex, Available: true}, MetricLimit5h); text != Missing {
+		t.Errorf("MenubarMetric(no limits) text = %q, want %q", text, Missing)
+	}
+	// Non-limit metrics never fall back to a limit window.
+	if _, text := MenubarMetric(weeklyOnly, MetricCost); text != Missing {
+		t.Errorf("MenubarMetric(cost) text = %q, want %q", text, Missing)
+	}
+	// Unavailable tools stay "--" even if limits linger in the struct.
+	unavailable := schema.Tool{Tool: schema.ToolCodex, Limits: weeklyOnly.Limits}
+	if _, text := MenubarMetric(unavailable, MetricLimit5h); text != Missing {
+		t.Errorf("MenubarMetric(unavailable) text = %q, want %q", text, Missing)
+	}
+}
