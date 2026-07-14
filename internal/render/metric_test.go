@@ -115,4 +115,37 @@ func TestMenubarMetricFallback(t *testing.T) {
 	if _, text := MenubarMetric(unavailable, MetricLimit5h); text != Missing {
 		t.Errorf("MenubarMetric(unavailable) text = %q, want %q", text, Missing)
 	}
+	// Error'd tools stay "--" even if limits linger in the struct.
+	errored := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Error:     &schema.Error{Code: "parse_error"},
+		Limits:    weeklyOnly.Limits,
+	}
+	if _, text := MenubarMetric(errored, MetricLimit5h); text != Missing {
+		t.Errorf("MenubarMetric(errored) text = %q, want %q", text, Missing)
+	}
+	// A window reported without a value is skipped both as the configured
+	// window and inside the fallback scan: 5h present but valueless falls
+	// through to the weekly value.
+	nilFirst := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Limits: []schema.Limit{
+			{Window: schema.WindowFiveHour},
+			{Window: schema.WindowWeekly, UsedPct: &wk},
+		},
+	}
+	if _, text := MenubarMetric(nilFirst, MetricLimit5h); text != "wk15%" {
+		t.Errorf("MenubarMetric(nil-first) text = %q, want \"wk15%%\"", text)
+	}
+	// All-valueless limits stay "--".
+	nilOnly := schema.Tool{
+		Tool:      schema.ToolCodex,
+		Available: true,
+		Limits:    []schema.Limit{{Window: schema.WindowWeekly}},
+	}
+	if _, text := MenubarMetric(nilOnly, MetricLimit5h); text != Missing {
+		t.Errorf("MenubarMetric(nil-only) text = %q, want %q", text, Missing)
+	}
 }
