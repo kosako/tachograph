@@ -29,7 +29,9 @@ type Rate struct {
 // Long-context premiums (Opus >200K, GPT-5.5 >272K) are not modeled — this is a
 // flat table. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
-	"claude-opus":     {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},   // Opus 4.5+
+	// Opus 4.5+ — Opus 5 kept the same $5/$25, so claude-opus-5 intentionally
+	// resolves here by prefix; no dedicated entry needed (unlike Sonnet 5).
+	"claude-opus":     {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},
 	"claude-opus-4-1": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // Opus 4.1 kept the older $15/$75
 	"claude-sonnet":   {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75},   // Sonnet 4.6 and earlier
 	// Sonnet 5 introductory pricing, in effect through 2026-08-31; from
