@@ -79,11 +79,13 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
-		{"gpt-5.6", Rate{5, 30, 0.5, 6.25}},     // Sol (default tier)
-		{"gpt-5.6-sol", Rate{5, 30, 0.5, 6.25}}, // full Sol id → base alias
-		{"gpt-5.6-terra", Rate{2.5, 15, 0.25, 3.125}},
-		{"gpt-5.6-luna", Rate{1, 6, 0.1, 1.25}},
-		{"gpt-5.5", Rate{5, 30, 0.5, 5}}, // and openai.gpt-5.5 via canonical
+		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                  // Sol (default tier), promo price since 2026-08-21 (#216)
+		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},              // full Sol id → base alias
+		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},          // 2026-07-30 cut
+		{"gpt-5.6-luna", Rate{0.2, 1.2, 0.02, 0.25}},      // 2026-07-30 cut (-80%)
+		{"gpt-5.6-cyber", Rate{12.5, 75, 1.25, 15.625}},   // dedicated key, not shadowed by the gpt-5.6 Sol alias
+		{"codex-auto-review", Rate{0.2, 1.2, 0.02, 0.25}}, // GPT-5.6 Luna under the hood, not the codex catch-all
+		{"gpt-5.5", Rate{5, 30, 0.5, 5}},                  // and openai.gpt-5.5 via canonical
 		{"gpt-5.5-pro", Rate{30, 180, 3, 30}},
 		{"gpt-5.4", Rate{2.5, 15, 0.25, 2.5}},
 		{"gpt-5.4-codex", Rate{2.5, 15, 0.25, 2.5}}, // -codex variant falls to the base price
