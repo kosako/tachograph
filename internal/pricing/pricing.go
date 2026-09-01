@@ -26,8 +26,9 @@ type Rate struct {
 // OpenAI uses its published cached-input price for reads. For cache writes,
 // gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
 // separately), while gpt-5.6 and later publish a 1.25x-input write price.
-// Long-context premiums (Opus >200K, GPT-5.5 >272K) are not modeled — this is a
-// flat table. Override or extend via the pricing.json file.
+// Long-context premiums (the GPT-5.4/5.5/5.6 >272K rates) are not modeled —
+// this is a flat table. Claude 4.6+ has no such premium: the full 1M window
+// bills at standard rates. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
 	// Opus 4.5+ — Opus 5 kept the same $5/$25, so claude-opus-5 intentionally
 	// resolves here by prefix; no dedicated entry needed (unlike Sonnet 5).
@@ -45,13 +46,16 @@ var defaults = map[string]Rate{
 	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
 	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.
-	// gpt-5.6 ships Sol/Terra/Luna tiers; bare "gpt-5.6" is OpenAI's alias for
-	// the default Sol tier, and Codex logs the full "gpt-5.6-sol" id (which
+	// gpt-5.6 ships Sol/Terra/Luna/Cyber tiers; bare "gpt-5.6" is OpenAI's alias
+	// for the default Sol tier, and Codex logs the full "gpt-5.6-sol" id (which
 	// prefix-matches this base). Unlike earlier gpt-5.x, 5.6 publishes a
-	// cache-write price at 1.25x input.
-	"gpt-5.6":       {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 6.25}, // Sol (default tier); alias of gpt-5.6-sol
-	"gpt-5.6-terra": {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 3.125},
-	"gpt-5.6-luna":  {In: 1, Out: 6, CacheRead: 0.1, CacheWrite: 1.25},
+	// cache-write price at 1.25x input. Rates reflect the 2026-07-30 Terra/Luna
+	// cuts and the 2026-08-21 Sol promotional price (in effect at least through
+	// 2026-11-21) — #216.
+	"gpt-5.6":       {In: 4, Out: 20, CacheRead: 0.4, CacheWrite: 5}, // Sol (default tier); alias of gpt-5.6-sol
+	"gpt-5.6-terra": {In: 2, Out: 12, CacheRead: 0.2, CacheWrite: 2.5},
+	"gpt-5.6-luna":  {In: 0.2, Out: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
+	"gpt-5.6-cyber": {In: 12.5, Out: 75, CacheRead: 1.25, CacheWrite: 15.625},
 	"gpt-5.5":       {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 5},
 	"gpt-5.5-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30}, // cached input unpublished; 0.1x convention
 	"gpt-5.4":       {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
@@ -59,7 +63,11 @@ var defaults = map[string]Rate{
 	"gpt-5.4-nano":  {In: 0.2, Out: 1.25, CacheRead: 0.02, CacheWrite: 0.2},
 	"gpt-5.4-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30},        // cached input unpublished; 0.1x convention
 	"gpt-5":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
-	"codex":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // fallback for "codex*" ids
+	// Codex's auto-review agent logs this id; OpenAI publishes no price for it
+	// but announced (2026-07-30) it runs on GPT-5.6 Luna, so approximate at
+	// Luna's rate instead of letting it fall to the codex catch-all (#216).
+	"codex-auto-review": {In: 0.2, Out: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
+	"codex":             {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // fallback for "codex*" ids
 	// Bare aliases some tools record instead of the full model id (e.g. a
 	// transcript that logs just "sonnet"). Same rate as the matching claude-* tier.
 	"opus":   {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},
