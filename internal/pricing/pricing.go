@@ -26,9 +26,9 @@ type Rate struct {
 // OpenAI uses its published cached-input price for reads. For cache writes,
 // gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
 // separately), while gpt-5.6 and later publish a 1.25x-input write price.
-// Long-context premiums (the GPT-5.6 >272K tiers) are not modeled — this is a
-// flat table. Claude 4.6+ has no such premium: the full 1M window bills at
-// standard rates. Override or extend via the pricing.json file.
+// Long-context premiums (the GPT-5.4/5.5/5.6 >272K rates) are not modeled —
+// this is a flat table. Claude 4.6+ has no such premium: the full 1M window
+// bills at standard rates. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
 	// Opus 4.5+ — Opus 5 kept the same $5/$25, so claude-opus-5 intentionally
 	// resolves here by prefix; no dedicated entry needed (unlike Sonnet 5).
