@@ -42,6 +42,7 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 		{"gpt-5.6-sol", tab["gpt-5.6"]},                          // Sol tier id → base alias
 		{"gpt-5.6-codex", tab["gpt-5.6"]},                        // -codex variant → 5.6 base (Sol)
 		{"openai.gpt-5.6-terra", tab["gpt-5.6-terra"]},           // Bedrock OpenAI → tier key
+		{"openai.gpt-6-astra", tab["gpt-6-astra"]},               // Bedrock OpenAI → GPT-6 Astra key
 		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
 	}
 	for _, c := range cases {
@@ -79,6 +80,7 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
+		{"gpt-6-astra", Rate{10, 50, 1, 12.5}},            // GPT-6 Astra, launched 2026-09-03; previously unpriced (#220)
 		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                  // Sol (default tier), promo price since 2026-08-21 (#216)
 		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},              // full Sol id → base alias
 		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},          // 2026-07-30 cut
