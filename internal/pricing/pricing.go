@@ -26,7 +26,7 @@ type Rate struct {
 // OpenAI uses its published cached-input price for reads. For cache writes,
 // gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
 // separately), while gpt-5.6 and later publish a 1.25x-input write price.
-// Long-context premiums (the GPT-5.4/5.5/5.6 >272K rates) are not modeled —
+// Long-context premiums (the GPT-5.4/5.5/5.6 and GPT-6 >272K rates) are not modeled —
 // this is a flat table. Claude 4.6+ has no such premium: the full 1M window
 // bills at standard rates. Override or extend via the pricing.json file.
 var defaults = map[string]Rate{
@@ -43,6 +43,11 @@ var defaults = map[string]Rate{
 	"claude-haiku":    {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25}, // Haiku 4.5
 	"claude-fable":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Fable 5
 	"claude-mythos":   {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Mythos 5
+	// GPT-6 ships as the single "gpt-6-astra" id (released 2026-09-03), which
+	// Codex logs verbatim. OpenAI publishes no bare "gpt-6" alias, so none is
+	// added here — an unknown future gpt-6 tier stays unpriced rather than
+	// guessing. Cache write is the published $12.50 (1.25x input) — #220.
+	"gpt-6-astra": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},
 	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
 	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.
