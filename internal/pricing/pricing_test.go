@@ -141,6 +141,40 @@ func TestOverrideFromFile(t *testing.T) {
 
 // A partial override must keep the other prices at their built-in defaults
 // rather than zeroing them (which would silently undercount cost).
+// A built-in key more specific than the override's key still wins, because
+// lookup is longest-prefix: overriding "claude-fable" reaches Fable 5 but not
+// Fable 5.1, which has its own entry. Users overriding such a tier must name it
+// exactly — documented in the README (#225 review).
+func TestOverrideDoesNotReachMoreSpecificDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"claude-fable":{"cache_read":99}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab := Load()
+	if r, ok := tab.For("claude-fable-5"); !ok || r.CacheRead != 99 {
+		t.Errorf("claude-fable-5 = %+v %v, want the override's CacheRead=99", r, ok)
+	}
+	if r, ok := tab.For("claude-fable-5-1"); !ok || r.CacheRead != 0.25 {
+		t.Errorf("claude-fable-5-1 = %+v %v, want the built-in CacheRead=0.25 (longest prefix wins)", r, ok)
+	}
+}
+
+// Naming the specific tier does override it.
+func TestOverrideOfSpecificTierApplies(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"),
+		[]byte(`{"claude-fable-5-1":{"cache_read":0.5}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := Load().For("claude-fable-5-1")
+	if !ok || r.CacheRead != 0.5 || r.In != 10 {
+		t.Errorf("claude-fable-5-1 = %+v %v, want CacheRead=0.5 with In=10 from defaults", r, ok)
+	}
+}
+
 func TestPartialOverrideMergesOverDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
