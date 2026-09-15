@@ -58,9 +58,9 @@ func TestPNGBase64Empty(t *testing.T) {
 	}
 }
 
-// The fill must track 5h usage: more usage paints more of the ring, so a
-// higher-percentage gauge has strictly more ink than a lower one.
-func TestFillScalesWithUsage(t *testing.T) {
+// The fill must track 5h headroom: the ring drains as the window is used, so
+// a lightly used gauge has strictly more ink than a heavily used one (#223).
+func TestFillScalesWithHeadroom(t *testing.T) {
 	ink := func(pct float64) int {
 		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}}, true, render.MetricLimit5h)
 		if !ok {
@@ -78,9 +78,51 @@ func TestFillScalesWithUsage(t *testing.T) {
 		}
 		return sum
 	}
-	low, high := ink(10), ink(90)
-	if high <= low {
-		t.Errorf("expected more ink at 90%% (%d) than 10%% (%d)", high, low)
+	light, heavy := ink(10), ink(90)
+	if light <= heavy {
+		t.Errorf("expected more ink at 10%% used (%d) than 90%% used (%d)", light, heavy)
+	}
+}
+
+// reddish counts pixels whose color reads as the danger red on either
+// appearance (logo and neutral tracks are white/near-black, so they never
+// qualify).
+func reddish(t *testing.T, s schema.Status, dark bool) int {
+	t.Helper()
+	b64, ok := PNGBase64(s, dark, render.MetricLimit5h)
+	if !ok {
+		t.Fatal("not ok")
+	}
+	raw, _ := base64.StdEncoding.DecodeString(b64)
+	img, _ := png.Decode(bytes.NewReader(raw))
+	var n int
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a > 0 && r > g+g/2 && r > bl+bl/2 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// A window with (almost) nothing left draws no visible headroom arc — none at
+// 100% used, a sub-sample sliver at 99.9% — which must not collapse into the
+// same picture as a tool without limit data: the ring keeps its danger color
+// on the track (#223 review R1/R3).
+func TestExhaustedRingStaysVisible(t *testing.T) {
+	noLimits := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription}
+	for _, dark := range []bool{true, false} {
+		for _, used := range []float64{97, 99, 99.9, 100} {
+			if n := reddish(t, schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, used)}}, dark); n == 0 {
+				t.Errorf("dark=%v: %v%% used ring has no red pixels; near-exhaustion is invisible", dark, used)
+			}
+		}
+		if missing := reddish(t, schema.Status{Tools: []schema.Tool{noLimits}}, dark); missing != 0 {
+			t.Errorf("dark=%v: no-limit ring has %d red pixels, want 0 (neutral track)", dark, missing)
+		}
 	}
 }
 
@@ -112,9 +154,9 @@ func TestFallbackFillsRingFromAvailableWindow(t *testing.T) {
 		}
 		return sum
 	}
-	low, high := ink(10), ink(90)
-	if high <= low {
-		t.Errorf("expected the weekly fallback to drive the ring: ink at 90%% (%d) should exceed 10%% (%d)", high, low)
+	light, heavy := ink(10), ink(90)
+	if light <= heavy {
+		t.Errorf("expected the weekly fallback to drive the ring: ink at 10%% used (%d) should exceed 90%% used (%d)", light, heavy)
 	}
 }
 

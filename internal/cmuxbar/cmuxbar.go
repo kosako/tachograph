@@ -115,7 +115,7 @@ func pillValue(t schema.Tool, now time.Time) string {
 			if label == schema.WindowWeekly {
 				label = "wk"
 			}
-			parts = append(parts, fmt.Sprintf("%s%.0f%%", label, *l.UsedPct))
+			parts = append(parts, fmt.Sprintf("%s%.0f%%", label, render.RemainingPct(*l.UsedPct)))
 		}
 	} else if t.Fallback != nil && t.Fallback.SessionTokens != nil {
 		parts = append(parts, render.FormatTokens(*t.Fallback.SessionTokens)+"tok")

@@ -11,7 +11,8 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// row builds the expected per-tool metric row text (label-padded + bar).
+// barRow builds the expected per-tool metric row text (label-padded + bar)
+// for the displayed percentage: headroom for limits, usage for context.
 func barRow(label string, pct float64, suffix string) string {
 	return fmt.Sprintf("%-*s %s %.0f%%%s", labelW, label, lineBar(pct, barWidth), pct, suffix)
 }
@@ -48,8 +49,8 @@ func TestRenderStructure(t *testing.T) {
 	out := Render(s, now, true, config.Default())
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 
-	if lines[0] != "C🌒" {
-		t.Errorf("title = %q, want C🌒 (codex unavailable is omitted)", lines[0])
+	if lines[0] != "C🌔" { // 24% used → 76% left
+		t.Errorf("title = %q, want C🌔 (codex unavailable is omitted)", lines[0])
 	}
 	if lines[1] != "---" {
 		t.Errorf("line 2 = %q, want ---", lines[1])
@@ -64,8 +65,8 @@ func TestRenderStructure(t *testing.T) {
 	for _, want := range []string{
 		"Claude — Fable 5 | color=" + inkLight,
 		barRow("context", 24, "") + " | font=" + dataFont + " color=" + inkLight + suffix,
-		barRow("5h", 24, " "+resets) + " | font=" + dataFont + " color=" + inkLight + suffix,
-		barRow("weekly", 41, "") + " | font=" + dataFont + " color=" + inkLight + suffix,
+		barRow("5h", 76, " "+resets) + " | font=" + dataFont + " color=" + inkLight + suffix, // 24% used → 76% left
+		barRow("weekly", 59, "") + " | font=" + dataFont + " color=" + inkLight + suffix,     // 41% used → 59% left
 		"Codex — not found | color=" + colorGray,
 		"Refresh | refresh=true",
 	} {
@@ -77,13 +78,14 @@ func TestRenderStructure(t *testing.T) {
 
 func TestRenderColorsOnlyAttention(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00")
-	// 5h at 85% (red), weekly at 60% (yellow), ctx normal (uncolored).
+	// 5h at 85% used (red, shows 15% left), weekly at 60% used (yellow, shows
+	// 40% left), ctx normal (uncolored): rows read as headroom, color by use.
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
 	out := Render(s, now, true, config.Default())
-	if !strings.Contains(out, barRow("5h", 85, "")) || !strings.Contains(out, "| font="+dataFont+" color="+attnRed()) {
+	if !strings.Contains(out, barRow("5h", 15, "")) || !strings.Contains(out, "| font="+dataFont+" color="+attnRed()) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, barRow("weekly", 60, "")+" | font="+dataFont+" color="+attnYellow()) {
+	if !strings.Contains(out, barRow("weekly", 40, "")+" | font="+dataFont+" color="+attnYellow()) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
 	// Normal context row uses the ink color, not an attention color.
@@ -130,8 +132,8 @@ func TestRenderNumberStyle(t *testing.T) {
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricLimit5h
 	title := strings.SplitN(Render(s, now, true, cfg), "\n", 2)[0]
-	if title != "C 24%  X 7%" {
-		t.Errorf("number title = %q, want \"C 24%%  X 7%%\"", title)
+	if title != "C 76%  X 93%" { // headroom: 24% / 7% used
+		t.Errorf("number title = %q, want \"C 76%%  X 93%%\"", title)
 	}
 }
 
@@ -155,8 +157,8 @@ func TestRenderNumberStyleLimitFallback(t *testing.T) {
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricLimit5h
 	title := strings.SplitN(Render(s, now, true, cfg), "\n", 2)[0]
-	if title != "C 24%  X wk15%" {
-		t.Errorf("number title = %q, want \"C 24%%  X wk15%%\"", title)
+	if title != "C 76%  X wk85%" { // headroom: 24% / 15% used
+		t.Errorf("number title = %q, want \"C 76%%  X wk85%%\"", title)
 	}
 }
 
@@ -167,8 +169,8 @@ func TestRenderTextTitleMoonFallback(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{weeklyOnlyTool(60)}}
 	title := strings.SplitN(Render(s, now, true, config.Default()), "\n", 2)[0]
-	if title != "X"+render.Moon(60) {
-		t.Errorf("text title = %q, want %q", title, "X"+render.Moon(60))
+	if title != "X"+render.Moon(40) { // 60% used → 40% left
+		t.Errorf("text title = %q, want %q", title, "X"+render.Moon(40))
 	}
 }
 
@@ -253,8 +255,8 @@ func TestRenderTitleBothTools(t *testing.T) {
 		tool(schema.ToolCodex, false, 90, 10),
 	}}
 	out := Render(s, now, true, config.Default())
-	if !strings.HasPrefix(out, "C🌒 X🌕\n") {
-		t.Errorf("title = %q, want C🌒 X🌕", strings.SplitN(out, "\n", 2)[0])
+	if !strings.HasPrefix(out, "C🌔 X🌑\n") { // 24% used → 76% left; 90% used → 10% left
+		t.Errorf("title = %q, want C🌔 X🌑", strings.SplitN(out, "\n", 2)[0])
 	}
 }
 

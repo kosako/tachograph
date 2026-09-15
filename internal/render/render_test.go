@@ -27,6 +27,15 @@ func TestPressureFor(t *testing.T) {
 	}
 }
 
+func TestRemainingPct(t *testing.T) {
+	cases := map[float64]float64{0: 100, 59: 41, 100: 0, 130: 0, -5: 100}
+	for used, want := range cases {
+		if got := RemainingPct(used); got != want {
+			t.Errorf("RemainingPct(%v) = %v, want %v", used, got, want)
+		}
+	}
+}
+
 func TestBar(t *testing.T) {
 	cases := []struct {
 		pct  float64
@@ -130,7 +139,8 @@ func limitsTool() schema.Tool {
 func TestToolLineWithLimits(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	got := ToolLine(limitsTool(), now, plain)
-	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "24%", hhmm(t, "2026-06-13T02:00:00+09:00"), "wk", "41%", mmdd(t, "2026-06-15T10:30:00+09:00")} {
+	// Limits read as headroom: 23.5% used → 76% left, 41.2% used → 59% left.
+	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "76%", hhmm(t, "2026-06-13T02:00:00+09:00"), "wk", "59%", mmdd(t, "2026-06-15T10:30:00+09:00")} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ToolLine = %q, missing %q", got, want)
 		}

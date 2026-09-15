@@ -50,10 +50,29 @@ func PressureFor(pct float64) PressureLevel {
 	}
 }
 
+// RemainingPct converts a used percentage into the headroom shown for rate
+// limits. Every surface (statusline, one-shot, cmux, SwiftBar, menu bar)
+// displays how much of the 5h / weekly window is left, so Claude and Codex
+// read the same way whatever wording each tool's own UI uses (#223). The
+// schema keeps used_pct as reported, and coloring stays keyed on the used
+// value via PressureFor. A window reported past 100% clamps to 0 left.
+func RemainingPct(used float64) float64 {
+	left := 100 - used
+	if left < 0 {
+		return 0
+	}
+	if left > 100 {
+		return 100
+	}
+	return left
+}
+
 type Style struct {
 	Color bool
 }
 
+// paintPct colors s by the pressure of a used percentage (not by what s
+// displays: a limit shows its headroom but is colored by its use).
 func (st Style) paintPct(pct float64, s string) string {
 	if !st.Color {
 		return s
@@ -75,7 +94,7 @@ func (st Style) dim(s string) string {
 	return cDim + s + cReset
 }
 
-// Bar renders pct (0-100, used) as a fixed-width gauge, e.g. "██░░░░░░".
+// Bar renders pct (0-100) as a fixed-width gauge, e.g. "██░░░░░░".
 func Bar(pct float64, width int) string {
 	if width <= 0 {
 		width = 8
@@ -90,7 +109,7 @@ func Bar(pct float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
-// Dial renders pct (0-100, used) as a single-character gauge: ○◔◑◕●.
+// Dial renders pct (0-100) as a single-character gauge: ○◔◑◕●.
 func Dial(pct float64) string {
 	switch {
 	case pct < 12.5:
@@ -109,7 +128,7 @@ func Dial(pct float64) string {
 // DialMissing keeps single-character alignment when a dial has no data.
 const DialMissing = "◌"
 
-// Moon renders pct (0-100, used) as a moon-phase gauge: 🌑🌒🌓🌔🌕.
+// Moon renders pct (0-100) as a moon-phase gauge: 🌑🌒🌓🌔🌕.
 // Emoji render larger than the ○◔◑◕● glyphs, at the cost of ANSI colors
 // (terminals draw emoji in their own colors).
 func Moon(pct float64) string {
@@ -272,8 +291,9 @@ func limitPart(l schema.Limit, now time.Time, st Style) string {
 	if l.UsedPct == nil {
 		return label + " --%"
 	}
-	pct := *l.UsedPct
-	s := fmt.Sprintf("%s %s %s", label, st.paintPct(pct, Bar(pct, 8)), st.paintPct(pct, fmt.Sprintf("%2.0f%%", pct)))
+	used := *l.UsedPct
+	left := RemainingPct(used)
+	s := fmt.Sprintf("%s %s %s", label, st.paintPct(used, Bar(left, 8)), st.paintPct(used, fmt.Sprintf("%2.0f%%", left)))
 	if l.ResetsAt != nil {
 		s += " " + st.dim(ResetShort(*l.ResetsAt, now))
 	}

@@ -8,8 +8,8 @@ import (
 
 // Metric identifiers selectable for display.
 const (
-	MetricLimit5h     = "limit_5h"     // 5-hour rate-limit usage %
-	MetricLimitWeekly = "limit_weekly" // weekly rate-limit usage %
+	MetricLimit5h     = "limit_5h"     // 5-hour rate-limit headroom % (what's left)
+	MetricLimitWeekly = "limit_weekly" // weekly rate-limit headroom % (what's left)
 	MetricContext     = "context"      // context window usage %
 	MetricCost        = "cost"         // estimated daily API cost
 	MetricTokens      = "tokens"       // daily token count
@@ -61,11 +61,14 @@ func ValidMenubarMetric(metric string) bool {
 }
 
 // Metric extracts a metric from a tool: frac is a 0..1 gauge fraction (nil
-// when the metric is not a percentage or has no data), and text is the
-// compact display string ("34%", "$0.05", "989k", or "--").
-func Metric(t schema.Tool, metric string) (frac *float64, text string) {
+// when the metric is not a percentage or has no data), text is the compact
+// display string ("34%", "$0.05", "989k", or "--"), and pressure classifies
+// the underlying used percentage for coloring (PressureOK without one).
+// Rate limits fill and read as headroom while their pressure follows use;
+// context fills and reads as usage.
+func Metric(t schema.Tool, metric string) (frac *float64, text string, pressure PressureLevel) {
 	if !t.Available || t.Error != nil {
-		return nil, Missing
+		return nil, Missing, PressureOK
 	}
 	switch metric {
 	case MetricLimit5h:
@@ -74,27 +77,29 @@ func Metric(t schema.Tool, metric string) (frac *float64, text string) {
 		return limitMetric(t, schema.WindowWeekly)
 	case MetricContext:
 		if t.Session != nil && t.Session.ContextUsedPct != nil {
-			return pctMetric(*t.Session.ContextUsedPct)
+			used := *t.Session.ContextUsedPct
+			frac, text := pctMetric(used)
+			return frac, text, PressureFor(used)
 		}
 	case MetricCost:
 		// Today's total across all sessions (pricing-based); the "/d" suffix
 		// marks it as a daily figure. Falls back to the current session's cost.
 		if t.Daily != nil && t.Daily.CostUSD != nil {
-			return nil, fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD)
+			return nil, fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD), PressureOK
 		}
 		if t.Fallback != nil && t.Fallback.EstimatedCostUSD != nil {
-			return nil, fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD)
+			return nil, fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD), PressureOK
 		}
 	case MetricTokens:
 		// Today's total across all sessions; "/d" marks it daily.
 		if t.Daily != nil {
-			return nil, FormatTokens(t.Daily.Tokens) + "/d"
+			return nil, FormatTokens(t.Daily.Tokens) + "/d", PressureOK
 		}
 		if t.Fallback != nil && t.Fallback.SessionTokens != nil {
-			return nil, FormatTokens(*t.Fallback.SessionTokens)
+			return nil, FormatTokens(*t.Fallback.SessionTokens), PressureOK
 		}
 	}
-	return nil, Missing
+	return nil, Missing, PressureOK
 }
 
 // MenubarMetric resolves the menu bar's per-tool value. It behaves like
@@ -105,19 +110,19 @@ func Metric(t schema.Tool, metric string) (frac *float64, text string) {
 // removed Codex's 5h window in 2026-07 — and the menu bar should keep showing
 // the limit pressure that does exist instead of "--". The fallback self-
 // reverts once the configured window reappears in the payload.
-func MenubarMetric(t schema.Tool, metric string) (frac *float64, text string) {
-	frac, text = Metric(t, metric)
+func MenubarMetric(t schema.Tool, metric string) (frac *float64, text string, pressure PressureLevel) {
+	frac, text, pressure = Metric(t, metric)
 	if !isLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
-		return frac, text
+		return frac, text, pressure
 	}
 	for _, l := range t.Limits {
 		if l.UsedPct == nil {
 			continue
 		}
-		f, txt := pctMetric(*l.UsedPct)
-		return f, windowShort(l.Window) + txt
+		f, txt, p := headroomMetric(*l.UsedPct)
+		return f, windowShort(l.Window) + txt, p
 	}
-	return frac, text
+	return frac, text, pressure
 }
 
 func isLimitMetric(metric string) bool {
@@ -133,13 +138,20 @@ func windowShort(window string) string {
 	return window
 }
 
-func limitMetric(t schema.Tool, window string) (*float64, string) {
+func limitMetric(t schema.Tool, window string) (*float64, string, PressureLevel) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
-			return pctMetric(*l.UsedPct)
+			return headroomMetric(*l.UsedPct)
 		}
 	}
-	return nil, Missing
+	return nil, Missing, PressureOK
+}
+
+// headroomMetric is the gauge value of a rate-limit window: fill and text
+// show what is left (RemainingPct), pressure still reflects what is used.
+func headroomMetric(used float64) (*float64, string, PressureLevel) {
+	frac, text := pctMetric(RemainingPct(used))
+	return frac, text, PressureFor(used)
 }
 
 func pctMetric(pct float64) (*float64, string) {

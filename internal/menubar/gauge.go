@@ -77,7 +77,10 @@ func paletteFor(dark bool) palette {
 	return palette{logo: color.NRGBA{40, 40, 42, 255}, track: color.NRGBA{40, 40, 40, 38}}
 }
 
-const aDimLogo = 90 // logo alpha when the tool is unavailable
+const (
+	aDimLogo        = 90  // logo alpha when the tool is unavailable
+	aExhaustedTrack = 160 // track alpha when a limit has no visible headroom left
+)
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
 // there is nothing to draw. dark selects the system appearance so the logo
@@ -102,13 +105,13 @@ func PNGBase64(s schema.Status, dark bool, metric string) (string, bool) {
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), true
 }
 
-// ringColor is the fill color for the used portion: gray when stale,
-// otherwise green/yellow/red by pressure.
-func ringColor(t schema.Tool, frac float64) color.NRGBA {
+// ringColor is the fill color of the ring arc: gray when stale, otherwise
+// green/yellow/red by used pressure.
+func ringColor(t schema.Tool, pressure render.PressureLevel) color.NRGBA {
 	if t.Stale {
 		return cGray
 	}
-	switch render.PressureFor(frac * 100) {
+	switch pressure {
 	case render.PressureDanger:
 		return cRed
 	case render.PressureWarn:
@@ -132,15 +135,29 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
-	frac, _ := render.MenubarMetric(t, metric)
+	frac, _, pressure := render.MenubarMetric(t, metric)
 	var pct float64
 	hasPct := frac != nil
 	if hasPct {
 		pct = *frac
 	}
-	fill := ringColor(t, pct)
+	fill := ringColor(t, pressure)
+	track := pal.track
+	// A window with (almost) nothing left draws no visible arc: at 100% used
+	// there is none, and just below it (99.9%) the arc spans a fraction of a
+	// degree that never reaches a sample point. Either would look exactly like
+	// a tool with no limit data, so once the headroom arc is shorter than one
+	// on-screen pixel the track itself takes the pressure color, dimmed, and
+	// the empty ring still reads as "red: used up".
+	arcPx := pct * 2 * math.Pi * rOut / ss // arc length in final pixels
+	if hasPct && arcPx < 1 {
+		track = fill
+		track.A = aExhaustedTrack
+	}
 
-	// Progress ring: full circle, starting at 12 o'clock, clockwise.
+	// Ring: full circle, starting at 12 o'clock, clockwise. A rate limit
+	// fills it with its headroom, so the arc drains as the window is used up
+	// (fuel-gauge reading, #223); the color still tracks used pressure.
 	for py := 0; py < canvas*ss; py++ {
 		for px := ox; px < ox+canvas*ss; px++ {
 			dx := float64(px) + 0.5 - cx
@@ -157,7 +174,7 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 			if hasPct && frac <= pct {
 				setPix(img, px, py, fill)
 			} else {
-				setPix(img, px, py, pal.track)
+				setPix(img, px, py, track)
 			}
 		}
 	}

@@ -12,7 +12,7 @@
 headroom you have left:
 
 - current model per session
-- rate-limit usage (5-hour / weekly windows) and reset times
+- rate-limit headroom (what's left of the 5-hour / weekly windows) and reset times
 - context-window usage
 
 Supported agents: **Claude Code** and **Codex CLI**.
@@ -114,8 +114,9 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠6h` marks stale data with its age, and the whole line is dimmed — usage can
-only go down while an agent is idle, so a stale value reads as an upper bound.
+`⚠6h` marks stale data with its age, and the whole line is dimmed — a stale
+value is the headroom as last observed; it does not reflect a reset since then
+(which raises it) or consumption elsewhere (which lowers it).
 The threshold is per tool: Claude is 60 minutes (about an hour); Codex is 5
 hours, since it has no live feed and its limit windows stay valid for hours.
 Agents without rate-limit windows (e.g. Claude Code on Bedrock) fall back to
@@ -192,10 +193,10 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `model` | model display name (`Fable 5`, `gpt-5.5`) |
 | `effort` | reasoning effort, `⚡xhi ` (`low`/`med`/`high`/`xhi`/`max`, marker + trailing space; Claude only, empty when the model doesn't support it) |
 | `ctx` | context window usage, `8%` |
-| `5h.pct` / `wk.pct` | rate-limit usage for the 5-hour / weekly window |
-| `5h.bar:8` / `wk.bar:8` | usage gauge of the given width, `██░░░░░░` |
-| `5h.dial` / `wk.dial` | single-character dial, `○◔◑◕●` (`◌` when no data) |
-| `5h.moon` / `wk.moon` | larger moon-phase dial, `🌑🌒🌓🌔🌕` (emoji — not affected by colors; `◌` when no data) |
+| `5h.pct` / `wk.pct` | rate-limit **headroom** (percent left) for the 5-hour / weekly window, `76%` |
+| `5h.bar:8` / `wk.bar:8` | headroom gauge of the given width (drains as you use it), `██████░░` |
+| `5h.dial` / `wk.dial` | single-character headroom dial, `○◔◑◕●` (● = all left; `◌` when no data) |
+| `5h.moon` / `wk.moon` | larger moon-phase headroom dial, `🌑🌒🌓🌔🌕` (🌕 = all left; emoji, so not colored; `◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
@@ -212,15 +213,17 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 `*.session.today` is Claude only — Codex's token counts are cumulative and
 can't be sliced to a single day, so it renders `--`.
 
-Missing values render as `--`. Percentages and bars are colored by usage
-(<50% green, ≥50% yellow, ≥80% red); disable with `--no-color` or `NO_COLOR`.
+Missing values render as `--`. The 5h / weekly percentages and bars show
+**headroom** (percent left) while their color still follows usage (<50% used
+green, ≥50% yellow, ≥80% red); `ctx` stays a usage figure. Disable colors
+with `--no-color` or `NO_COLOR`.
 
 ### cmux sidebar
 
 Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
 mirrors the status to the workspace sidebar as colored pills —
-`claude ctx24% 5h24% wk41%` / `codex 5h4% wk11%`, colored green/yellow/red
-by usage and gray when stale — with no extra setup beyond the status line.
+`claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` (5h / wk are headroom,
+ctx is usage), colored green/yellow/red by usage and gray when stale — with no extra setup beyond the status line.
 It detects cmux via `CMUX_WORKSPACE_ID` and talks through the bundled cmux
 CLI, fire-and-forget, so the status line latency is unaffected.
 
@@ -235,13 +238,13 @@ tacho cmux clear   # remove tacho's pills
 
 For an always-visible gauge regardless of which agent is running, a
 [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin is bundled. The menu
-bar shows a tachometer per tool — the logo ringed by an iOS-app-download-style
-progress ring that fills clockwise with 5-hour usage; clicking reveals
-per-tool details. The ring is colored by usage (green/yellow/red, gray when
+bar shows a tachometer per tool — the logo ringed by a fuel-gauge-style ring
+showing the 5-hour headroom, which drains clockwise as you use it; clicking
+reveals per-tool details. The ring is colored by usage (green/yellow/red, gray when
 stale). The logo and track are white by default (for Dark mode or a
 wallpaper-darkened menu bar); set `TACHO_APPEARANCE=light` if your menu bar
 is light. Set `TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text
-(`C🌒 X🌑`).
+(`C🌔 X🌑`, full moon = all left).
 
 ```sh
 brew install swiftbar   # if you don't have it

@@ -85,7 +85,7 @@
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
 | `limits` | nullable。配列のときは `window_minutes` 昇順 |
-| `used_pct` | 0–100。「使った割合」。残量表示はレンダラ側で `100 - used_pct` |
+| `used_pct` | 0–100。「使った割合」(JSON はこの意味のまま)。レンダラは残量 `100 - used_pct` を表示し、色分けは `used_pct` 基準(#223) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト) |
 | `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算。Codex の daily は `token_count` イベント単位の増分をその時点の `turn_context.model` 単価で積算(セッション内のモデル切替に追随)。Codex の `fallback.estimated_cost_usd`(session cost)は累積値しか持たないため「現在モデル × 全累積」の概算 |
 

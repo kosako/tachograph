@@ -50,7 +50,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
-	if got, want := strings.TrimSpace(out.String()), "Fable 5 5h 24% all 12.7M/d"; got != want {
+	if got, want := strings.TrimSpace(out.String()), "Fable 5 5h 76% all 12.7M/d"; got != want { // 23.5% used → 76% left
 		t.Fatalf("statusline output = %q, want %q", got, want)
 	}
 
