@@ -72,7 +72,7 @@ func TestPills(t *testing.T) {
 		t.Fatalf("Pills = %+v, want 2", pills)
 	}
 	claude := pills[0]
-	if claude.Key != "claude" || claude.Value != "claude ctx24% 5h24% wk41%" {
+	if claude.Key != "claude" || claude.Value != "claude ctx24% 5h76% wk59%" { // limits show headroom, ctx shows usage
 		t.Errorf("claude pill = %+v", claude)
 	}
 	if claude.Color != colorGreen {
@@ -146,7 +146,7 @@ func TestPushAndClearExec(t *testing.T) {
 	if len(calls) != 4 {
 		t.Fatalf("calls = %q, want 4 (2 set + 2 clear)", calls)
 	}
-	if calls[0] != "set-status claude claude ctx24% 5h24% wk41% --color "+colorGreen {
+	if calls[0] != "set-status claude claude ctx24% 5h76% wk59% --color "+colorGreen {
 		t.Errorf("set call = %q", calls[0])
 	}
 	if calls[1] != "set-status codex codex 4Mtok --color "+colorGreen {

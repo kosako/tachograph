@@ -58,9 +58,9 @@ func TestPNGBase64Empty(t *testing.T) {
 	}
 }
 
-// The fill must track 5h usage: more usage paints more of the ring, so a
-// higher-percentage gauge has strictly more ink than a lower one.
-func TestFillScalesWithUsage(t *testing.T) {
+// The fill must track 5h headroom: the ring drains as the window is used, so
+// a lightly used gauge has strictly more ink than a heavily used one (#223).
+func TestFillScalesWithHeadroom(t *testing.T) {
 	ink := func(pct float64) int {
 		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}}, true, render.MetricLimit5h)
 		if !ok {
@@ -78,9 +78,9 @@ func TestFillScalesWithUsage(t *testing.T) {
 		}
 		return sum
 	}
-	low, high := ink(10), ink(90)
-	if high <= low {
-		t.Errorf("expected more ink at 90%% (%d) than 10%% (%d)", high, low)
+	light, heavy := ink(10), ink(90)
+	if light <= heavy {
+		t.Errorf("expected more ink at 10%% used (%d) than 90%% used (%d)", light, heavy)
 	}
 }
 
@@ -112,9 +112,9 @@ func TestFallbackFillsRingFromAvailableWindow(t *testing.T) {
 		}
 		return sum
 	}
-	low, high := ink(10), ink(90)
-	if high <= low {
-		t.Errorf("expected the weekly fallback to drive the ring: ink at 90%% (%d) should exceed 10%% (%d)", high, low)
+	light, heavy := ink(10), ink(90)
+	if light <= heavy {
+		t.Errorf("expected the weekly fallback to drive the ring: ink at 10%% used (%d) should exceed 90%% used (%d)", light, heavy)
 	}
 }
 

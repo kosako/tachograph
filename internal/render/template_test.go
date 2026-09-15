@@ -29,6 +29,29 @@ func testStatus() schema.Status {
 	return schema.Status{Tools: []schema.Tool{claude, codex}}
 }
 
+// Limits render their headroom but are colored by their use (#223): 59%
+// used shows "41%" in the warning color, not the green a 41% usage would get.
+func TestTemplateLimitHeadroomColoredByUse(t *testing.T) {
+	now := time.Now()
+	used := 59.0
+	tool := limitsTool()
+	tool.Limits[0].UsedPct = &used // 5h window
+	s := schema.Status{Tools: []schema.Tool{tool}}
+	color := Style{Color: true}
+	if got, want := Template("{claude.5h.pct}", s, now, color), cYellow+"41%"+cReset; got != want {
+		t.Errorf("pct = %q, want %q (headroom text, warn color)", got, want)
+	}
+	if got, want := Template("{claude.5h.bar:4}", s, now, color), cYellow+"██░░"+cReset; got != want {
+		t.Errorf("bar = %q, want %q (bar fills with headroom)", got, want)
+	}
+	if got, want := Template("{claude.5h.dial}", s, now, plain), "◑"; got != want {
+		t.Errorf("dial = %q, want %q (41%% left)", got, want)
+	}
+	if got, want := Template("{claude.5h.moon}", s, now, plain), "🌓"; got != want {
+		t.Errorf("moon = %q, want %q (41%% left)", got, want)
+	}
+}
+
 func TestTemplateBasics(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	s := testStatus()
@@ -38,14 +61,14 @@ func TestTemplateBasics(t *testing.T) {
 		"{claude.effort}":               "⚡xhi ", // xhigh, trailing space like {stale}
 		"{codex.effort}":                "",      // unavailable tool → no effort
 		"{claude.ctx}":                  "8%",
-		"{claude.5h.pct}":               "24%",
-		"{claude.5h}":                   "24%", // bare window defaults to pct
-		"{claude.wk.pct}":               "41%",
-		"{claude.5h.bar:4}":             "█░░░",
-		"{claude.5h.dial}":              "◔", // 24% used
-		"{claude.wk.dial}":              "◑", // 41% used
+		"{claude.5h.pct}":               "76%",  // 23.5% used → 76% left (limits show headroom)
+		"{claude.5h}":                   "76%",  // bare window defaults to pct
+		"{claude.wk.pct}":               "59%",  // 41.2% used → 59% left
+		"{claude.5h.bar:4}":             "███░", // bar fills with headroom
+		"{claude.5h.dial}":              "◕",    // 76% left
+		"{claude.wk.dial}":              "◑",    // 59% left
 		"{codex.5h.dial}":               DialMissing,
-		"{claude.5h.moon}":              "🌒", // 24% used
+		"{claude.5h.moon}":              "🌔", // 76% left
 		"{codex.5h.moon}":               DialMissing,
 		"{claude.5h.resets}":            hhmm(t, "2026-06-13T02:00:00+09:00"),
 		"{claude.tokens}":               "989k",
@@ -79,7 +102,7 @@ func TestTemplateBasics(t *testing.T) {
 func TestTemplateComposite(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	got := Template("[{claude.model}] 5h {claude.5h.bar:8} {claude.5h.pct}", testStatus(), now, plain)
-	want := "[Fable 5] 5h ██░░░░░░ 24%"
+	want := "[Fable 5] 5h ██████░░ 76%" // 23.5% used → 76% left
 	if got != want {
 		t.Errorf("Template = %q, want %q", got, want)
 	}

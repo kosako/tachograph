@@ -173,7 +173,7 @@ func numberTitle(s schema.Status, metric string) string {
 		if t.Tool == schema.ToolClaudeCode {
 			initial = "C"
 		}
-		_, text := render.MenubarMetric(t, metric)
+		_, text, _ := render.MenubarMetric(t, metric)
 		parts = append(parts, initial+" "+text)
 	}
 	if len(parts) == 0 {
@@ -182,9 +182,10 @@ func numberTitle(s schema.Status, metric string) string {
 	return strings.Join(parts, "  ")
 }
 
-// title is the menu bar text fallback: tool initial + moon dial, "C🌒 X🌑".
-// The moon tracks 5h usage, or the tool's first reported limit window when
-// no 5h window exists (same fallback as the ring and the number style).
+// title is the menu bar text fallback: tool initial + moon dial, "C🌔 X🌑".
+// The moon shows 5h headroom (full = nothing used yet), or the tool's first
+// reported limit window when no 5h window exists (same fallback as the ring
+// and the number style).
 func title(s schema.Status) string {
 	var parts []string
 	for _, t := range s.Tools {
@@ -195,7 +196,7 @@ func title(s schema.Status) string {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		if frac, _ := render.MenubarMetric(t, render.MetricLimit5h); frac != nil {
+		if frac, _, _ := render.MenubarMetric(t, render.MetricLimit5h); frac != nil {
 			parts = append(parts, initial+render.Moon(*frac*100))
 		} else {
 			parts = append(parts, initial+render.DialMissing)
@@ -273,16 +274,18 @@ func lineBar(pct float64, width int) string {
 // labelW pads metric labels so the bars line up in the monospace font.
 const labelW = 7
 
-// limitRow renders a rate-limit window with a usage bar, reset time, and
-// pressure color (or "--" when the window is absent).
+// limitRow renders a rate-limit window with a headroom bar (what is left),
+// reset time, and pressure color by use (or "--" when the window is absent).
 func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
-			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(*l.UsedPct, barWidth), *l.UsedPct)
+			used := *l.UsedPct
+			left := render.RemainingPct(used)
+			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(left, barWidth), left)
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
-			dataRow(b, line, lineColor(t, *l.UsedPct))
+			dataRow(b, line, lineColor(t, render.PressureFor(used)))
 			return
 		}
 	}
@@ -292,10 +295,10 @@ func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.
 // metricRow renders context/cost/tokens. Percentage metrics get a usage bar;
 // non-percentage ones (cost/tokens) are shown as plain text.
 func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
-	frac, text := render.Metric(t, metric)
+	frac, text, pressure := render.Metric(t, metric)
 	if frac != nil { // percentage metric: bar + color by pressure
 		line := fmt.Sprintf("%-*s %s %s", labelW, label, lineBar(*frac*100, barWidth), text)
-		dataRow(b, line, lineColor(t, *frac*100))
+		dataRow(b, line, lineColor(t, pressure))
 		return
 	}
 	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, text), staleOnly(t))
@@ -321,11 +324,11 @@ func staleOnly(t schema.Tool) string {
 
 // lineColor colors rows that need attention (yellow/red by pressure), gray
 // when stale, otherwise the normal ink.
-func lineColor(t schema.Tool, pct float64) string {
+func lineColor(t schema.Tool, pressure render.PressureLevel) string {
 	if t.Stale {
 		return colorGray
 	}
-	switch render.PressureFor(pct) {
+	switch pressure {
 	case render.PressureDanger:
 		return attnRed()
 	case render.PressureWarn:
