@@ -108,18 +108,19 @@ func reddish(t *testing.T, s schema.Status, dark bool) int {
 	return n
 }
 
-// A window with nothing left draws no headroom arc, which must not collapse
-// into the same picture as a tool without limit data: the exhausted ring
-// keeps its danger color on the track (#223 review).
+// A window with (almost) nothing left draws no visible headroom arc — none at
+// 100% used, a sub-sample sliver at 99.9% — which must not collapse into the
+// same picture as a tool without limit data: the ring keeps its danger color
+// on the track (#223 review R1/R3).
 func TestExhaustedRingStaysVisible(t *testing.T) {
 	noLimits := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription}
 	for _, dark := range []bool{true, false} {
-		used := reddish(t, schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, 100)}}, dark)
-		missing := reddish(t, schema.Status{Tools: []schema.Tool{noLimits}}, dark)
-		if used == 0 {
-			t.Errorf("dark=%v: 100%% used ring has no red pixels; exhaustion is invisible", dark)
+		for _, used := range []float64{97, 99, 99.9, 100} {
+			if n := reddish(t, schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, used)}}, dark); n == 0 {
+				t.Errorf("dark=%v: %v%% used ring has no red pixels; near-exhaustion is invisible", dark, used)
+			}
 		}
-		if missing != 0 {
+		if missing := reddish(t, schema.Status{Tools: []schema.Tool{noLimits}}, dark); missing != 0 {
 			t.Errorf("dark=%v: no-limit ring has %d red pixels, want 0 (neutral track)", dark, missing)
 		}
 	}

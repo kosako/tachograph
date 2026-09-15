@@ -79,7 +79,7 @@ func paletteFor(dark bool) palette {
 
 const (
 	aDimLogo        = 90  // logo alpha when the tool is unavailable
-	aExhaustedTrack = 160 // track alpha when a limit has no headroom left
+	aExhaustedTrack = 160 // track alpha when a limit has no visible headroom left
 )
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
@@ -143,10 +143,14 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	}
 	fill := ringColor(t, pressure)
 	track := pal.track
-	// An exhausted window (nothing left) would draw no arc at all and look
-	// exactly like a tool with no limit data. Paint its track in the pressure
-	// color, dimmed, so the empty ring still reads as "red: used up".
-	if hasPct && pct <= 0 {
+	// A window with (almost) nothing left draws no visible arc: at 100% used
+	// there is none, and just below it (99.9%) the arc spans a fraction of a
+	// degree that never reaches a sample point. Either would look exactly like
+	// a tool with no limit data, so once the headroom arc is shorter than one
+	// on-screen pixel the track itself takes the pressure color, dimmed, and
+	// the empty ring still reads as "red: used up".
+	arcPx := pct * 2 * math.Pi * rOut / ss // arc length in final pixels
+	if hasPct && arcPx < 1 {
 		track = fill
 		track.A = aExhaustedTrack
 	}
