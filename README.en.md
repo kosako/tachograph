@@ -295,7 +295,10 @@ Prices are rough, not exact, so override or extend them in
 Only the fields you set override the built-in defaults (e.g. set just `input`
 and the other rates stay at their defaults — partial overrides merge). A **new
 model id** not in the table has no defaults, so any rate you leave out is `0`.
-Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`). When a
+Keys match model ids by prefix (`claude-fable` matches `claude-fable-5`), and
+the **longest matching key wins**: to override a tier that has its own built-in
+entry (`claude-fable-5-1`, `claude-mythos-5-1`, `claude-sonnet-5`, …), use that
+exact key — an override on `claude-fable` does not reach `claude-fable-5-1`. When a
 Claude transcript records 1-hour cache writes, they are priced at 2x the input
 rate. Models not in the price table are excluded from the cost calculation and
 don't count toward the total (if no priced model ran that day, cost shows as
