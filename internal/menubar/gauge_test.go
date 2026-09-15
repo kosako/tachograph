@@ -84,6 +84,47 @@ func TestFillScalesWithHeadroom(t *testing.T) {
 	}
 }
 
+// reddish counts pixels whose color reads as the danger red on either
+// appearance (logo and neutral tracks are white/near-black, so they never
+// qualify).
+func reddish(t *testing.T, s schema.Status, dark bool) int {
+	t.Helper()
+	b64, ok := PNGBase64(s, dark, render.MetricLimit5h)
+	if !ok {
+		t.Fatal("not ok")
+	}
+	raw, _ := base64.StdEncoding.DecodeString(b64)
+	img, _ := png.Decode(bytes.NewReader(raw))
+	var n int
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a > 0 && r > g+g/2 && r > bl+bl/2 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// A window with nothing left draws no headroom arc, which must not collapse
+// into the same picture as a tool without limit data: the exhausted ring
+// keeps its danger color on the track (#223 review).
+func TestExhaustedRingStaysVisible(t *testing.T) {
+	noLimits := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription}
+	for _, dark := range []bool{true, false} {
+		used := reddish(t, schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, 100)}}, dark)
+		missing := reddish(t, schema.Status{Tools: []schema.Tool{noLimits}}, dark)
+		if used == 0 {
+			t.Errorf("dark=%v: 100%% used ring has no red pixels; exhaustion is invisible", dark)
+		}
+		if missing != 0 {
+			t.Errorf("dark=%v: no-limit ring has %d red pixels, want 0 (neutral track)", dark, missing)
+		}
+	}
+}
+
 // A tool reporting only a weekly window must still fill the ring when the
 // menu bar metric is limit_5h — the ring falls back to the available window
 // (Codex dropped its 5h window in 2026-07, issue #210).

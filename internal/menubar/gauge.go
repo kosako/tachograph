@@ -77,7 +77,10 @@ func paletteFor(dark bool) palette {
 	return palette{logo: color.NRGBA{40, 40, 42, 255}, track: color.NRGBA{40, 40, 40, 38}}
 }
 
-const aDimLogo = 90 // logo alpha when the tool is unavailable
+const (
+	aDimLogo        = 90  // logo alpha when the tool is unavailable
+	aExhaustedTrack = 160 // track alpha when a limit has no headroom left
+)
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
 // there is nothing to draw. dark selects the system appearance so the logo
@@ -139,6 +142,14 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 		pct = *frac
 	}
 	fill := ringColor(t, pressure)
+	track := pal.track
+	// An exhausted window (nothing left) would draw no arc at all and look
+	// exactly like a tool with no limit data. Paint its track in the pressure
+	// color, dimmed, so the empty ring still reads as "red: used up".
+	if hasPct && pct <= 0 {
+		track = fill
+		track.A = aExhaustedTrack
+	}
 
 	// Ring: full circle, starting at 12 o'clock, clockwise. A rate limit
 	// fills it with its headroom, so the arc drains as the window is used up
@@ -159,7 +170,7 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 			if hasPct && frac <= pct {
 				setPix(img, px, py, fill)
 			} else {
-				setPix(img, px, py, pal.track)
+				setPix(img, px, py, track)
 			}
 		}
 	}
