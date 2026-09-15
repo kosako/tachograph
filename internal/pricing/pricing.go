@@ -22,7 +22,8 @@ type Rate struct {
 
 // defaults are approximate first-party API prices (USD per million tokens),
 // matched by model-id prefix. Cache rates follow each provider's convention:
-// Anthropic cache read = 0.1x input, write (5-min ephemeral) = 1.25x input;
+// Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / Mythos 5.1, the one
+// documented exception), write (5-min ephemeral) = 1.25x input;
 // OpenAI uses its published cached-input price for reads. For cache writes,
 // gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
 // separately), while gpt-5.6 and later publish a 1.25x-input write price.
@@ -43,6 +44,12 @@ var defaults = map[string]Rate{
 	"claude-haiku":    {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25}, // Haiku 4.5
 	"claude-fable":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Fable 5
 	"claude-mythos":   {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Mythos 5
+	// Fable 5.1 / Mythos 5.1 match the 5 series everywhere except cache hits,
+	// which Anthropic prices at 0.025x input ($0.25) instead of the usual 0.1x
+	// — the only models with that multiplier. Without these keys the 5.1 ids
+	// resolve to the 5 series by prefix and bill cache reads at 4x (#225).
+	"claude-fable-5-1":  {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
+	"claude-mythos-5-1": {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
 	// GPT-6 ships as the single "gpt-6-astra" id (released 2026-09-03), which
 	// Codex logs verbatim. OpenAI publishes no bare "gpt-6" alias, so none is
 	// added here — an unknown future gpt-6 tier stays unpriced rather than

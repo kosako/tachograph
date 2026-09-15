@@ -43,6 +43,7 @@ func TestForBedrockPrefixAndAliases(t *testing.T) {
 		{"gpt-5.6-codex", tab["gpt-5.6"]},                        // -codex variant → 5.6 base (Sol)
 		{"openai.gpt-5.6-terra", tab["gpt-5.6-terra"]},           // Bedrock OpenAI → tier key
 		{"openai.gpt-6-astra", tab["gpt-6-astra"]},               // Bedrock OpenAI → GPT-6 Astra key
+		{"anthropic.claude-fable-5-1", tab["claude-fable-5-1"]},  // Bedrock Claude → 5.1 key, not the 5 series
 		{"claude-opus-4-8", tab["claude-opus"]},                  // first-party (regression)
 	}
 	for _, c := range cases {
@@ -80,14 +81,19 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
-		{"gpt-6-astra", Rate{10, 50, 1, 12.5}},            // GPT-6 Astra, launched 2026-09-03; previously unpriced (#220)
-		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                  // Sol (default tier), promo price since 2026-08-21 (#216)
-		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},              // full Sol id → base alias
-		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},          // 2026-07-30 cut
-		{"gpt-5.6-luna", Rate{0.2, 1.2, 0.02, 0.25}},      // 2026-07-30 cut (-80%)
-		{"gpt-5.6-cyber", Rate{12.5, 75, 1.25, 15.625}},   // dedicated key, not shadowed by the gpt-5.6 Sol alias
-		{"codex-auto-review", Rate{0.2, 1.2, 0.02, 0.25}}, // GPT-5.6 Luna under the hood, not the codex catch-all
-		{"gpt-5.5", Rate{5, 30, 0.5, 5}},                  // and openai.gpt-5.5 via canonical
+		// 5.1 prices cache hits at 0.025x input, so it needs its own key rather
+		// than falling to claude-fable's 0.1x (#225).
+		{"claude-fable-5-1", Rate{10, 50, 0.25, 12.5}},
+		{"claude-mythos-5-1", Rate{10, 50, 0.25, 12.5}},
+		{"claude-fable-5-1-20260901", Rate{10, 50, 0.25, 12.5}}, // dated id → 5.1 key
+		{"gpt-6-astra", Rate{10, 50, 1, 12.5}},                  // GPT-6 Astra, launched 2026-09-03; previously unpriced (#220)
+		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                        // Sol (default tier), promo price since 2026-08-21 (#216)
+		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},                    // full Sol id → base alias
+		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},                // 2026-07-30 cut
+		{"gpt-5.6-luna", Rate{0.2, 1.2, 0.02, 0.25}},            // 2026-07-30 cut (-80%)
+		{"gpt-5.6-cyber", Rate{12.5, 75, 1.25, 15.625}},         // dedicated key, not shadowed by the gpt-5.6 Sol alias
+		{"codex-auto-review", Rate{0.2, 1.2, 0.02, 0.25}},       // GPT-5.6 Luna under the hood, not the codex catch-all
+		{"gpt-5.5", Rate{5, 30, 0.5, 5}},                        // and openai.gpt-5.5 via canonical
 		{"gpt-5.5-pro", Rate{30, 180, 3, 30}},
 		{"gpt-5.4", Rate{2.5, 15, 0.25, 2.5}},
 		{"gpt-5.4-codex", Rate{2.5, 15, 0.25, 2.5}}, // -codex variant falls to the base price
