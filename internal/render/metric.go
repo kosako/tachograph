@@ -64,17 +64,17 @@ func ValidMenubarMetric(metric string) bool {
 // when the metric is not a percentage or has no data), text is the compact
 // display string ("34%", "$0.05", "989k", or "--"), and pressure classifies
 // the underlying used percentage for coloring (PressureOK without one).
-// Rate limits fill and read as headroom while their pressure follows use;
-// context fills and reads as usage.
-func Metric(t schema.Tool, metric string) (frac *float64, text string, pressure PressureLevel) {
+// Rate limits fill and read as headroom or use per d while their pressure
+// always follows use; context fills and reads as usage.
+func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text string, pressure PressureLevel) {
 	if !t.Available || t.Error != nil {
 		return nil, Missing, PressureOK
 	}
 	switch metric {
 	case MetricLimit5h:
-		return limitMetric(t, schema.WindowFiveHour)
+		return limitMetric(t, schema.WindowFiveHour, d)
 	case MetricLimitWeekly:
-		return limitMetric(t, schema.WindowWeekly)
+		return limitMetric(t, schema.WindowWeekly, d)
 	case MetricContext:
 		if t.Session != nil && t.Session.ContextUsedPct != nil {
 			used := *t.Session.ContextUsedPct
@@ -110,8 +110,8 @@ func Metric(t schema.Tool, metric string) (frac *float64, text string, pressure 
 // removed Codex's 5h window in 2026-07 — and the menu bar should keep showing
 // the limit pressure that does exist instead of "--". The fallback self-
 // reverts once the configured window reappears in the payload.
-func MenubarMetric(t schema.Tool, metric string) (frac *float64, text string, pressure PressureLevel) {
-	frac, text, pressure = Metric(t, metric)
+func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text string, pressure PressureLevel) {
+	frac, text, pressure = Metric(t, metric, d)
 	if !isLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
 		return frac, text, pressure
 	}
@@ -119,7 +119,7 @@ func MenubarMetric(t schema.Tool, metric string) (frac *float64, text string, pr
 		if l.UsedPct == nil {
 			continue
 		}
-		f, txt, p := headroomMetric(*l.UsedPct)
+		f, txt, p := limitGauge(*l.UsedPct, d)
 		return f, windowShort(l.Window) + txt, p
 	}
 	return frac, text, pressure
@@ -138,19 +138,20 @@ func windowShort(window string) string {
 	return window
 }
 
-func limitMetric(t schema.Tool, window string) (*float64, string, PressureLevel) {
+func limitMetric(t schema.Tool, window string, d LimitDisplay) (*float64, string, PressureLevel) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
-			return headroomMetric(*l.UsedPct)
+			return limitGauge(*l.UsedPct, d)
 		}
 	}
 	return nil, Missing, PressureOK
 }
 
-// headroomMetric is the gauge value of a rate-limit window: fill and text
-// show what is left (RemainingPct), pressure still reflects what is used.
-func headroomMetric(used float64) (*float64, string, PressureLevel) {
-	frac, text := pctMetric(RemainingPct(used))
+// limitGauge is the gauge value of a rate-limit window: fill and text show
+// what is left or what is used per d (LimitPct), pressure always reflects
+// what is used.
+func limitGauge(used float64, d LimitDisplay) (*float64, string, PressureLevel) {
+	frac, text := pctMetric(LimitPct(used, d))
 	return frac, text, PressureFor(used)
 }
 

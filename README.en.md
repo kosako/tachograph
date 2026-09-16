@@ -214,16 +214,18 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 can't be sliced to a single day, so it renders `--`.
 
 Missing values render as `--`. The 5h / weekly percentages and bars show
-**headroom** (percent left) while their color still follows usage (<50% used
-green, ≥50% yellow, ≥80% red); `ctx` stays a usage figure. Disable colors
-with `--no-color` or `NO_COLOR`.
+**headroom** (percent left) by default while their color still follows usage
+(<50% used green, ≥50% yellow, ≥80% red); `tacho config set limits.display used`
+switches them to **usage** (the gauges then fill as you use them; colors are
+unchanged). `ctx` stays a usage figure. Disable colors with `--no-color` or
+`NO_COLOR`.
 
 ### cmux sidebar
 
 Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
 mirrors the status to the workspace sidebar as colored pills —
-`claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` (5h / wk are headroom,
-ctx is usage), colored green/yellow/red by usage and gray when stale — with no extra setup beyond the status line.
+`claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` (5h / wk are headroom by
+default, following `limits.display`; ctx is usage), colored green/yellow/red by usage and gray when stale — with no extra setup beyond the status line.
 It detects cmux via `CMUX_WORKSPACE_ID` and talks through the bundled cmux
 CLI, fire-and-forget, so the status line latency is unaffected.
 
@@ -239,7 +241,8 @@ tacho cmux clear   # remove tacho's pills
 For an always-visible gauge regardless of which agent is running, a
 [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin is bundled. The menu
 bar shows a tachometer per tool — the logo ringed by a fuel-gauge-style ring
-showing the 5-hour headroom, which drains clockwise as you use it; clicking
+showing the 5-hour headroom, which drains clockwise as you use it (or fills up,
+with the usage display); clicking
 reveals per-tool details. The ring is colored by usage (green/yellow/red, gray when
 stale). The logo and track are white by default (for Dark mode or a
 wallpaper-darkened menu bar); set `TACHO_APPEARANCE=light` if your menu bar
@@ -266,6 +269,7 @@ choice is check-marked):
 
 - **Display**: meter (gauge) or number
 - **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure). cost / tokens show today's total (marked `/d`) and fall back to the current session's value (no `/d`) when the daily total is unknown
+- **Limit display**: remaining / used (what the 5h / weekly percentages, gauges, and ring show; the same setting drives the status line and `tacho`; colors still follow usage)
 - **Tools**: Claude / Codex (checkboxes)
 
 Or via the CLI (config lives in `~/.config/tachograph/config.json`):
@@ -274,6 +278,7 @@ Or via the CLI (config lives in `~/.config/tachograph/config.json`):
 tacho config show
 tacho config set menubar.style number   # meter → number
 tacho config set menubar.metric cost    # show spent cost instead of limits
+tacho config set limits.display used    # 5h / weekly as usage instead of headroom
 tacho config set tools codex            # show only Codex
 ```
 

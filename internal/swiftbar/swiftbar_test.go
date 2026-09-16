@@ -137,6 +137,46 @@ func TestRenderNumberStyle(t *testing.T) {
 	}
 }
 
+// limits.display=used flips the number title, the dropdown limit rows, and
+// the ring to use; the settings menu offers both displays (#228).
+func TestRenderUsedDisplay(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{
+		tool(schema.ToolClaudeCode, false, 24, 41),
+		tool(schema.ToolCodex, false, 7, 2),
+	}}
+	cfg := config.Default()
+	cfg.Limits.Display = string(render.LimitUsed)
+	cfg.Menubar.Style = config.StyleNumber
+	out := Render(s, now, true, cfg)
+	if title := strings.SplitN(out, "\n", 2)[0]; title != "C 24%  X 7%" {
+		t.Errorf("number title (used) = %q, want \"C 24%%  X 7%%\"", title)
+	}
+	for _, want := range []string{
+		barRow("5h", 24, " "+render.ResetShort("2026-06-13T14:00:00+09:00", now)),
+		barRow("weekly", 41, ""),
+		barRow("context", 24, ""), // unchanged: context is always usage
+		"--リミット表示\n",
+		"----    残量 | bash=",
+		"----✓ 使用率 | bash=",
+		"param3=\"limits.display\" param4=\"remaining\"",
+		"param3=\"limits.display\" param4=\"used\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("used display output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, barRow("5h", 76, "")) {
+		t.Errorf("used display still shows the 5h headroom row:\n%s", out)
+	}
+
+	cfg.Menubar.Style = config.StyleMeter
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	if title := strings.SplitN(Render(s, now, true, cfg), "\n", 2)[0]; title != "C🌒 X🌑" { // 24% / 7% used
+		t.Errorf("moon title (used) = %q, want \"C🌒 X🌑\"", title)
+	}
+}
+
 // weeklyOnlyTool mirrors Codex after OpenAI's 2026-07 5h-limit removal: the
 // payload reports only a weekly window.
 func weeklyOnlyTool(pctW float64) schema.Tool {
@@ -192,6 +232,10 @@ func TestRenderSettingsMenu(t *testing.T) {
 		// metric submenu lists all options
 		"param3=\"menubar.metric\" param4=\"cost\"",
 		"param3=\"menubar.metric\" param4=\"tokens\"",
+		// limit display: headroom selected by default
+		"--リミット表示\n",
+		"----✓ 残量 | bash=",
+		"param3=\"limits.display\" param4=\"used\"",
 		// tools as checkboxes: Claude enabled, Codex disabled
 		"----☑ Claude | bash=",
 		"----☐ Codex | bash=",

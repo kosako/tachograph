@@ -68,6 +68,27 @@ func TestConfigSetMenubarMetricRejectsContext(t *testing.T) {
 	}
 }
 
+// limits.display accepts only remaining / used and persists the choice
+// through the actual configSet path (#228).
+func TestConfigSetLimitsDisplay(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if code := configSet("limits.display", "headroom"); code == 0 {
+		t.Error("configSet limits.display headroom returned 0, want non-zero")
+	}
+	if code := configSet("limits.display", "used"); code != 0 {
+		t.Errorf("configSet limits.display used returned %d, want 0", code)
+	}
+	if got := config.Load().Limits.Display; got != "used" {
+		t.Errorf("Load().Limits.Display = %q, want \"used\"", got)
+	}
+	if code := configSet("limits.display", "remaining"); code != 0 {
+		t.Errorf("configSet limits.display remaining returned %d, want 0", code)
+	}
+	if got := config.Load().Limits.Display; got != "remaining" {
+		t.Errorf("Load().Limits.Display = %q, want \"remaining\"", got)
+	}
+}
+
 // A config.json that fails to parse must not be clobbered by write commands:
 // configSet / configToggleTool refuse instead of saving defaults over the
 // user's (fixable) file.

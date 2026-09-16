@@ -175,11 +175,11 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 
 `*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
 
-欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
+欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
 
 ### cmux サイドバー
 
-[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は残量、ctx は使用率)で、使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、同梱のcmux CLI経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
+[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は既定で残量、`limits.display` に従う。ctx は使用率)で、使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、同梱のcmux CLI経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
 
 手動操作:
 
@@ -190,7 +190,7 @@ tacho cmux clear   # tachoのピルを削除
 
 ### macOSメニューバー(SwiftBar)
 
-どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、満月 = 全部残っている)にフォールバックできます。
+どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、満月 = 全部残っている)にフォールバックできます。
 
 ```sh
 brew install swiftbar   # 未導入なら
@@ -208,6 +208,7 @@ chmod +x <プラグインフォルダ>/tacho.30s.sh
 
 - **表示形式**: メーター(ゲージ)/ 数字
 - **指標**: 5h limit / weekly limit / cost / tokens(ラジオ選択。contextはセッションごとに変動が大きくメニューバー向きでないため除外)。cost / tokens は当日合計(`/d` 付き)で、当日合計が不明なときは現セッション値(`/d` なし)に切り替わる
+- **リミット表示**: 残量 / 使用率(5h / weekly のパーセント・ゲージ・リングが示す値。ステータスラインや `tacho` にも同じ設定が効く。色分けは使用率基準のまま)
 - **表示するツール**: Claude / Codex(チェックボックス)
 
 CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
@@ -216,6 +217,7 @@ CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
 tacho config show
 tacho config set menubar.style number      # メーター→数字
 tacho config set menubar.metric cost       # 使った金額を表示
+tacho config set limits.display used       # 5h / weekly を残量→使用率で表示
 tacho config set tools codex               # Codexだけ表示
 ```
 

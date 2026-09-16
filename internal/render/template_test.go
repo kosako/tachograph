@@ -52,6 +52,39 @@ func TestTemplateLimitHeadroomColoredByUse(t *testing.T) {
 	}
 }
 
+// With the used display the same limit reads as its use, still colored by
+// use (#228): 59% used shows "59%" in the warning color, and the gauges fill
+// with use instead of draining.
+func TestTemplateLimitUsedDisplayColoredByUse(t *testing.T) {
+	now := time.Now()
+	used := 59.0
+	tool := limitsTool()
+	tool.Limits[0].UsedPct = &used // 5h window
+	s := schema.Status{Tools: []schema.Tool{tool}}
+	color := Style{Color: true, Limits: LimitUsed}
+	usedPlain := Style{Limits: LimitUsed}
+	if got, want := Template("{claude.5h.pct}", s, now, color), cYellow+"59%"+cReset; got != want {
+		t.Errorf("pct = %q, want %q (used text, warn color)", got, want)
+	}
+	if got, want := Template("{claude.5h.bar:4}", s, now, color), cYellow+"██░░"+cReset; got != want {
+		t.Errorf("bar = %q, want %q (bar fills with use)", got, want)
+	}
+	if got, want := Template("{claude.5h.dial}", s, now, usedPlain), "◑"; got != want {
+		t.Errorf("dial = %q, want %q (59%% used)", got, want)
+	}
+	if got, want := Template("{claude.5h.moon}", s, now, usedPlain), "🌓"; got != want {
+		t.Errorf("moon = %q, want %q (59%% used)", got, want)
+	}
+	// A value where headroom and use fall in different dial buckets.
+	used = 85
+	if got, want := Template("{claude.5h.dial} {claude.5h.moon} {claude.5h.pct}", s, now, usedPlain), "◕ 🌔 85%"; got != want {
+		t.Errorf("used 85%% = %q, want %q", got, want)
+	}
+	if got, want := Template("{claude.5h.dial} {claude.5h.moon} {claude.5h.pct}", s, now, plain), "◔ 🌒 15%"; got != want {
+		t.Errorf("remaining 85%% used = %q, want %q", got, want)
+	}
+}
+
 func TestTemplateBasics(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	s := testStatus()

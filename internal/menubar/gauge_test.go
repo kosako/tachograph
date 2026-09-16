@@ -39,7 +39,7 @@ func TestPNGBase64Dimensions(t *testing.T) {
 		toolWith(schema.ToolClaudeCode, 34),
 		toolWith(schema.ToolCodex, 78),
 	}}
-	b64, ok := PNGBase64(s, true, render.MetricLimit5h)
+	b64, ok := PNGBase64(s, true, render.MetricLimit5h, render.LimitRemaining)
 	if !ok {
 		t.Fatal("PNGBase64 not ok")
 	}
@@ -53,7 +53,7 @@ func TestPNGBase64Dimensions(t *testing.T) {
 }
 
 func TestPNGBase64Empty(t *testing.T) {
-	if _, ok := PNGBase64(schema.Status{}, true, render.MetricLimit5h); ok {
+	if _, ok := PNGBase64(schema.Status{}, true, render.MetricLimit5h, render.LimitRemaining); ok {
 		t.Error("PNGBase64 should be !ok with no tools")
 	}
 }
@@ -62,7 +62,7 @@ func TestPNGBase64Empty(t *testing.T) {
 // a lightly used gauge has strictly more ink than a heavily used one (#223).
 func TestFillScalesWithHeadroom(t *testing.T) {
 	ink := func(pct float64) int {
-		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}}, true, render.MetricLimit5h)
+		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, pct)}}, true, render.MetricLimit5h, render.LimitRemaining)
 		if !ok {
 			t.Fatal("not ok")
 		}
@@ -84,12 +84,55 @@ func TestFillScalesWithHeadroom(t *testing.T) {
 	}
 }
 
+// With the used display the ring fills as the window is used (#228): a
+// heavily used gauge has strictly more ink than a lightly used one, an
+// exhausted window is a full red ring, and an untouched window draws the
+// same neutral track as a tool without limit data (no exhausted-track
+// painting, which only makes sense for a drained headroom arc).
+func TestFillScalesWithUse(t *testing.T) {
+	encode := func(tools []schema.Tool) []byte {
+		b64, ok := PNGBase64(schema.Status{Tools: tools}, true, render.MetricLimit5h, render.LimitUsed)
+		if !ok {
+			t.Fatal("not ok")
+		}
+		raw, _ := base64.StdEncoding.DecodeString(b64)
+		return raw
+	}
+	ink := func(pct float64) int {
+		img, _ := png.Decode(bytes.NewReader(encode([]schema.Tool{toolWith(schema.ToolClaudeCode, pct)})))
+		var sum int
+		b := img.Bounds()
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				_, _, _, a := img.At(x, y).RGBA()
+				sum += int(a >> 8)
+			}
+		}
+		return sum
+	}
+	if light, heavy := ink(10), ink(90); heavy <= light {
+		t.Errorf("used display: expected more ink at 90%% used (%d) than 10%% used (%d)", heavy, light)
+	}
+	if n := reddishFor(t, schema.Status{Tools: []schema.Tool{toolWith(schema.ToolClaudeCode, 100)}}, true, render.LimitUsed); n == 0 {
+		t.Error("used display: 100% used ring has no red pixels")
+	}
+	noLimits := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription}
+	if !bytes.Equal(encode([]schema.Tool{toolWith(schema.ToolClaudeCode, 0)}), encode([]schema.Tool{noLimits})) {
+		t.Error("used display: 0% used ring differs from the no-limit ring (track must stay neutral)")
+	}
+}
+
 // reddish counts pixels whose color reads as the danger red on either
 // appearance (logo and neutral tracks are white/near-black, so they never
 // qualify).
 func reddish(t *testing.T, s schema.Status, dark bool) int {
 	t.Helper()
-	b64, ok := PNGBase64(s, dark, render.MetricLimit5h)
+	return reddishFor(t, s, dark, render.LimitRemaining)
+}
+
+func reddishFor(t *testing.T, s schema.Status, dark bool, d render.LimitDisplay) int {
+	t.Helper()
+	b64, ok := PNGBase64(s, dark, render.MetricLimit5h, d)
 	if !ok {
 		t.Fatal("not ok")
 	}
@@ -138,7 +181,7 @@ func TestFallbackFillsRingFromAvailableWindow(t *testing.T) {
 			Backend:   schema.BackendSubscription,
 			Limits:    []schema.Limit{{Window: "weekly", WindowMinutes: &mW, UsedPct: &pctW}},
 		}
-		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{weeklyOnly}}, true, render.MetricLimit5h)
+		b64, ok := PNGBase64(schema.Status{Tools: []schema.Tool{weeklyOnly}}, true, render.MetricLimit5h, render.LimitRemaining)
 		if !ok {
 			t.Fatal("not ok")
 		}
@@ -164,7 +207,7 @@ func TestUnavailableRendersTrackOnly(t *testing.T) {
 	// An unavailable tool still produces a gauge (dim track + dim logo),
 	// so the image dimensions stay stable.
 	s := schema.Status{Tools: []schema.Tool{schema.Unavailable(schema.ToolCodex)}}
-	b64, ok := PNGBase64(s, true, render.MetricLimit5h)
+	b64, ok := PNGBase64(s, true, render.MetricLimit5h, render.LimitRemaining)
 	if !ok {
 		t.Fatal("not ok")
 	}

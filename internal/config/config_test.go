@@ -11,8 +11,29 @@ import (
 func TestLoadDefaultsWhenMissing(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	c := Load()
-	if len(c.Tools) != 2 || c.Menubar.Style != StyleMeter || c.Menubar.Metric != DefaultMetric {
+	if len(c.Tools) != 2 || c.Menubar.Style != StyleMeter || c.Menubar.Metric != DefaultMetric || c.Limits.Display != DefaultLimitDisplay {
 		t.Errorf("Load() = %+v, want defaults", c)
+	}
+}
+
+// limits.display round-trips, and a config written before the key existed
+// (#228) keeps the headroom display it had.
+func TestLimitsDisplayRoundTripAndDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	c := Default()
+	c.Limits.Display = "used"
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Limits.Display; got != "used" {
+		t.Errorf("Limits.Display = %q, want \"used\"", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"menubar":{"style":"number"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Limits.Display; got != DefaultLimitDisplay {
+		t.Errorf("Limits.Display without the key = %q, want %q", got, DefaultLimitDisplay)
 	}
 }
 

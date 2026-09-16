@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -46,7 +47,7 @@ func TestAbsentToolKeys(t *testing.T) {
 		limitsTool(false, 24, 41),            // claude available → pill present
 		schema.Unavailable(schema.ToolCodex), // codex unavailable → no pill
 	}}
-	pills := Pills(s, now)
+	pills := Pills(s, now, render.LimitRemaining)
 	keys := absentToolKeys(pills)
 	if len(keys) != 1 || keys[0] != "codex" {
 		t.Errorf("absentToolKeys = %v, want [codex] (cleared because it has no pill)", keys)
@@ -54,7 +55,7 @@ func TestAbsentToolKeys(t *testing.T) {
 
 	// Both available → nothing to clear.
 	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41), codexTokenTool()}}
-	if got := absentToolKeys(Pills(s2, now)); len(got) != 0 {
+	if got := absentToolKeys(Pills(s2, now, render.LimitRemaining)); len(got) != 0 {
 		t.Errorf("absentToolKeys = %v, want none when every tool has a pill", got)
 	}
 }
@@ -67,7 +68,7 @@ func TestPills(t *testing.T) {
 		schema.Unavailable(schema.ToolCodex), // ignored
 	}}
 
-	pills := Pills(s, now)
+	pills := Pills(s, now, render.LimitRemaining)
 	if len(pills) != 2 {
 		t.Fatalf("Pills = %+v, want 2", pills)
 	}
@@ -80,6 +81,17 @@ func TestPills(t *testing.T) {
 	}
 	if pills[1].Key != "codex" || pills[1].Value != "codex 4Mtok" {
 		t.Errorf("codex fallback pill = %+v", pills[1])
+	}
+}
+
+// The used display flips the limit figures to their use (#228); ctx and the
+// pressure color are unchanged.
+func TestPillsUsedDisplay(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
+	got := Pills(s, now, render.LimitUsed)[0]
+	if got.Value != "claude ctx24% 5h24% wk41%" || got.Color != colorGreen {
+		t.Errorf("claude pill (used) = %+v, want \"claude ctx24%% 5h24%% wk41%%\" green", got)
 	}
 }
 
@@ -97,7 +109,7 @@ func TestPillPressureColors(t *testing.T) {
 	}
 	for _, c := range cases {
 		s := schema.Status{Tools: []schema.Tool{limitsTool(c.stale, c.pct5, c.pctW)}}
-		got := Pills(s, now)[0]
+		got := Pills(s, now, render.LimitRemaining)[0]
 		if got.Color != c.want {
 			t.Errorf("color(%v) = %s, want %s", c, got.Color, c.want)
 		}
@@ -107,7 +119,7 @@ func TestPillPressureColors(t *testing.T) {
 func TestPillStaleAge(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00") // 1h after collected
 	s := schema.Status{Tools: []schema.Tool{limitsTool(true, 24, 41)}}
-	got := Pills(s, now)[0]
+	got := Pills(s, now, render.LimitRemaining)[0]
 	if !strings.HasPrefix(got.Value, "claude ⚠1h ") {
 		t.Errorf("stale pill = %q, want \"⚠1h\" prefix", got.Value)
 	}
@@ -132,7 +144,7 @@ func TestPushAndClearExec(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	s := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41), codexTokenTool()}}
 
-	if err := Push(bin, s, now, true); err != nil {
+	if err := Push(bin, s, now, render.LimitRemaining, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := Clear(bin, true); err != nil {
@@ -167,7 +179,7 @@ func TestPushClearsAbsentTool(t *testing.T) {
 		limitsTool(false, 24, 41),            // claude available → set
 		schema.Unavailable(schema.ToolCodex), // codex unavailable → clear
 	}}
-	if err := Push(bin, s, now, true); err != nil {
+	if err := Push(bin, s, now, render.LimitRemaining, true); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(log)
@@ -183,7 +195,7 @@ func TestPushClearsAbsentTool(t *testing.T) {
 	// old codex pill is not left frozen in the sidebar.
 	bin2, log2 := fakeCLI(t)
 	s2 := schema.Status{Tools: []schema.Tool{limitsTool(false, 24, 41)}}
-	if err := Push(bin2, s2, now, true); err != nil {
+	if err := Push(bin2, s2, now, render.LimitRemaining, true); err != nil {
 		t.Fatal(err)
 	}
 	b2, _ := os.ReadFile(log2)

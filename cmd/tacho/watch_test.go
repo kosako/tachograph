@@ -24,7 +24,7 @@ func TestWatchStatusBypassesTTLCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := watchStatus(now)
+	got, _ := watchStatus(now)
 	if got.GeneratedAt == "cached-status" {
 		t.Fatal("watchStatus used the TTL cache")
 	}
