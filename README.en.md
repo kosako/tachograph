@@ -193,10 +193,10 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `model` | model display name (`Fable 5`, `gpt-5.5`) |
 | `effort` | reasoning effort, `⚡xhi ` (`low`/`med`/`high`/`xhi`/`max`, marker + trailing space; Claude only, empty when the model doesn't support it) |
 | `ctx` | context window usage, `8%` |
-| `5h.pct` / `wk.pct` | rate-limit **headroom** (percent left) for the 5-hour / weekly window, `76%` |
-| `5h.bar:8` / `wk.bar:8` | headroom gauge of the given width (drains as you use it), `██████░░` |
-| `5h.dial` / `wk.dial` | single-character headroom dial, `○◔◑◕●` (● = all left; `◌` when no data) |
-| `5h.moon` / `wk.moon` | larger moon-phase headroom dial, `🌑🌒🌓🌔🌕` (🌕 = all left; emoji, so not colored; `◌` when no data) |
+| `5h.pct` / `wk.pct` | rate-limit **headroom** (percent left) for the 5-hour / weekly window, `76%`; usage with `limits.display: used` |
+| `5h.bar:8` / `wk.bar:8` | headroom gauge of the given width (drains as you use it; fills with `used`), `██████░░` |
+| `5h.dial` / `wk.dial` | single-character headroom dial, `○◔◑◕●` (● = all left, or used up with `used`; `◌` when no data) |
+| `5h.moon` / `wk.moon` | larger moon-phase headroom dial, `🌑🌒🌓🌔🌕` (🌕 = all left, or used up with `used`; emoji, so not colored; `◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (today) or `↻06/15` |
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
@@ -247,7 +247,8 @@ reveals per-tool details. The ring is colored by usage (green/yellow/red, gray w
 stale). The logo and track are white by default (for Dark mode or a
 wallpaper-darkened menu bar); set `TACHO_APPEARANCE=light` if your menu bar
 is light. Set `TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text
-(`C🌔 X🌑`, full moon = all left).
+(`C🌔 X🌑`; with the default headroom display a full moon = all left, with the
+usage display a full moon = used up).
 
 ```sh
 brew install swiftbar   # if you don't have it

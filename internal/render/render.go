@@ -279,10 +279,11 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 	}
 
 	// Stale lines are dimmed as a whole; per-part colors would reset the
-	// dim attribute mid-line, so suppress them.
+	// dim attribute mid-line, so suppress them (only the color: the limit
+	// display setting still applies).
 	inner := st
 	if t.Stale {
-		inner = Style{}
+		inner.Color = false
 	}
 	parts := []string{head, "ctx " + ctxPct(t.Session, inner)}
 	if t.Limits != nil {

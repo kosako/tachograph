@@ -194,6 +194,22 @@ func TestToolLineWithLimitsUsedDisplay(t *testing.T) {
 	}
 }
 
+// A stale line drops its per-part colors, not the display setting: the used
+// figures must survive the stale dimming (#229 review R1).
+func TestToolLineStaleKeepsUsedDisplay(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	tool := limitsTool()
+	tool.Stale = true
+	for _, st := range []Style{{Limits: LimitUsed}, {Color: true, Limits: LimitUsed}} {
+		got := ToolLine(tool, now, st)
+		for _, want := range []string{"5h ██░░░░░░ 24%", "wk ███░░░░░ 41%"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("ToolLine(stale, %+v) = %q, missing %q", st, got, want)
+			}
+		}
+	}
+}
+
 func TestToolLineFallback(t *testing.T) {
 	tokens := int64(3962991)
 	cost := 1.5
