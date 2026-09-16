@@ -242,18 +242,19 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 		}
 		return Missing
 	}
-	// Limits display headroom; colors still follow used pressure.
+	// Limits display headroom or use per st.Limits; colors always follow
+	// used pressure.
 	used := *limit.UsedPct
-	left := RemainingPct(used)
+	shown := LimitPct(used, st.Limits)
 	switch field {
 	case "pct":
-		return st.paintPct(used, fmt.Sprintf("%.0f%%", left))
+		return st.paintPct(used, fmt.Sprintf("%.0f%%", shown))
 	case "bar":
-		return st.paintPct(used, Bar(left, width))
+		return st.paintPct(used, Bar(shown, width))
 	case "dial":
-		return st.paintPct(used, Dial(left))
+		return st.paintPct(used, Dial(shown))
 	case "moon":
-		return Moon(left) // emoji ignore ANSI colors; no paint
+		return Moon(shown) // emoji ignore ANSI colors; no paint
 	case "resets":
 		if limit.ResetsAt == nil {
 			return Missing

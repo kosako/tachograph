@@ -32,21 +32,46 @@ func TestMetricIsGauge(t *testing.T) {
 
 // Rate-limit metrics fill with headroom but carry the pressure of their use,
 // so a nearly exhausted window shows a small number in the danger color (#223).
+// Under the used display a limit fills and reads as its use while the
+// pressure is unchanged; the menu bar fallback tags the window the same way
+// (#228). Context is unaffected by the display.
+func TestMetricLimitUsedDisplay(t *testing.T) {
+	used := 85.0
+	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true,
+		Limits: []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &used}}}
+	frac, text, pressure := Metric(tool, MetricLimit5h, LimitUsed)
+	if text != "85%" || frac == nil || *frac < 0.84 || *frac > 0.86 {
+		t.Errorf("Metric(5h, 85%% used, LimitUsed) = %v %q, want ~0.85 \"85%%\"", frac, text)
+	}
+	if pressure != PressureDanger {
+		t.Errorf("pressure = %v, want PressureDanger", pressure)
+	}
+	if _, text, p := MenubarMetric(tool, MetricLimitWeekly, LimitUsed); text != "5h85%" || p != PressureDanger {
+		t.Errorf("MenubarMetric fallback (LimitUsed) = %q %v, want \"5h85%%\" PressureDanger", text, p)
+	}
+	ctxTool := metricTool()
+	if _, remaining, _ := Metric(ctxTool, MetricContext, LimitRemaining); remaining != "8%" {
+		t.Errorf("context (remaining) = %q, want \"8%%\"", remaining)
+	} else if _, usedText, _ := Metric(ctxTool, MetricContext, LimitUsed); usedText != remaining {
+		t.Errorf("context (used) = %q, want %q (display does not apply to context)", usedText, remaining)
+	}
+}
+
 func TestMetricLimitPressureFollowsUse(t *testing.T) {
 	used := 85.0
 	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true,
 		Limits: []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &used}}}
-	frac, text, pressure := Metric(tool, MetricLimit5h)
+	frac, text, pressure := Metric(tool, MetricLimit5h, LimitRemaining)
 	if text != "15%" || frac == nil || *frac < 0.14 || *frac > 0.16 {
 		t.Errorf("Metric(5h, 85%% used) = %v %q, want ~0.15 \"15%%\"", frac, text)
 	}
 	if pressure != PressureDanger {
 		t.Errorf("pressure = %v, want PressureDanger (colored by use, not headroom)", pressure)
 	}
-	if _, text, p := MenubarMetric(tool, MetricLimitWeekly); text != "5h15%" || p != PressureDanger {
+	if _, text, p := MenubarMetric(tool, MetricLimitWeekly, LimitRemaining); text != "5h15%" || p != PressureDanger {
 		t.Errorf("MenubarMetric fallback = %q %v, want \"5h15%%\" PressureDanger", text, p)
 	}
-	if _, _, p := Metric(metricTool(), MetricLimit5h); p != PressureOK {
+	if _, _, p := Metric(metricTool(), MetricLimit5h, LimitRemaining); p != PressureOK {
 		t.Errorf("pressure at 24%% used = %v, want PressureOK", p)
 	}
 }
@@ -78,7 +103,7 @@ func TestMetric(t *testing.T) {
 		{MetricLimitWeekly, "--", false}, // no weekly limit on this tool
 	}
 	for _, c := range cases {
-		frac, text, _ := Metric(tool, c.metric)
+		frac, text, _ := Metric(tool, c.metric, LimitRemaining)
 		if text != c.wantText {
 			t.Errorf("Metric(%s) text = %q, want %q", c.metric, text, c.wantText)
 		}
@@ -86,13 +111,13 @@ func TestMetric(t *testing.T) {
 			t.Errorf("Metric(%s) frac present = %v, want %v", c.metric, frac != nil, c.wantFrac)
 		}
 	}
-	if frac, _, _ := Metric(tool, MetricLimit5h); frac == nil || *frac < 0.75 || *frac > 0.77 {
+	if frac, _, _ := Metric(tool, MetricLimit5h, LimitRemaining); frac == nil || *frac < 0.75 || *frac > 0.77 {
 		t.Errorf("5h frac = %v, want ~0.76 (headroom)", frac)
 	}
 }
 
 func TestMetricUnavailable(t *testing.T) {
-	if _, text, _ := Metric(schema.Unavailable(schema.ToolCodex), MetricLimit5h); text != Missing {
+	if _, text, _ := Metric(schema.Unavailable(schema.ToolCodex), MetricLimit5h, LimitRemaining); text != Missing {
 		t.Errorf("unavailable text = %q, want %q", text, Missing)
 	}
 }
@@ -107,7 +132,7 @@ func TestMenubarMetricFallback(t *testing.T) {
 		Available: true,
 		Limits:    []schema.Limit{{Window: schema.WindowWeekly, UsedPct: &wk}},
 	}
-	frac, text, _ := MenubarMetric(weeklyOnly, MetricLimit5h)
+	frac, text, _ := MenubarMetric(weeklyOnly, MetricLimit5h, LimitRemaining)
 	if text != "wk85%" { // 15% used → 85% left
 		t.Errorf("MenubarMetric(5h, weekly-only) text = %q, want \"wk85%%\"", text)
 	}
@@ -116,24 +141,24 @@ func TestMenubarMetricFallback(t *testing.T) {
 	}
 
 	// The configured window wins when present: no tag, identical to Metric.
-	if _, text, _ := MenubarMetric(metricTool(), MetricLimit5h); text != "76%" {
+	if _, text, _ := MenubarMetric(metricTool(), MetricLimit5h, LimitRemaining); text != "76%" {
 		t.Errorf("MenubarMetric(5h present) text = %q, want \"76%%\"", text)
 	}
 	// The fallback works in both directions (weekly configured, only 5h).
-	if _, text, _ := MenubarMetric(metricTool(), MetricLimitWeekly); text != "5h76%" {
+	if _, text, _ := MenubarMetric(metricTool(), MetricLimitWeekly, LimitRemaining); text != "5h76%" {
 		t.Errorf("MenubarMetric(weekly, 5h-only) text = %q, want \"5h76%%\"", text)
 	}
 	// No reported limits at all stays "--".
-	if _, text, _ := MenubarMetric(schema.Tool{Tool: schema.ToolCodex, Available: true}, MetricLimit5h); text != Missing {
+	if _, text, _ := MenubarMetric(schema.Tool{Tool: schema.ToolCodex, Available: true}, MetricLimit5h, LimitRemaining); text != Missing {
 		t.Errorf("MenubarMetric(no limits) text = %q, want %q", text, Missing)
 	}
 	// Non-limit metrics never fall back to a limit window.
-	if _, text, _ := MenubarMetric(weeklyOnly, MetricCost); text != Missing {
+	if _, text, _ := MenubarMetric(weeklyOnly, MetricCost, LimitRemaining); text != Missing {
 		t.Errorf("MenubarMetric(cost) text = %q, want %q", text, Missing)
 	}
 	// Unavailable tools stay "--" even if limits linger in the struct.
 	unavailable := schema.Tool{Tool: schema.ToolCodex, Limits: weeklyOnly.Limits}
-	if _, text, _ := MenubarMetric(unavailable, MetricLimit5h); text != Missing {
+	if _, text, _ := MenubarMetric(unavailable, MetricLimit5h, LimitRemaining); text != Missing {
 		t.Errorf("MenubarMetric(unavailable) text = %q, want %q", text, Missing)
 	}
 	// Error'd tools stay "--" even if limits linger in the struct.
@@ -143,7 +168,7 @@ func TestMenubarMetricFallback(t *testing.T) {
 		Error:     &schema.Error{Code: "parse_error"},
 		Limits:    weeklyOnly.Limits,
 	}
-	if _, text, _ := MenubarMetric(errored, MetricLimit5h); text != Missing {
+	if _, text, _ := MenubarMetric(errored, MetricLimit5h, LimitRemaining); text != Missing {
 		t.Errorf("MenubarMetric(errored) text = %q, want %q", text, Missing)
 	}
 	// A window reported without a value is skipped both as the configured
@@ -157,7 +182,7 @@ func TestMenubarMetricFallback(t *testing.T) {
 			{Window: schema.WindowWeekly, UsedPct: &wk},
 		},
 	}
-	if _, text, _ := MenubarMetric(nilFirst, MetricLimit5h); text != "wk85%" {
+	if _, text, _ := MenubarMetric(nilFirst, MetricLimit5h, LimitRemaining); text != "wk85%" {
 		t.Errorf("MenubarMetric(nil-first) text = %q, want \"wk85%%\"", text)
 	}
 	// All-valueless limits stay "--".
@@ -166,7 +191,7 @@ func TestMenubarMetricFallback(t *testing.T) {
 		Available: true,
 		Limits:    []schema.Limit{{Window: schema.WindowWeekly}},
 	}
-	if _, text, _ := MenubarMetric(nilOnly, MetricLimit5h); text != Missing {
+	if _, text, _ := MenubarMetric(nilOnly, MetricLimit5h, LimitRemaining); text != Missing {
 		t.Errorf("MenubarMetric(nil-only) text = %q, want %q", text, Missing)
 	}
 }

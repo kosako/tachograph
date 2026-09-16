@@ -109,8 +109,11 @@ func main() {
 	}
 }
 
-func style(noColor bool) render.Style {
-	return render.Style{Color: !noColor && os.Getenv("NO_COLOR") == ""}
+func style(noColor bool, cfg config.Config) render.Style {
+	return render.Style{
+		Color:  !noColor && os.Getenv("NO_COLOR") == "",
+		Limits: render.LimitDisplay(cfg.Limits.Display),
+	}
 }
 
 func runSwiftbar(args []string) int {
@@ -128,7 +131,7 @@ func runSwiftbar(args []string) int {
 	s := core.Status(core.Options{Now: now})
 	shown := cfg.FilterStatus(s)
 	if *pngOut != "" {
-		b64, ok := menubar.PNGBase64(shown, dark, cfg.Menubar.Metric)
+		b64, ok := menubar.PNGBase64(shown, dark, cfg.Menubar.Metric, render.LimitDisplay(cfg.Limits.Display))
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
@@ -155,6 +158,7 @@ keys:
   tools           comma-separated: claude-code,codex  (which tools to show)
   menubar.style   meter | number
   menubar.metric  ` + "limit_5h | limit_weekly | cost | tokens" + `
+  limits.display  remaining | used  (what 5h / weekly percentages show)
 `
 
 func runConfig(args []string) int {
@@ -296,6 +300,12 @@ func configSet(key, val string) int {
 			return 2
 		}
 		c.Menubar.Metric = val
+	case "limits.display":
+		if !render.ValidLimitDisplay(val) {
+			fmt.Fprintf(os.Stderr, "tacho: invalid limits display %q (want remaining or used)\n", val)
+			return 2
+		}
+		c.Limits.Display = val
 	default:
 		fmt.Fprintf(os.Stderr, "tacho: unknown key %q\n", key)
 		fmt.Fprint(os.Stderr, configUsage)
@@ -333,8 +343,9 @@ func runOnce(args []string) int {
 	fs.Parse(args)
 
 	now := time.Now()
-	s := config.Load().FilterStatus(core.Status(core.Options{Now: now, NoCache: *noCache}))
-	fmt.Println(render.StatusLines(s, now, style(*noColor)))
+	cfg := config.Load()
+	s := cfg.FilterStatus(core.Status(core.Options{Now: now, NoCache: *noCache}))
+	fmt.Println(render.StatusLines(s, now, style(*noColor, cfg)))
 	return 0
 }
 
@@ -347,20 +358,22 @@ func runWatch(args []string) int {
 		*interval = 1
 	}
 
-	st := style(*noColor)
 	for {
 		now := time.Now()
-		s := watchStatus(now)
+		s, cfg := watchStatus(now)
 		// Clear screen and home the cursor between refreshes.
 		fmt.Print("\x1b[H\x1b[2J")
 		fmt.Printf("tachograph  %s  (every %ds, ctrl-c to quit)\n\n", now.Format("15:04:05"), *interval)
-		fmt.Println(render.StatusLines(s, now, st))
+		fmt.Println(render.StatusLines(s, now, style(*noColor, cfg)))
 		time.Sleep(time.Duration(*interval) * time.Second)
 	}
 }
 
-func watchStatus(now time.Time) schema.Status {
-	return config.Load().FilterStatus(core.Status(core.Options{Now: now, NoCache: true}))
+// watchStatus reloads the config each tick, so a display setting changed
+// elsewhere (dropdown, `tacho config set`) applies without a restart.
+func watchStatus(now time.Time) (schema.Status, config.Config) {
+	cfg := config.Load()
+	return cfg.FilterStatus(core.Status(core.Options{Now: now, NoCache: true})), cfg
 }
 
 // runStatusline is the R1 renderer: it consumes the session JSON Claude
@@ -400,13 +413,14 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	if tmpl == "" {
 		tmpl = loadTemplate()
 	}
-	fmt.Fprintln(stdout, render.Template(tmpl, s, now, style(*noColor)))
+	cfg := config.Load()
+	fmt.Fprintln(stdout, render.Template(tmpl, s, now, style(*noColor, cfg)))
 
 	// R3 piggyback: inside a cmux terminal, mirror the status to the
 	// sidebar. Fire-and-forget so the statusline stays fast.
 	if cmuxbar.Detect() {
 		if cli := cmuxbar.FindCLI(); cli != "" {
-			_ = cmuxbar.Push(cli, config.Load().FilterStatus(s), now, false)
+			_ = cmuxbar.Push(cli, cfg.FilterStatus(s), now, render.LimitDisplay(cfg.Limits.Display), false)
 		}
 	}
 	return 0
@@ -469,8 +483,9 @@ func runCmux(args []string) int {
 		err = cmuxbar.Clear(cli, true)
 	} else {
 		now := time.Now()
-		s := config.Load().FilterStatus(core.Status(core.Options{Now: now}))
-		err = cmuxbar.Push(cli, s, now, true)
+		cfg := config.Load()
+		s := cfg.FilterStatus(core.Status(core.Options{Now: now}))
+		err = cmuxbar.Push(cli, s, now, render.LimitDisplay(cfg.Limits.Display), true)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)

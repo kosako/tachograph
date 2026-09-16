@@ -50,29 +50,62 @@ func PressureFor(pct float64) PressureLevel {
 	}
 }
 
-// RemainingPct converts a used percentage into the headroom shown for rate
-// limits. Every surface (statusline, one-shot, cmux, SwiftBar, menu bar)
-// displays how much of the 5h / weekly window is left, so Claude and Codex
-// read the same way whatever wording each tool's own UI uses (#223). The
-// schema keeps used_pct as reported, and coloring stays keyed on the used
-// value via PressureFor. A window reported past 100% clamps to 0 left.
+// LimitDisplay selects what a rate-limit percentage shows on every surface
+// (statusline, one-shot, cmux, SwiftBar, menu bar): the headroom left in the
+// 5h / weekly window, or the share already used. It is the config key
+// limits.display; any other value (including an unset one) reads as
+// LimitRemaining, the default since #223.
+type LimitDisplay string
+
+const (
+	LimitRemaining LimitDisplay = "remaining" // what's left (drains as you use it)
+	LimitUsed      LimitDisplay = "used"      // what's consumed (fills as you use it)
+)
+
+// ValidLimitDisplay reports whether v is an accepted limits.display value.
+func ValidLimitDisplay(v string) bool {
+	switch LimitDisplay(v) {
+	case LimitRemaining, LimitUsed:
+		return true
+	}
+	return false
+}
+
+// LimitPct converts a used percentage into the value a rate-limit gauge
+// shows under d, clamped to 0..100. Every surface goes through here so
+// Claude and Codex read the same way whatever wording each tool's own UI
+// uses (#223, #228). The schema keeps used_pct as reported, and coloring
+// stays keyed on the used value via PressureFor.
+func LimitPct(used float64, d LimitDisplay) float64 {
+	if d == LimitUsed {
+		return clampPct(used)
+	}
+	return RemainingPct(used)
+}
+
+// RemainingPct converts a used percentage into the headroom left in a rate
+// limit window. A window reported past 100% clamps to 0 left.
 func RemainingPct(used float64) float64 {
-	left := 100 - used
-	if left < 0 {
+	return clampPct(100 - used)
+}
+
+func clampPct(pct float64) float64 {
+	if pct < 0 {
 		return 0
 	}
-	if left > 100 {
+	if pct > 100 {
 		return 100
 	}
-	return left
+	return pct
 }
 
 type Style struct {
-	Color bool
+	Color  bool
+	Limits LimitDisplay // what 5h / weekly percentages show
 }
 
 // paintPct colors s by the pressure of a used percentage (not by what s
-// displays: a limit shows its headroom but is colored by its use).
+// displays: a limit may show its headroom but is always colored by its use).
 func (st Style) paintPct(pct float64, s string) string {
 	if !st.Color {
 		return s
@@ -246,10 +279,11 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 	}
 
 	// Stale lines are dimmed as a whole; per-part colors would reset the
-	// dim attribute mid-line, so suppress them.
+	// dim attribute mid-line, so suppress them (only the color: the limit
+	// display setting still applies).
 	inner := st
 	if t.Stale {
-		inner = Style{}
+		inner.Color = false
 	}
 	parts := []string{head, "ctx " + ctxPct(t.Session, inner)}
 	if t.Limits != nil {
@@ -292,8 +326,8 @@ func limitPart(l schema.Limit, now time.Time, st Style) string {
 		return label + " --%"
 	}
 	used := *l.UsedPct
-	left := RemainingPct(used)
-	s := fmt.Sprintf("%s %s %s", label, st.paintPct(used, Bar(left, 8)), st.paintPct(used, fmt.Sprintf("%2.0f%%", left)))
+	shown := LimitPct(used, st.Limits)
+	s := fmt.Sprintf("%s %s %s", label, st.paintPct(used, Bar(shown, 8)), st.paintPct(used, fmt.Sprintf("%2.0f%%", shown)))
 	if l.ResetsAt != nil {
 		s += " " + st.dim(ResetShort(*l.ResetsAt, now))
 	}

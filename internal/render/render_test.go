@@ -36,6 +36,36 @@ func TestRemainingPct(t *testing.T) {
 	}
 }
 
+// LimitPct shows headroom by default (an unset display reads as remaining)
+// and the clamped use under LimitUsed (#228).
+func TestLimitPct(t *testing.T) {
+	cases := []struct {
+		used float64
+		d    LimitDisplay
+		want float64
+	}{
+		{59, LimitRemaining, 41},
+		{59, "", 41},
+		{59, LimitUsed, 59},
+		{130, LimitUsed, 100},
+		{-5, LimitUsed, 0},
+	}
+	for _, c := range cases {
+		if got := LimitPct(c.used, c.d); got != c.want {
+			t.Errorf("LimitPct(%v, %q) = %v, want %v", c.used, c.d, got, c.want)
+		}
+	}
+}
+
+func TestValidLimitDisplay(t *testing.T) {
+	if !ValidLimitDisplay("remaining") || !ValidLimitDisplay("used") {
+		t.Error("remaining / used must be valid")
+	}
+	if ValidLimitDisplay("") || ValidLimitDisplay("headroom") {
+		t.Error("only remaining / used are valid")
+	}
+}
+
 func TestBar(t *testing.T) {
 	cases := []struct {
 		pct  float64
@@ -143,6 +173,39 @@ func TestToolLineWithLimits(t *testing.T) {
 	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "76%", hhmm(t, "2026-06-13T02:00:00+09:00"), "wk", "59%", mmdd(t, "2026-06-15T10:30:00+09:00")} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ToolLine = %q, missing %q", got, want)
+		}
+	}
+}
+
+// With the used display the same tool reads as its use (#228): 23.5% → 24%,
+// 41.2% → 41%, bars filling with use, colors unchanged.
+func TestToolLineWithLimitsUsedDisplay(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	got := ToolLine(limitsTool(), now, Style{Limits: LimitUsed})
+	for _, want := range []string{"5h ██░░░░░░ 24%", "wk ███░░░░░ 41%"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ToolLine(used) = %q, missing %q", got, want)
+		}
+	}
+	for _, headroom := range []string{"76%", "59%"} {
+		if strings.Contains(got, headroom) {
+			t.Errorf("ToolLine(used) = %q, still shows headroom %q", got, headroom)
+		}
+	}
+}
+
+// A stale line drops its per-part colors, not the display setting: the used
+// figures must survive the stale dimming (#229 review R1).
+func TestToolLineStaleKeepsUsedDisplay(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	tool := limitsTool()
+	tool.Stale = true
+	for _, st := range []Style{{Limits: LimitUsed}, {Color: true, Limits: LimitUsed}} {
+		got := ToolLine(tool, now, st)
+		for _, want := range []string{"5h ██░░░░░░ 24%", "wk ███░░░░░ 41%"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("ToolLine(stale, %+v) = %q, missing %q", st, got, want)
+			}
 		}
 	}
 }

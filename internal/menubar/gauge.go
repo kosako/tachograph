@@ -84,8 +84,9 @@ const (
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
 // there is nothing to draw. dark selects the system appearance so the logo
-// and track stay legible; metric selects which value drives the ring.
-func PNGBase64(s schema.Status, dark bool, metric string) (string, bool) {
+// and track stay legible; metric selects which value drives the ring and d
+// whether a limit ring fills with headroom or use.
+func PNGBase64(s schema.Status, dark bool, metric string, d render.LimitDisplay) (string, bool) {
 	if len(s.Tools) == 0 {
 		return "", false
 	}
@@ -94,7 +95,7 @@ func PNGBase64(s schema.Status, dark bool, metric string) (string, bool) {
 	w := canvas*n + gap*(n-1)
 	big := image.NewNRGBA(image.Rect(0, 0, w*ss, canvas*ss))
 	for i, t := range s.Tools {
-		drawGauge(big, (canvas+gap)*i*ss, t, pal, metric)
+		drawGauge(big, (canvas+gap)*i*ss, t, pal, metric, d)
 	}
 	img := downsample(big, w, canvas)
 
@@ -122,8 +123,9 @@ func ringColor(t schema.Tool, pressure render.PressureLevel) color.NRGBA {
 }
 
 // drawGauge renders one tool into a canvas*ss square at horizontal offset ox
-// (supersampled coordinates). metric selects which value fills the ring.
-func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric string) {
+// (supersampled coordinates). metric selects which value fills the ring and
+// d whether a limit fills it with headroom or use.
+func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric string, d render.LimitDisplay) {
 	c := float64(canvas * ss)
 	cx := float64(ox) + c/2
 	cy := c / 2
@@ -135,7 +137,7 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
-	frac, _, pressure := render.MenubarMetric(t, metric)
+	frac, _, pressure := render.MenubarMetric(t, metric, d)
 	var pct float64
 	hasPct := frac != nil
 	if hasPct {
@@ -143,21 +145,24 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	}
 	fill := ringColor(t, pressure)
 	track := pal.track
-	// A window with (almost) nothing left draws no visible arc: at 100% used
-	// there is none, and just below it (99.9%) the arc spans a fraction of a
-	// degree that never reaches a sample point. Either would look exactly like
-	// a tool with no limit data, so once the headroom arc is shorter than one
-	// on-screen pixel the track itself takes the pressure color, dimmed, and
-	// the empty ring still reads as "red: used up".
+	// A window with (almost) nothing left draws no visible headroom arc: at
+	// 100% used there is none, and just below it (99.9%) the arc spans a
+	// fraction of a degree that never reaches a sample point. Either would
+	// look exactly like a tool with no limit data, so once the headroom arc
+	// is shorter than one on-screen pixel the track itself takes the pressure
+	// color, dimmed, and the empty ring still reads as "red: used up". With
+	// the used display an empty ring means nothing used, and an exhausted
+	// window already draws a full pressure-colored arc.
 	arcPx := pct * 2 * math.Pi * rOut / ss // arc length in final pixels
-	if hasPct && arcPx < 1 {
+	if hasPct && arcPx < 1 && d != render.LimitUsed {
 		track = fill
 		track.A = aExhaustedTrack
 	}
 
 	// Ring: full circle, starting at 12 o'clock, clockwise. A rate limit
 	// fills it with its headroom, so the arc drains as the window is used up
-	// (fuel-gauge reading, #223); the color still tracks used pressure.
+	// (fuel-gauge reading, #223), or with its use so the arc grows (#228);
+	// the color always tracks used pressure.
 	for py := 0; py < canvas*ss; py++ {
 		for px := ox; px < ox+canvas*ss; px++ {
 			dx := float64(px) + 0.5 - cx

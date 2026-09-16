@@ -62,15 +62,16 @@ var BinPath = "tacho"
 // display style to show.
 func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string {
 	shown := cfg.FilterStatus(s)
+	limits := render.LimitDisplay(cfg.Limits.Display)
 
 	var b strings.Builder
-	b.WriteString(titleLine(shown, dark, cfg))
+	b.WriteString(titleLine(shown, dark, cfg, limits))
 	b.WriteString("\n---\n")
 	for i, t := range shown.Tools {
 		if i > 0 {
 			b.WriteString("---\n")
 		}
-		section(&b, t, now)
+		section(&b, t, now, limits)
 	}
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
@@ -100,6 +101,19 @@ func settings(b *strings.Builder, cfg config.Config) {
 	for _, m := range render.MenubarMetrics {
 		clickOption(b, 2, mark(cfg.Menubar.Metric == m)+render.MetricLabel(m),
 			"config", "set", "menubar.metric", m)
+	}
+
+	// Limit display (radio): what the 5h / weekly percentages show.
+	b.WriteString("--リミット表示\n")
+	for _, o := range []struct {
+		value render.LimitDisplay
+		label string
+	}{
+		{render.LimitRemaining, "残量"},
+		{render.LimitUsed, "使用率"},
+	} {
+		clickOption(b, 2, mark(cfg.Limits.Display == string(o.value))+o.label,
+			"config", "set", "limits.display", string(o.value))
 	}
 
 	// Tools (checkbox).
@@ -146,24 +160,24 @@ func clickOption(b *strings.Builder, depth int, label string, params ...string) 
 // is the metric value as text. cost/tokens have no gauge fraction, so the
 // meter style falls back to the number text for them. For gauge metrics,
 // TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the image.
-func titleLine(s schema.Status, dark bool, cfg config.Config) string {
+func titleLine(s schema.Status, dark bool, cfg config.Config, limits render.LimitDisplay) string {
 	metric := cfg.Menubar.Metric
 	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
 	// have no fraction, so the ring would always be empty — fall back to the
 	// number style for them.
 	if cfg.Menubar.Style == config.StyleNumber || !render.MetricIsGauge(metric) {
-		return numberTitle(s, metric)
+		return numberTitle(s, metric, limits)
 	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(s, dark, metric); ok {
+		if b64, ok := menubar.PNGBase64(s, dark, metric, limits); ok {
 			return "| image=" + b64
 		}
 	}
-	return title(s)
+	return title(s, limits)
 }
 
 // numberTitle renders the chosen metric per tool as text, e.g. "C 24% X 7%".
-func numberTitle(s schema.Status, metric string) string {
+func numberTitle(s schema.Status, metric string, limits render.LimitDisplay) string {
 	var parts []string
 	for _, t := range s.Tools {
 		if !t.Available || t.Error != nil {
@@ -173,7 +187,7 @@ func numberTitle(s schema.Status, metric string) string {
 		if t.Tool == schema.ToolClaudeCode {
 			initial = "C"
 		}
-		_, text, _ := render.MenubarMetric(t, metric)
+		_, text, _ := render.MenubarMetric(t, metric, limits)
 		parts = append(parts, initial+" "+text)
 	}
 	if len(parts) == 0 {
@@ -183,10 +197,10 @@ func numberTitle(s schema.Status, metric string) string {
 }
 
 // title is the menu bar text fallback: tool initial + moon dial, "C🌔 X🌑".
-// The moon shows 5h headroom (full = nothing used yet), or the tool's first
-// reported limit window when no 5h window exists (same fallback as the ring
-// and the number style).
-func title(s schema.Status) string {
+// The moon shows the 5h headroom (full = nothing used yet) or use per
+// limits, or the tool's first reported limit window when no 5h window exists
+// (same fallback as the ring and the number style).
+func title(s schema.Status, limits render.LimitDisplay) string {
 	var parts []string
 	for _, t := range s.Tools {
 		initial := "X"
@@ -196,7 +210,7 @@ func title(s schema.Status) string {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		if frac, _, _ := render.MenubarMetric(t, render.MetricLimit5h); frac != nil {
+		if frac, _, _ := render.MenubarMetric(t, render.MetricLimit5h, limits); frac != nil {
 			parts = append(parts, initial+render.Moon(*frac*100))
 		} else {
 			parts = append(parts, initial+render.DialMissing)
@@ -213,7 +227,7 @@ func title(s schema.Status) string {
 // this keeps the info rows at full opacity. Clicking runs /usr/bin/true.
 const enableParams = "bash=/usr/bin/true terminal=false refresh=false"
 
-func section(b *strings.Builder, t schema.Tool, now time.Time) {
+func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay) {
 	name := "Codex"
 	if t.Tool == schema.ToolClaudeCode {
 		name = "Claude"
@@ -243,11 +257,11 @@ func section(b *strings.Builder, t schema.Tool, now time.Time) {
 
 	// Show every metric in the dropdown — the menu bar shows one, the
 	// dropdown is the full readout. Limits carry a moon + reset time.
-	limitRow(b, t, schema.WindowFiveHour, "5h", now)
-	limitRow(b, t, schema.WindowWeekly, "weekly", now)
-	metricRow(b, t, render.MetricContext, "context")
-	metricRow(b, t, render.MetricCost, "cost")
-	metricRow(b, t, render.MetricTokens, "tokens")
+	limitRow(b, t, schema.WindowFiveHour, "5h", now, limits)
+	limitRow(b, t, schema.WindowWeekly, "weekly", now, limits)
+	metricRow(b, t, render.MetricContext, "context", limits)
+	metricRow(b, t, render.MetricCost, "cost", limits)
+	metricRow(b, t, render.MetricTokens, "tokens", limits)
 }
 
 // barWidth is the gauge width for dropdown rows (space is not constrained
@@ -274,14 +288,15 @@ func lineBar(pct float64, width int) string {
 // labelW pads metric labels so the bars line up in the monospace font.
 const labelW = 7
 
-// limitRow renders a rate-limit window with a headroom bar (what is left),
-// reset time, and pressure color by use (or "--" when the window is absent).
-func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time) {
+// limitRow renders a rate-limit window with a bar and figure showing what
+// is left or what is used per limits, reset time, and pressure color by use
+// (or "--" when the window is absent).
+func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time, limits render.LimitDisplay) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
 			used := *l.UsedPct
-			left := render.RemainingPct(used)
-			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(left, barWidth), left)
+			shown := render.LimitPct(used, limits)
+			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(shown, barWidth), shown)
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
@@ -294,8 +309,8 @@ func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.
 
 // metricRow renders context/cost/tokens. Percentage metrics get a usage bar;
 // non-percentage ones (cost/tokens) are shown as plain text.
-func metricRow(b *strings.Builder, t schema.Tool, metric, label string) {
-	frac, text, pressure := render.Metric(t, metric)
+func metricRow(b *strings.Builder, t schema.Tool, metric, label string, limits render.LimitDisplay) {
+	frac, text, pressure := render.Metric(t, metric, limits)
 	if frac != nil { // percentage metric: bar + color by pressure
 		line := fmt.Sprintf("%-*s %s %s", labelW, label, lineBar(*frac*100, barWidth), text)
 		dataRow(b, line, lineColor(t, pressure))

@@ -22,10 +22,15 @@ const (
 // DefaultMetric drives the gauge / number when none is configured.
 const DefaultMetric = "limit_5h"
 
+// DefaultLimitDisplay is what 5h / weekly percentages show when none is
+// configured (render.LimitRemaining, the headroom display since #223).
+const DefaultLimitDisplay = "remaining"
+
 // Config is the persisted preference set.
 type Config struct {
 	Tools   []string `json:"tools"` // which tools to show, in order
 	Menubar Menubar  `json:"menubar"`
+	Limits  Limits   `json:"limits"`
 }
 
 type Menubar struct {
@@ -33,12 +38,17 @@ type Menubar struct {
 	Metric string `json:"metric"` // see render.MenubarMetrics
 }
 
+type Limits struct {
+	Display string `json:"display"` // see render.LimitDisplay
+}
+
 // Default is the configuration applied when no file exists — it preserves the
-// original behavior (both tools, meter style, 5-hour limit).
+// original behavior (both tools, meter style, 5-hour limit, headroom).
 func Default() Config {
 	return Config{
 		Tools:   []string{schema.ToolClaudeCode, schema.ToolCodex},
 		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric},
+		Limits:  Limits{Display: DefaultLimitDisplay},
 	}
 }
 
@@ -111,6 +121,9 @@ func load() (Config, error) {
 	}
 	if c.Menubar.Metric == "" {
 		c.Menubar.Metric = DefaultMetric
+	}
+	if c.Limits.Display == "" {
+		c.Limits.Display = DefaultLimitDisplay
 	}
 	return c, nil
 }

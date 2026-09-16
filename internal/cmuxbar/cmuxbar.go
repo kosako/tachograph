@@ -66,8 +66,9 @@ func pillKey(tool string) string {
 	return tool
 }
 
-// Pills builds one pill per available tool.
-func Pills(s schema.Status, now time.Time) []Pill {
+// Pills builds one pill per available tool; d selects whether the 5h / wk
+// figures show headroom or use.
+func Pills(s schema.Status, now time.Time, d render.LimitDisplay) []Pill {
 	var pills []Pill
 	for _, t := range s.Tools {
 		if !t.Available || t.Error != nil {
@@ -75,7 +76,7 @@ func Pills(s schema.Status, now time.Time) []Pill {
 		}
 		key := pillKey(t.Tool)
 		// The sidebar renders only the value, so the tool name leads it.
-		pills = append(pills, Pill{Key: key, Value: key + " " + pillValue(t, now), Color: pillColor(t)})
+		pills = append(pills, Pill{Key: key, Value: key + " " + pillValue(t, now, d), Color: pillColor(t)})
 	}
 	return pills
 }
@@ -96,7 +97,7 @@ func absentToolKeys(pills []Pill) []string {
 	return keys
 }
 
-func pillValue(t schema.Tool, now time.Time) string {
+func pillValue(t schema.Tool, now time.Time, d render.LimitDisplay) string {
 	var parts []string
 	if t.Stale && t.CollectedAt != nil {
 		if a := render.Age(*t.CollectedAt, now); a != "" {
@@ -115,7 +116,7 @@ func pillValue(t schema.Tool, now time.Time) string {
 			if label == schema.WindowWeekly {
 				label = "wk"
 			}
-			parts = append(parts, fmt.Sprintf("%s%.0f%%", label, render.RemainingPct(*l.UsedPct)))
+			parts = append(parts, fmt.Sprintf("%s%.0f%%", label, render.LimitPct(*l.UsedPct, d)))
 		}
 	} else if t.Fallback != nil && t.Fallback.SessionTokens != nil {
 		parts = append(parts, render.FormatTokens(*t.Fallback.SessionTokens)+"tok")
@@ -151,9 +152,9 @@ func pillColor(t schema.Tool) string {
 // started and abandoned so the caller's latency is unaffected; errors are
 // best-effort by design. With wait=true it waits and reports the first
 // failure (the `tacho cmux push` path).
-func Push(cli string, s schema.Status, now time.Time, wait bool) error {
+func Push(cli string, s schema.Status, now time.Time, d render.LimitDisplay, wait bool) error {
 	var firstErr error
-	pills := Pills(s, now)
+	pills := Pills(s, now, d)
 	for _, p := range pills {
 		cmd := exec.Command(cli, "set-status", p.Key, p.Value, "--color", p.Color)
 		if err := runCmd(cmd, wait); err != nil && firstErr == nil {
