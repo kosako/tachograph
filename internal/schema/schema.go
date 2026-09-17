@@ -2,7 +2,7 @@
 // docs/schema.md is the authoritative specification.
 package schema
 
-const Version = "1.0"
+const Version = "2.0"
 
 // Tool name values.
 const (
@@ -56,10 +56,16 @@ type Tool struct {
 	SessionToday *Daily    `json:"session_today"` // current session's totals, today only (Claude only)
 }
 
-// Daily holds today's aggregate usage across every session of a tool.
+// Daily holds today's aggregate usage across every session of a tool. Tokens
+// is the billing volume — Input (cache writes and cache reads included) plus
+// Output, the same measure as Tokens.Total on a session — so it shares a
+// denominator with CostUSD (#234; schema 2.0).
 type Daily struct {
-	Tokens  int64    `json:"tokens"`
-	CostUSD *float64 `json:"cost_usd"` // nil until pricing is known
+	Tokens      int64    `json:"tokens"`       // Input + Output as the provider reports it
+	Input       int64    `json:"input"`        // incl. cache writes and cache reads
+	CachedInput int64    `json:"cached_input"` // cache reads within Input
+	Output      int64    `json:"output"`
+	CostUSD     *float64 `json:"cost_usd"` // nil until pricing is known
 }
 
 type Error struct {

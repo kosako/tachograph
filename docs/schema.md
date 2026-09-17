@@ -1,4 +1,4 @@
-# 統一JSONスキーマ v1.0
+# 統一JSONスキーマ v2.0
 
 `tacho status --json` が出力する、コレクタ層とレンダラ層の境界となるスキーマ。
 本ファイルが仕様の正本。Goの型定義は `internal/schema/schema.go`。
@@ -15,7 +15,7 @@
 
 ```jsonc
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "generated_at": "2026-06-12T21:00:00+09:00",  // この JSON を生成した時刻
   "tools": [ /* ツールごとのエントリ。検出されないツールも available:false で常に載る */ ]
 }
@@ -65,11 +65,17 @@
     "estimated_cost_usd": null
   },
   "daily": {                          // 当日(ローカル日付)の全セッション合計。ログの走査に失敗したとき(集計値が不明のとき)は null(0 と区別)
-    "tokens": 12704565,               // 新規トークン(cache_read等の再読込は除外)
+    "tokens": 12704565,               // 課金対象トークン = input + output(session.tokens.total と同じ尺度。2.0 で意味変更 #234)
+    "input": 12504028,                // cache write / cache read を含む
+    "cached_input": 11800000,         // input のうち cache read
+    "output": 200537,
     "cost_usd": null                  // 料金表ベースの推定コスト(未確定時null)
   },
-  "session_today": {                  // 現セッションの当日分のみ。Claudeのみ(Codexは累積記録のためnull)
+  "session_today": {                  // 現セッションの当日分のみ。Claudeのみ(Codexは累積記録のためnull)。内訳は daily と同じ
     "tokens": 68000,
+    "input": 66000,
+    "cached_input": 60000,
+    "output": 2000,
     "cost_usd": 1.84
   }
 }
@@ -87,6 +93,7 @@
 | `limits` | nullable。配列のときは `window_minutes` 昇順 |
 | `used_pct` | 0–100。「使った割合」(JSON はこの意味のまま)。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト) |
+| `daily.tokens` / `session_today.tokens` | 課金対象トークン(`input` + `output`。`input` は cache write / cache read 込み)で、`session.tokens.total` および `cost_usd` と分母が同じ(#234)。`input` / `cached_input` / `output` の内訳を併せて持つ。Codex は `total_token_usage` の増分をそのまま使う |
 | `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算。Codex の daily は `token_count` イベント単位の増分をその時点の `turn_context.model` 単価で積算(セッション内のモデル切替に追随)。Codex の `fallback.estimated_cost_usd`(session cost)は累積値しか持たないため「現在モデル × 全累積」の概算 |
 
 ## データソース対応表
@@ -103,6 +110,7 @@
 
 Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`
 の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
+この規約は `session.tokens` / `session_today` / `daily` で共通(2.0)。
 `daily` は `projects` 配下の通常セッションに加え、同セッション配下の subagents / workflows
 transcript も集計する。ログディレクトリの走査自体に失敗したとき(データ未生成の
 「実在する 0」と区別できないとき)は `daily` を null にする(不明は null 原則)。`session_today` も現セッション transcript と、その同名セッション
@@ -117,6 +125,7 @@ transcript も集計する。ログディレクトリの走査自体に失敗し
 
 基準は初版 commit の v0.1(`credits` は初版から存在)。
 
+- `2.0`: `daily.tokens` / `session_today.tokens` の意味変更(cache read を除いた「新規トークン」→ cache read を含む課金対象トークン、#234)。追加(後方互換): `daily.input` / `daily.cached_input` / `daily.output`(`session_today` も同じ)
 - `1.0`: v0.1 のまま出荷されてきた追加と意味変更を版に反映
   - 追加(後方互換): `tool.daily`、`tool.session_today`、`session.transcript_path`、`model.effort`
   - 意味変更(メジャー要因): `stale` の閾値(15分 → Claude 60分 / Codex 5時間)、

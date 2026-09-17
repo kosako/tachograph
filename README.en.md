@@ -203,6 +203,10 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
 | `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
+
+Every `tokens` scope counts **billable tokens** (input + cache writes + cache
+reads + output), the same denominator as `cost` (since v0.5.0; before that,
+`tokens.all` / `tokens.session.today` counted "new" tokens without cache reads).
 | `cost` / `cost.session` | **current session** estimated cost, `$0.05` (the estimate Claude Code passes to the status line) |
 | `cost.session.today` | **current session, today only** estimated cost (Claude only), `$1.84` |
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
@@ -287,7 +291,8 @@ tacho config set tools codex            # show only Codex
 
 #### Cost price table (approximate, overridable)
 
-`cost` and `tokens` are **today's totals across all sessions**. For Claude Code,
+`cost` and `tokens` are **today's totals across all sessions** (`tokens` counts
+billable tokens, cache reads included — the same denominator as `cost`). For Claude Code,
 this includes regular sessions plus subagents / workflows transcripts under
 those sessions. Cost is estimated from a per-model price table (tokens × rate).
 Prices are rough, not exact, so override or extend them in
