@@ -164,8 +164,6 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
 | `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
 | `tokens.all` | **当日の全セッション合計**トークン、`12.7M/d`(`/d`=当日合計) |
-
-`tokens` 系はどのスコープも**課金対象トークン**(input + cache write + cache read + output)で、`cost` と同じ分母です(v0.5.0 以降。以前の `tokens.all` / `tokens.session.today` は cache read を除いた「新規トークン」でした)。
 | `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(statusline では Claude Code が渡す推定値) |
 | `cost.session.today` | **現セッションの当日分**推定コスト(Claudeのみ)、`$1.84` |
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
@@ -175,7 +173,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `stale` | 60分超で `⚠1h `(印+経過時間)、それ以外は空(Codexはライブ入力が無く、リミット枠が数時間有効なため5時間超で stale) |
 | `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
 
-`*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
+`tokens` 系はどのスコープも**課金対象トークン**(input + cache write + cache read + output)で、`cost` と同じ分母です(v0.5.0 以降。以前の `tokens.all` / `tokens.session.today` は cache read を除いた「新規トークン」でした)。`*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
 
 欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
 

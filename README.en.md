@@ -203,10 +203,6 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `tokens` / `tokens.session` | **current session** tokens, `989k` |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
 | `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
-
-Every `tokens` scope counts **billable tokens** (input + cache writes + cache
-reads + output), the same denominator as `cost` (since v0.5.0; before that,
-`tokens.all` / `tokens.session.today` counted "new" tokens without cache reads).
 | `cost` / `cost.session` | **current session** estimated cost, `$0.05` (the estimate Claude Code passes to the status line) |
 | `cost.session.today` | **current session, today only** estimated cost (Claude only), `$1.84` |
 | `cost.all` | **today's all-session** estimated cost (price-table based, approximate), `$1.20/d` |
@@ -216,6 +212,9 @@ reads + output), the same denominator as `cost` (since v0.5.0; before that,
 | `stale` | `⚠1h ` (marker + data age) when older than 60 minutes, else empty (Codex has no live feed and its limit windows stay valid for hours, so it goes stale after 5 hours) |
 | `age` | age of the data, `42s` / `5m` / `1h` / `3d` |
 
+Every `tokens` scope counts **billable tokens** (input + cache writes + cache
+reads + output), the same denominator as `cost` (since v0.5.0; before that,
+`tokens.all` / `tokens.session.today` counted "new" tokens without cache reads).
 `*.session.today` is Claude only — Codex's token counts are cumulative and
 can't be sliced to a single day, so it renders `--`.
 
