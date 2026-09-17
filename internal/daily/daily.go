@@ -21,17 +21,30 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// Totals is today's aggregate for one tool.
+// Totals is today's aggregate for one tool. Tokens is the billing volume —
+// input (cache writes and cache reads included) plus output, the same measure
+// as session.tokens.total — so it shares a denominator with Cost (#234).
 type Totals struct {
-	Tokens int64
-	Cost   float64
+	Tokens      int64 // Input + Output as the provider reports it
+	Input       int64 // incl. cache writes and cache reads
+	CachedInput int64 // cache reads within Input
+	Output      int64
+	Cost        float64
+}
+
+func (t *Totals) add(o Totals) {
+	t.Tokens += o.Tokens
+	t.Input += o.Input
+	t.CachedInput += o.CachedInput
+	t.Output += o.Output
+	t.Cost += o.Cost
 }
 
 // Schema packs Totals into the wire type. Cost is set only when non-zero (a
 // priced model was seen), so an unpriced model reads as "tokens known, cost
 // unknown" rather than "$0.00".
 func (t Totals) Schema() *schema.Daily {
-	d := &schema.Daily{Tokens: t.Tokens}
+	d := &schema.Daily{Tokens: t.Tokens, Input: t.Input, CachedInput: t.CachedInput, Output: t.Output}
 	if t.Cost > 0 {
 		c := t.Cost
 		d.CostUSD = &c
@@ -39,7 +52,7 @@ func (t Totals) Schema() *schema.Daily {
 	return d
 }
 
-// ClaudeSessionToday totals today's new tokens and estimated cost for one
+// ClaudeSessionToday totals today's tokens and estimated cost for one
 // Claude session transcript plus its nested subagent/workflow transcripts
 // (used for the {tool.*.session.today} scope). It reuses the same per-message
 // accounting as ClaudeTotals with a fresh dedup set for that session tree.
@@ -66,14 +79,13 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 		if err != nil {
 			return nil
 		}
-		out.Tokens += ft.Tokens
-		out.Cost += ft.Cost
+		out.add(ft)
 		return nil
 	})
 	return out
 }
 
-// ClaudeTotals sums today's new tokens and estimated cost across every Claude
+// ClaudeTotals sums today's tokens and estimated cost across every Claude
 // transcript message under <root>/projects. root defaults to CLAUDE_CONFIG_DIR
 // or ~/.claude.
 func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
@@ -119,8 +131,7 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, err
 			if err != nil {
 				return err
 			}
-			out.Tokens += ft.Tokens
-			out.Cost += ft.Cost
+			out.add(ft)
 			return nil
 		})
 		if err != nil {
@@ -149,8 +160,13 @@ func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageS
 		}
 		u := line.Message.Usage
 		cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := u.CacheWrites()
-		// New tokens exclude cache reads (same context re-read each message).
-		out.Tokens += u.InputTokens + cacheWriteTotal + u.OutputTokens
+		// Same convention as session.tokens: input is everything sent,
+		// cache reads included, so tokens and cost share a denominator.
+		in := u.InputTokens + cacheWriteTotal + u.CacheReadInputTokens
+		out.Input += in
+		out.CachedInput += u.CacheReadInputTokens
+		out.Output += u.OutputTokens
+		out.Tokens += in + u.OutputTokens
 		if r, ok := prices.For(line.Message.Model); ok {
 			out.Cost += claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 		}
@@ -166,7 +182,7 @@ func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnk
 		float64(out)*r.Out) / 1_000_000
 }
 
-// CodexTotals sums today's new tokens and estimated cost across Codex
+// CodexTotals sums today's tokens and estimated cost across Codex
 // sessions. root defaults to CODEX_HOME or ~/.codex. total_token_usage is
 // cumulative per session, so each session contributes its growth since local
 // midnight: the last cumulative snapshot minus the last snapshot before today
@@ -214,8 +230,7 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 		id, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok {
 			t := codexRolloutTotals(ro, prices)
-			out.Tokens += t.Tokens
-			out.Cost += t.Cost
+			out.add(t)
 			return
 		}
 		mergeCodexRollout(bySession, id, ro)
@@ -280,8 +295,7 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 	}
 	for _, ro := range bySession {
 		t := codexRolloutTotals(*ro, prices)
-		out.Tokens += t.Tokens
-		out.Cost += t.Cost
+		out.add(t)
 	}
 	return out, nil
 }
@@ -382,18 +396,23 @@ func codexRolloutTotals(ro codexRollout, prices pricing.Table) Totals {
 }
 
 // codexDeltaTotals prices the growth from before (nil = session started
-// today) to last. Tokens counts new tokens — cumulative total minus cached
-// input — the same measure the whole-session accounting used.
+// today) to last. Tokens is the growth of the cumulative total as Codex
+// reports it (cached input included), matching session.tokens.total.
 func codexDeltaTotals(model string, before, last *codex.TokenUsage, prices pricing.Table) Totals {
 	var b codex.TokenUsage
 	if before != nil {
 		b = *before
 	}
-	out := Totals{Tokens: clamp0((last.TotalTokens - last.CachedInputTokens) - (b.TotalTokens - b.CachedInputTokens))}
+	in := clamp0(last.InputTokens - b.InputTokens)
+	cached := clamp0(last.CachedInputTokens - b.CachedInputTokens)
+	outTok := clamp0(last.OutputTokens - b.OutputTokens)
+	out := Totals{
+		Tokens:      clamp0(last.TotalTokens - b.TotalTokens),
+		Input:       in,
+		CachedInput: cached,
+		Output:      outTok,
+	}
 	if r, ok := prices.For(model); ok {
-		in := clamp0(last.InputTokens - b.InputTokens)
-		cached := clamp0(last.CachedInputTokens - b.CachedInputTokens)
-		outTok := clamp0(last.OutputTokens - b.OutputTokens)
 		out.Cost = r.Cost(clamp0(in-cached), 0, cached, outTok)
 	}
 	return out

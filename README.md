@@ -164,6 +164,8 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
 | `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
 | `tokens.all` | **当日の全セッション合計**トークン、`12.7M/d`(`/d`=当日合計) |
+
+`tokens` 系はどのスコープも**課金対象トークン**(input + cache write + cache read + output)で、`cost` と同じ分母です(v0.5.0 以降。以前の `tokens.all` / `tokens.session.today` は cache read を除いた「新規トークン」でした)。
 | `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(statusline では Claude Code が渡す推定値) |
 | `cost.session.today` | **現セッションの当日分**推定コスト(Claudeのみ)、`$1.84` |
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
@@ -223,7 +225,7 @@ tacho config set tools codex               # Codexだけ表示
 
 #### コスト料金表(概算・上書き可)
 
-`cost` / `tokens` は**当日の全セッション合計**です。Claude Code は通常セッションに加え、その配下の subagents / workflows transcript も集計します。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):
+`cost` / `tokens` は**当日の全セッション合計**です(`tokens` は cache read を含む課金対象トークンで、`cost` と同じ分母)。Claude Code は通常セッションに加え、その配下の subagents / workflows transcript も集計します。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):
 
 ```json
 {
