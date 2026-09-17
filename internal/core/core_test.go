@@ -106,6 +106,56 @@ func TestStatusDropsSnapshotLimitsPastObservationCeiling(t *testing.T) {
 	}
 }
 
+// A snapshot older than the stale threshold still serves the account-level
+// values (limits, model), but its session-scoped values are unknown by then:
+// outside the statusline they would otherwise sit next to a daily total
+// recomputed right now (#235). A fresh snapshot keeps them as the most
+// recently observed session.
+func TestStatusDropsSessionValuesFromStaleSnapshot(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+
+	snapshotAt := func(age time.Duration) schema.Tool {
+		collected := now.Add(-age).Format(time.RFC3339)
+		pct, ctx, cost, tokens := 42.0, 24.0, 1.25, int64(4321)
+		id := "session-b"
+		return schema.Tool{
+			Tool:         schema.ToolClaudeCode,
+			Available:    true,
+			Backend:      schema.BackendSubscription,
+			CollectedAt:  &collected,
+			Model:        &schema.Model{ID: "claude-opus-5"},
+			Session:      &schema.Session{ID: &id, ContextUsedPct: &ctx, Tokens: &schema.Tokens{Total: tokens}},
+			Limits:       []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+			Fallback:     &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
+			SessionToday: &schema.Daily{Tokens: tokens, CostUSD: &cost},
+		}
+	}
+
+	stale := schema.StaleAfterMinutes*time.Minute + time.Minute
+	if err := cache.WriteSnapshot(snapshotAt(stale), now.Add(-stale)); err != nil {
+		t.Fatal(err)
+	}
+	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if !got.Stale {
+		t.Fatalf("Stale = false, want true for a %v-old snapshot", stale)
+	}
+	if got.Session != nil || got.Fallback != nil || got.SessionToday != nil {
+		t.Errorf("stale snapshot kept session-scoped values: session=%+v fallback=%+v session_today=%+v", got.Session, got.Fallback, got.SessionToday)
+	}
+	if got.Limits == nil || got.Model == nil {
+		t.Errorf("stale snapshot lost account-level values: limits=%+v model=%+v", got.Limits, got.Model)
+	}
+
+	if err := cache.WriteSnapshot(snapshotAt(time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got = Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Stale || got.Session == nil || *got.Session.ID != "session-b" || got.Fallback == nil || got.Fallback.EstimatedCostUSD == nil {
+		t.Errorf("fresh snapshot must keep the last observed session: %+v", got)
+	}
+}
+
 func TestAddCodexSessionCost(t *testing.T) {
 	tool := schema.Tool{
 		Tool:      schema.ToolCodex,
