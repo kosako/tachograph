@@ -15,7 +15,7 @@
 
 ```jsonc
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "generated_at": "2026-06-12T21:00:00+09:00",  // この JSON を生成した時刻
   "tools": [ /* ツールごとのエントリ。検出されないツールも available:false で常に載る */ ]
 }
