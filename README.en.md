@@ -154,7 +154,9 @@ Claude Code pipes its session JSON (model, context, rate limits) to
 `tacho statusline`, which prints one line combining it with Codex usage.
 As a side effect each invocation snapshots the Claude rate limits, so bare
 `tacho` / `tacho watch` in other terminals can show them too (kept as a
-last-known value for up to 30 days, shown as stale after 60 minutes).
+last-known value for up to 30 days, shown as stale after 60 minutes; ctx and
+the session's tokens / cost describe the most recently observed session, so
+they turn into `--` once stale).
 
 ### Customizing the status line
 

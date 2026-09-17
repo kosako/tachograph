@@ -121,7 +121,7 @@ PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusl
 
 うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・cmux/SwiftBar連携・statusLineの設定状況を診断します。
 
-Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります)。
+Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります。ctx / セッションのトークン・コストは「直近に観測したセッション」の値なので、stale になると `--` になります)。
 
 ### ステータスラインのカスタマイズ
 

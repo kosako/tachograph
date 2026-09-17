@@ -103,8 +103,20 @@ func AddSessionToday(t *schema.Tool, now time.Time, prices pricing.Table) {
 
 // claudeTool prefers a recent statusline snapshot (which carries rate
 // limits) over the transcript route (which cannot see them).
+//
+// Outside the statusline "session" can only mean the most recently observed
+// session, and that reading holds only while the snapshot is fresh. Once it
+// is stale the session-scoped values (session, fallback, session_today) are
+// dropped as unknown instead of being served next to a daily total that is
+// recomputed on every call (#235). The account-level rate limits, model,
+// plan, and credits keep the snapshot's 30-day retention.
 func claudeTool(opts Options) schema.Tool {
 	if snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now); ok {
+		if snap.Stale {
+			snap.Session = nil
+			snap.Fallback = nil
+			snap.SessionToday = nil
+		}
 		return *snap
 	}
 	return claude.Collect(claude.Options{Root: opts.ClaudeRoot, Now: opts.Now})
