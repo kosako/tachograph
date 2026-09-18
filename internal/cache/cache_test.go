@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -280,5 +281,39 @@ func TestSnapshotRejectsOtherSchemaVersion(t *testing.T) {
 	}
 	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
 		t.Error("ReadSnapshot accepted a different schema_version")
+	}
+}
+
+// The daily-history cache round-trips under its key and is a miss for another
+// key or schema version (a release or price change starts it over).
+func TestDailyHistoryRoundTripAndKey(t *testing.T) {
+	dir := setCacheDir(t)
+	if _, ok := ReadDailyHistory("k1"); ok {
+		t.Fatal("ReadDailyHistory hit on empty cache")
+	}
+	cost := 1.5
+	days := map[string]map[string]*schema.Daily{
+		"2026-07-03": {schema.ToolClaudeCode: {Tokens: 100, CostUSD: &cost}, schema.ToolCodex: {}},
+	}
+	if err := WriteDailyHistory("k1", days); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ReadDailyHistory("k1")
+	if !ok || got["2026-07-03"][schema.ToolClaudeCode].Tokens != 100 || *got["2026-07-03"][schema.ToolClaudeCode].CostUSD != 1.5 || got["2026-07-03"][schema.ToolCodex] == nil {
+		t.Fatalf("ReadDailyHistory = %+v, %v", got, ok)
+	}
+	if _, ok := ReadDailyHistory("k2"); ok {
+		t.Error("ReadDailyHistory hit for another key")
+	}
+
+	// Another schema version on disk is a miss.
+	path := filepath.Join(dir, "daily-history.json")
+	b, _ := os.ReadFile(path)
+	b = []byte(strings.Replace(string(b), `"schema_version":"`+schema.Version+`"`, `"schema_version":"0.1"`, 1))
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadDailyHistory("k1"); ok {
+		t.Error("ReadDailyHistory hit for another schema version")
 	}
 }

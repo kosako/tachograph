@@ -272,6 +272,16 @@ renderer.
 The dropdown lists every metric per tool (5h / weekly / context / cost /
 tokens); the menu bar shows the one you select.
 
+Below them, the **last 7 days of cost/tokens** appear one row per day
+(`09/17  C $150.76/179M  X $0.13/27k`). The figures are defined exactly like
+`tacho daily`, and today's row equals the cost / tokens rows above. Earlier
+days are computed once — on the first refresh after midnight, yesterday only —
+and kept in `daily-history.json` in the cache directory (`tacho doctor`
+prints where); anything older than 7 days is dropped. It is a derived cache
+that can always be rebuilt from the logs, is rebuilt when the tacho version or
+`pricing.json` changes, and can be deleted freely (the next refresh recreates
+it).
+
 The **Settings** submenu at the bottom picks values from a list (the current
 choice is check-marked):
 

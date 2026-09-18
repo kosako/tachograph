@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/config"
+	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
@@ -57,10 +58,14 @@ func ink() string {
 // cmd sets it to the running binary; tests keep the default.
 var BinPath = "tacho"
 
+// HistoryDays is how many days the dropdown history covers, today included
+// (#243). The closed days come from core.RecentHistory's rolling cache.
+const HistoryDays = 7
+
 // Render produces the full plugin output for one status document. dark
 // selects the menu bar appearance; cfg selects which tools, metric, and
-// display style to show.
-func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string {
+// display style to show; hist supplies the per-day rows (none when empty).
+func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist core.DailyHistory) string {
 	shown := cfg.FilterStatus(s)
 	limits := render.LimitDisplay(cfg.Limits.Display)
 
@@ -73,6 +78,7 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config) string
 		}
 		section(&b, t, now, limits)
 	}
+	history(&b, hist, cfg)
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
 	settings(&b, cfg)
@@ -262,6 +268,55 @@ func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.Lim
 	metricRow(b, t, render.MetricContext, "context", limits)
 	metricRow(b, t, render.MetricCost, "cost", limits)
 	metricRow(b, t, render.MetricTokens, "tokens", limits)
+}
+
+// history renders one row per day, oldest first, with each shown tool's
+// cost/tokens: the same figures as the cost / tokens rows above, for the
+// last HistoryDays days. Tools follow the config order; a tool without a
+// column is skipped, an unknown day reads "--".
+func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
+	if len(h.Days) == 0 {
+		return
+	}
+	b.WriteString("---\n")
+	fmt.Fprintf(b, "直近 %d 日の cost/tokens | color=%s size=11 %s\n", len(h.Days), colorGray, enableParams)
+	for i, day := range h.Days {
+		line := historyDay(day)
+		for _, name := range cfg.Tools {
+			col, ok := h.Tools[name]
+			if !ok {
+				continue
+			}
+			line += "  " + toolInitial(name) + " " + historyCell(col[i])
+		}
+		dataRow(b, line, ink())
+	}
+}
+
+// historyDay shortens a "2006-01-02" day key to MM/DD, as the reset times
+// are shown; a key in another shape is printed as is.
+func historyDay(day string) string {
+	t, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		return day
+	}
+	return t.Format("01/02")
+}
+
+// historyCell is one tool's cost/tokens for a day, padded so the columns
+// line up in the data font; nil (unknown) reads "--".
+func historyCell(d *schema.Daily) string {
+	if d == nil {
+		return fmt.Sprintf("%-14s", render.Missing)
+	}
+	return fmt.Sprintf("%7s/%-6s", render.DailyCost(d), render.FormatTokens(d.Tokens))
+}
+
+func toolInitial(name string) string {
+	if name == schema.ToolClaudeCode {
+		return "C"
+	}
+	return "X"
 }
 
 // barWidth is the gauge width for dropdown rows (space is not constrained

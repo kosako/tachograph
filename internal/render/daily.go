@@ -111,17 +111,18 @@ func toolShort(tool string) string {
 	return tool
 }
 
-// dailyCells formats one day's cost and tokens. A nil day is unknown. Cost
-// follows the daily contract — null means no priced model was seen — except
-// that a day with no tokens at all is an exact $0.00, not unknown.
+// dailyCells formats one day's cost and tokens. A nil day is unknown.
 func dailyCells(d *schema.Daily) []string {
 	if d == nil {
 		return []string{"--", "--"}
 	}
-	return []string{dailyCost(d), FormatTokens(d.Tokens)}
+	return []string{DailyCost(d), FormatTokens(d.Tokens)}
 }
 
-func dailyCost(d *schema.Daily) string {
+// DailyCost formats a day's cost. It follows the daily contract — null means
+// no priced model was seen — except that a day with no tokens at all is an
+// exact $0.00, not unknown.
+func DailyCost(d *schema.Daily) string {
 	switch {
 	case d.CostUSD != nil:
 		return fmt.Sprintf("$%.2f", *d.CostUSD)
@@ -165,5 +166,5 @@ func dailyCostSum(days []*schema.Daily) string {
 	if sum == nil {
 		return "--"
 	}
-	return dailyCost(sum)
+	return DailyCost(sum)
 }

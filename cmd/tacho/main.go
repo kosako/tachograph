@@ -147,7 +147,8 @@ func runSwiftbar(args []string) int {
 		}
 		return 0
 	}
-	fmt.Print(swiftbar.Render(s, now, dark, cfg))
+	hist := core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, buildVersion())
+	fmt.Print(swiftbar.Render(s, now, dark, cfg, hist))
 	return 0
 }
 

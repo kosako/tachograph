@@ -162,3 +162,101 @@ func historyColumn(days []string, totals map[string]daily.Totals, err error) []*
 	}
 	return col
 }
+
+// closedDayGrace is how long after local midnight a day is still treated as
+// open: a line stamped just before midnight can be flushed a moment after
+// it, and a day is only cached once it can no longer change.
+const closedDayGrace = 10 * time.Minute
+
+// RecentHistory returns the last n local days ending today, for the SwiftBar
+// dropdown (#243). Today's entries come from s (the live status) so the row
+// matches the rest of the dropdown; closed days come from a rolling cache in
+// the cache dir that is filled with the days it lacks — normally just
+// yesterday, once a day — and pruned to the window, so tacho never holds more
+// than n-1 days of history. A tool whose logs could not be read is not cached
+// (unknown is not a fact worth remembering) and is retried on the next call.
+// version keys the cache together with the schema version and the pricing
+// override, so a release or a price change recomputes instead of serving
+// figures `tacho daily` would no longer produce.
+func RecentHistory(opts Options, s schema.Status, n int, version string) DailyHistory {
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	today := daily.DayStart(opts.Now)
+	start := today.AddDate(0, 0, -(n - 1))
+	yesterday := daily.DayKey(today.AddDate(0, 0, -1))
+	inGrace := opts.Now.Sub(today) < closedDayGrace // yesterday may still get late lines
+	key := version + "|" + pricing.OverrideStamp()
+	tools := []string{schema.ToolClaudeCode, schema.ToolCodex}
+
+	// Cached closed days inside the window; older entries fall off here.
+	cached, _ := cache.ReadDailyHistory(key)
+	closed := map[string]map[string]*schema.Daily{}
+	for d := start; d.Before(today); d = d.AddDate(0, 0, 1) {
+		if c := cached[daily.DayKey(d)]; c != nil {
+			closed[daily.DayKey(d)] = c
+		}
+	}
+
+	// Recompute from the oldest closed day any tool is missing for, in one
+	// pass. Known results replace the cache; unknown ones leave it as is.
+	var missing time.Time
+	for d := start; d.Before(today) && missing.IsZero(); d = d.AddDate(0, 0, 1) {
+		for _, tool := range tools {
+			if closed[daily.DayKey(d)][tool] == nil {
+				missing = d
+				break
+			}
+		}
+	}
+	if !missing.IsZero() {
+		h := History(opts, missing, today)
+		store := false
+		for i, day := range h.Days {
+			for tool, col := range h.Tools {
+				if col[i] == nil {
+					continue
+				}
+				if closed[day] == nil {
+					closed[day] = map[string]*schema.Daily{}
+				}
+				closed[day][tool] = col[i]
+				store = store || !(inGrace && day == yesterday)
+			}
+		}
+		if store {
+			keep := map[string]map[string]*schema.Daily{}
+			for day, c := range closed {
+				if !(inGrace && day == yesterday) {
+					keep[day] = c
+				}
+			}
+			_ = cache.WriteDailyHistory(key, keep) // serving the live result matters more than caching it
+		}
+	}
+
+	out := DailyHistory{Tools: map[string][]*schema.Daily{}}
+	for d := start; !d.After(today); d = d.AddDate(0, 0, 1) {
+		out.Days = append(out.Days, daily.DayKey(d))
+	}
+	for _, tool := range tools {
+		col := make([]*schema.Daily, len(out.Days))
+		for i, day := range out.Days[:len(out.Days)-1] {
+			col[i] = closed[day][tool]
+		}
+		col[len(col)-1] = todayDaily(s, tool)
+		out.Tools[tool] = col
+	}
+	return out
+}
+
+// todayDaily is the tool's daily total as the status carries it: nil when
+// the tool is absent, errored, or its total is unknown.
+func todayDaily(s schema.Status, tool string) *schema.Daily {
+	for _, t := range s.Tools {
+		if t.Tool == tool && t.Available && t.Error == nil {
+			return t.Daily
+		}
+	}
+	return nil
+}
