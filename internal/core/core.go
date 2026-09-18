@@ -142,11 +142,23 @@ func History(opts Options, from, to time.Time) DailyHistory {
 	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
 		h.Days = append(h.Days, daily.DayKey(d))
 	}
-	claudeDays, err := daily.ClaudeDays(opts.ClaudeRoot, from, to, prices)
-	h.Tools[schema.ToolClaudeCode] = historyColumn(h.Days, claudeDays, err)
-	codexDays, err := daily.CodexDays(opts.CodexRoot, from, to, prices)
-	h.Tools[schema.ToolCodex] = historyColumn(h.Days, codexDays, err)
+	for _, tool := range historyTools {
+		totals, err := toolDays(tool, opts, from, to, prices)
+		h.Tools[tool] = historyColumn(h.Days, totals, err)
+	}
 	return h
+}
+
+// historyTools are the tools History and RecentHistory aggregate, in the
+// order Status lists them.
+var historyTools = []string{schema.ToolClaudeCode, schema.ToolCodex}
+
+// toolDays runs one tool's per-day aggregation over [from, to).
+func toolDays(tool string, opts Options, from, to time.Time, prices pricing.Table) (map[string]daily.Totals, error) {
+	if tool == schema.ToolCodex {
+		return daily.CodexDays(opts.CodexRoot, from, to, prices)
+	}
+	return daily.ClaudeDays(opts.ClaudeRoot, from, to, prices)
 }
 
 // historyColumn lays one tool's per-day totals out along days. A scan error
@@ -168,17 +180,22 @@ func historyColumn(days []string, totals map[string]daily.Totals, err error) []*
 // it, and a day is only cached once it can no longer change.
 const closedDayGrace = 10 * time.Minute
 
+// unknownRetry is how long a closed day whose logs could not be read stays
+// cached as unknown before it is recomputed, so a broken log directory costs
+// one scan per hour rather than one per tick, while a transient failure
+// (a transcript deleted between listing and reading) still heals.
+const unknownRetry = time.Hour
+
 // RecentHistory returns the last n local days ending today, for the SwiftBar
 // dropdown (#243). Today's entries come from s (the live status) so the row
 // matches the rest of the dropdown; closed days come from a rolling cache in
-// the cache dir that is filled with the days it lacks — normally just
-// yesterday, once a day — and pruned to the window, so tacho never holds more
-// than n-1 days of history. A tool whose logs could not be read is not cached
-// (unknown is not a fact worth remembering) and is retried on the next call.
-// version keys the cache together with the schema version and the pricing
-// override, so a release or a price change recomputes instead of serving
-// figures `tacho daily` would no longer produce.
-func RecentHistory(opts Options, s schema.Status, n int, version string) DailyHistory {
+// the cache dir that is filled, per tool, with the days it lacks — normally
+// just yesterday, once a day — and pruned to the window, so tacho never holds
+// more than n-1 days of history. build identifies the binary and keys the
+// cache together with the schema version and the pricing override, so a new
+// build or a price change recomputes instead of serving figures `tacho daily`
+// would no longer produce.
+func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHistory {
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
@@ -186,68 +203,81 @@ func RecentHistory(opts Options, s schema.Status, n int, version string) DailyHi
 	start := today.AddDate(0, 0, -(n - 1))
 	yesterday := daily.DayKey(today.AddDate(0, 0, -1))
 	inGrace := opts.Now.Sub(today) < closedDayGrace // yesterday may still get late lines
-	key := version + "|" + pricing.OverrideStamp()
-	tools := []string{schema.ToolClaudeCode, schema.ToolCodex}
+	key := build + "|" + pricing.OverrideStamp()
 
 	// Cached closed days inside the window; older entries fall off here.
 	cached, _ := cache.ReadDailyHistory(key)
-	closed := map[string]map[string]*schema.Daily{}
+	closed := map[string]map[string]cache.DailyHistoryEntry{}
 	for d := start; d.Before(today); d = d.AddDate(0, 0, 1) {
 		if c := cached[daily.DayKey(d)]; c != nil {
 			closed[daily.DayKey(d)] = c
 		}
 	}
 
-	// Recompute from the oldest closed day any tool is missing for, in one
-	// pass. Known results replace the cache; unknown ones leave it as is.
-	var missing time.Time
-	for d := start; d.Before(today) && missing.IsZero(); d = d.AddDate(0, 0, 1) {
-		for _, tool := range tools {
-			if closed[daily.DayKey(d)][tool] == nil {
+	// Per tool, recompute from the oldest closed day it lacks — or was last
+	// found unknown for long enough ago — up to today, in one pass. A day
+	// still inside the grace window is computed but not stored.
+	var prices pricing.Table
+	store := false
+	for _, tool := range historyTools {
+		var missing time.Time
+		for d := start; d.Before(today); d = d.AddDate(0, 0, 1) {
+			e, ok := closed[daily.DayKey(d)][tool]
+			if !ok || (e.Daily == nil && retryDue(e.CheckedAt, opts.Now)) {
 				missing = d
 				break
 			}
 		}
+		if missing.IsZero() {
+			continue
+		}
+		if prices == nil {
+			prices = pricing.Load()
+		}
+		totals, err := toolDays(tool, opts, missing, today, prices)
+		for d := missing; d.Before(today); d = d.AddDate(0, 0, 1) {
+			day := daily.DayKey(d)
+			e := cache.DailyHistoryEntry{CheckedAt: opts.Now.Format(time.RFC3339)}
+			if err == nil {
+				e.Daily = totals[day].Schema()
+			}
+			if closed[day] == nil {
+				closed[day] = map[string]cache.DailyHistoryEntry{}
+			}
+			closed[day][tool] = e
+			store = store || !(inGrace && day == yesterday)
+		}
 	}
-	if !missing.IsZero() {
-		h := History(opts, missing, today)
-		store := false
-		for i, day := range h.Days {
-			for tool, col := range h.Tools {
-				if col[i] == nil {
-					continue
-				}
-				if closed[day] == nil {
-					closed[day] = map[string]*schema.Daily{}
-				}
-				closed[day][tool] = col[i]
-				store = store || !(inGrace && day == yesterday)
+	if store {
+		keep := map[string]map[string]cache.DailyHistoryEntry{}
+		for day, c := range closed {
+			if !(inGrace && day == yesterday) {
+				keep[day] = c
 			}
 		}
-		if store {
-			keep := map[string]map[string]*schema.Daily{}
-			for day, c := range closed {
-				if !(inGrace && day == yesterday) {
-					keep[day] = c
-				}
-			}
-			_ = cache.WriteDailyHistory(key, keep) // serving the live result matters more than caching it
-		}
+		_ = cache.WriteDailyHistory(key, keep) // serving the live result matters more than caching it
 	}
 
 	out := DailyHistory{Tools: map[string][]*schema.Daily{}}
 	for d := start; !d.After(today); d = d.AddDate(0, 0, 1) {
 		out.Days = append(out.Days, daily.DayKey(d))
 	}
-	for _, tool := range tools {
+	for _, tool := range historyTools {
 		col := make([]*schema.Daily, len(out.Days))
 		for i, day := range out.Days[:len(out.Days)-1] {
-			col[i] = closed[day][tool]
+			col[i] = closed[day][tool].Daily
 		}
 		col[len(col)-1] = todayDaily(s, tool)
 		out.Tools[tool] = col
 	}
 	return out
+}
+
+// retryDue reports whether an unknown entry checked at checkedAt is old
+// enough to recompute; an unparsable time is retried right away.
+func retryDue(checkedAt string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, checkedAt)
+	return err != nil || now.Sub(t) >= unknownRetry
 }
 
 // todayDaily is the tool's daily total as the status carries it: nil when

@@ -292,14 +292,19 @@ func TestDailyHistoryRoundTripAndKey(t *testing.T) {
 		t.Fatal("ReadDailyHistory hit on empty cache")
 	}
 	cost := 1.5
-	days := map[string]map[string]*schema.Daily{
-		"2026-07-03": {schema.ToolClaudeCode: {Tokens: 100, CostUSD: &cost}, schema.ToolCodex: {}},
+	at := "2026-07-04T09:00:00+09:00"
+	days := map[string]map[string]DailyHistoryEntry{
+		"2026-07-03": {
+			schema.ToolClaudeCode: {Daily: &schema.Daily{Tokens: 100, CostUSD: &cost}, CheckedAt: at},
+			schema.ToolCodex:      {CheckedAt: at}, // unknown when checked
+		},
 	}
 	if err := WriteDailyHistory("k1", days); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := ReadDailyHistory("k1")
-	if !ok || got["2026-07-03"][schema.ToolClaudeCode].Tokens != 100 || *got["2026-07-03"][schema.ToolClaudeCode].CostUSD != 1.5 || got["2026-07-03"][schema.ToolCodex] == nil {
+	claude, codex := got["2026-07-03"][schema.ToolClaudeCode], got["2026-07-03"][schema.ToolCodex]
+	if !ok || claude.Daily == nil || claude.Daily.Tokens != 100 || *claude.Daily.CostUSD != 1.5 || claude.CheckedAt != at || codex.Daily != nil || codex.CheckedAt != at {
 		t.Fatalf("ReadDailyHistory = %+v, %v", got, ok)
 	}
 	if _, ok := ReadDailyHistory("k2"); ok {

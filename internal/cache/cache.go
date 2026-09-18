@@ -189,21 +189,28 @@ func writeJSON(name string, v any) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, name))
 }
 
+// DailyHistoryEntry is one tool's figure for one closed day in the rolling
+// history cache: Daily, or nil when the tool's logs could not be read at
+// CheckedAt (the caller retries after a while instead of every tick).
+type DailyHistoryEntry struct {
+	Daily     *schema.Daily `json:"daily"`
+	CheckedAt string        `json:"checked_at"` // RFC 3339
+}
+
 // dailyHistoryFile is the rolling cache of closed days behind the SwiftBar
 // history rows (#243). It is derived data: every entry can be recomputed
 // from the logs, it never holds more than the window's closed days, and it
-// is dropped whole when its key (binary version, schema, pricing override)
-// changes. Days map a local calendar day to each tool's totals; a tool
-// missing from a day was unknown when computed and is not remembered.
+// is dropped whole when its key (binary identity, schema, pricing override)
+// changes. Days map a local calendar day to each tool's entry.
 type dailyHistoryFile struct {
-	SchemaVersion string                              `json:"schema_version"`
-	Key           string                              `json:"key"`
-	Days          map[string]map[string]*schema.Daily `json:"days"`
+	SchemaVersion string                                  `json:"schema_version"`
+	Key           string                                  `json:"key"`
+	Days          map[string]map[string]DailyHistoryEntry `json:"days"`
 }
 
 // ReadDailyHistory returns the cached closed days when the file exists and
 // was written under the same key and schema version; otherwise nothing.
-func ReadDailyHistory(key string) (map[string]map[string]*schema.Daily, bool) {
+func ReadDailyHistory(key string) (map[string]map[string]DailyHistoryEntry, bool) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, false
@@ -220,6 +227,6 @@ func ReadDailyHistory(key string) (map[string]map[string]*schema.Daily, bool) {
 }
 
 // WriteDailyHistory replaces the cached closed days under key.
-func WriteDailyHistory(key string, days map[string]map[string]*schema.Daily) error {
+func WriteDailyHistory(key string, days map[string]map[string]DailyHistoryEntry) error {
 	return writeJSON("daily-history.json", dailyHistoryFile{SchemaVersion: schema.Version, Key: key, Days: days})
 }

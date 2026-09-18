@@ -126,17 +126,28 @@ func TestRecentHistoryRekeysAndRetriesUnknown(t *testing.T) {
 		t.Error("old key still readable, want it discarded")
 	}
 	cached, ok := cache.ReadDailyHistory("v2|")
-	if !ok || cached["2026-07-03"][schema.ToolClaudeCode] != nil || cached["2026-07-03"][schema.ToolCodex] == nil {
-		t.Errorf("v2 cache = %v, want codex cached and claude absent for yesterday", cached)
+	y := cached["2026-07-03"]
+	if !ok || y[schema.ToolClaudeCode].Daily != nil || y[schema.ToolClaudeCode].CheckedAt == "" || y[schema.ToolCodex].Daily == nil {
+		t.Errorf("v2 cache = %v, want codex known and claude unknown (with its check time) for yesterday", cached)
 	}
 
-	// Logs readable again: the missing tool is computed and cached.
-	h = RecentHistory(Options{ClaudeRoot: root, CodexRoot: codex, Now: now}, historyStatus(0), 3, "v2")
+	// Logs readable again but the unknown was checked moments ago: served
+	// as unknown without a rescan (one scan per unknownRetry, not per tick).
+	h = RecentHistory(Options{ClaudeRoot: root, CodexRoot: unreadableRoot(t), Now: now.Add(time.Minute)}, historyStatus(0), 3, "v2")
+	if h.Tools[schema.ToolClaudeCode][1] != nil {
+		t.Errorf("claude yesterday = %+v within the retry interval, want nil (not rescanned)", h.Tools[schema.ToolClaudeCode][1])
+	}
+	if got := h.Tools[schema.ToolCodex][1]; got == nil || got.Tokens != 0 {
+		t.Errorf("codex yesterday = %+v, want its cached zero (an unreadable root must not be rescanned)", got)
+	}
+
+	// Past the retry interval the missing tool is computed and cached.
+	h = RecentHistory(Options{ClaudeRoot: root, CodexRoot: unreadableRoot(t), Now: now.Add(unknownRetry)}, historyStatus(0), 3, "v2")
 	if got := claudeTokens(h, 1); got != 200 {
 		t.Errorf("claude yesterday after retry = %d, want 200", got)
 	}
 	cached, _ = cache.ReadDailyHistory("v2|")
-	if cached["2026-07-03"][schema.ToolClaudeCode] == nil {
+	if cached["2026-07-03"][schema.ToolClaudeCode].Daily == nil {
 		t.Error("claude yesterday not cached after the retry")
 	}
 }
@@ -167,7 +178,7 @@ func TestRecentHistoryGraceWindow(t *testing.T) {
 	}
 }
 
-func keys(m map[string]map[string]*schema.Daily) []string {
+func keys(m map[string]map[string]cache.DailyHistoryEntry) []string {
 	var out []string
 	for k := range m {
 		out = append(out, k)

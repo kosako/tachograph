@@ -278,9 +278,9 @@ Below them, the **last 7 days of cost/tokens** appear one row per day
 days are computed once — on the first refresh after midnight, yesterday only —
 and kept in `daily-history.json` in the cache directory (`tacho doctor`
 prints where); anything older than 7 days is dropped. It is a derived cache
-that can always be rebuilt from the logs, is rebuilt when the tacho version or
-`pricing.json` changes, and can be deleted freely (the next refresh recreates
-it).
+that can always be rebuilt from the logs, is rebuilt when the tacho binary
+(version) or `pricing.json` changes, and can be deleted freely (the next
+refresh recreates it).
 
 The **Settings** submenu at the bottom picks values from a list (the current
 choice is check-marked):
