@@ -1,7 +1,9 @@
-// Package daily aggregates today's usage across all of a tool's sessions.
-// It walks the same on-disk logs the collectors read, delegating log-format
-// parsing to the collector packages and keeping only the date filtering and
-// aggregation here.
+// Package daily aggregates usage per local calendar day across all of a
+// tool's sessions. It walks the same on-disk logs the collectors read,
+// delegating log-format parsing to the collector packages and keeping only
+// the date filtering and aggregation here. Nothing is stored: every call
+// recomputes from the logs, so a day only ever reflects what is still on
+// disk (#242).
 package daily
 
 import (
@@ -52,6 +54,20 @@ func (t Totals) Schema() *schema.Daily {
 	return d
 }
 
+// DayStart returns the local midnight that begins t's calendar day. Day
+// windows passed to ClaudeDays / CodexDays are built from it, so a window
+// boundary is always a local midnight (DST-safe: time.Date normalizes the
+// 23h / 25h days).
+func DayStart(t time.Time) time.Time {
+	l := t.Local()
+	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, l.Location())
+}
+
+// DayKey is the key ClaudeDays / CodexDays use for t's local calendar day.
+func DayKey(t time.Time) string {
+	return t.Local().Format("2006-01-02")
+}
+
 // ClaudeSessionToday totals today's tokens and estimated cost for one
 // Claude session transcript plus its nested subagent/workflow transcripts
 // (used for the {tool.*.session.today} scope). It reuses the same per-message
@@ -60,11 +76,13 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 	if transcriptPath == "" {
 		return Totals{}
 	}
-	day := now.Local().Format("2006-01-02")
+	from := DayStart(now)
+	to := from.AddDate(0, 0, 1)
 	seen := claude.UsageSet{}
+	days := map[string]Totals{}
 	// session_today has no unknown-vs-zero contract (unlike daily, #187): an
 	// unreadable transcript contributes nothing rather than nulling the value.
-	out, _ := claudeFileTotals(transcriptPath, day, prices, seen)
+	_ = claudeFileDays(transcriptPath, from, to, prices, seen, days)
 
 	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
 	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
@@ -72,30 +90,38 @@ func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Tab
 			return nil
 		}
 		info, err := f.Info()
-		if err != nil || info.ModTime().Local().Format("2006-01-02") != day {
+		if err != nil || info.ModTime().Before(from) {
 			return nil
 		}
-		ft, err := claudeFileTotals(path, day, prices, seen)
-		if err != nil {
-			return nil
-		}
-		out.add(ft)
+		_ = claudeFileDays(path, from, to, prices, seen, days)
 		return nil
 	})
-	return out
+	return days[DayKey(now)]
 }
 
 // ClaudeTotals sums today's tokens and estimated cost across every Claude
-// transcript message under <root>/projects. root defaults to CLAUDE_CONFIG_DIR
-// or ~/.claude.
+// transcript message under <root>/projects: the single-day case of
+// ClaudeDays, so today's figure is the same whichever entry point asks.
 func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
+	from := DayStart(now)
+	days, err := ClaudeDays(root, from, from.AddDate(0, 0, 1), prices)
+	if err != nil {
+		return Totals{}, err
+	}
+	return days[DayKey(now)], nil
+}
+
+// ClaudeDays sums tokens and estimated cost per local calendar day across
+// every Claude transcript message under <root>/projects, for the days in
+// [from, to) (local midnights, see DayStart). Days without usage are absent
+// from the result. root defaults to CLAUDE_CONFIG_DIR or ~/.claude.
+func ClaudeDays(root string, from, to time.Time, prices pricing.Table) (map[string]Totals, error) {
 	var ok bool
 	root, ok = agentpath.ClaudeRoot(root)
 	if !ok {
-		return Totals{}, errors.New("claude root could not be resolved")
+		return nil, errors.New("claude root could not be resolved")
 	}
-	day := now.Local().Format("2006-01-02")
-	var out Totals
+	out := map[string]Totals{}
 	// One dedup set spans every file so a response duplicated across files
 	// (resume/compaction copies prior turns forward) is also counted once.
 	seen := claude.UsageSet{}
@@ -103,10 +129,10 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, err
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Totals{}, nil // no sessions yet: a real zero, not unknown
+		return out, nil // no sessions yet: a real zero, not unknown
 	}
 	if err != nil {
-		return Totals{}, err // unknown total; callers keep daily null, not 0
+		return nil, err // unknown totals; callers keep daily null, not 0
 	}
 	for _, d := range dirs {
 		if !d.IsDir() {
@@ -115,47 +141,40 @@ func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, err
 		projectDir := filepath.Join(projects, d.Name())
 		err := filepath.WalkDir(projectDir, func(path string, f os.DirEntry, err error) error {
 			if err != nil {
-				return err // a listed entry we can't descend into: total is unknown
+				return err // a listed entry we can't descend into: totals are unknown
 			}
 			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
 				return nil
 			}
 			info, err := f.Info()
 			if err != nil {
-				return err // can't check the mtime filter: total is unknown
+				return err // can't check the mtime filter: totals are unknown
 			}
-			if info.ModTime().Local().Format("2006-01-02") != day {
-				return nil // only files touched today can hold today's messages
+			if info.ModTime().Before(from) {
+				return nil // a file last written before the window can't hold its messages
 			}
-			ft, err := claudeFileTotals(path, day, prices, seen)
-			if err != nil {
-				return err
-			}
-			out.add(ft)
-			return nil
+			return claudeFileDays(path, from, to, prices, seen, out)
 		})
 		if err != nil {
-			return Totals{}, err // unknown total; callers keep daily null, not 0
+			return nil, err // unknown totals; callers keep daily null, not 0
 		}
 	}
 	return out, nil
 }
 
-// claudeFileTotals sums one transcript's today entries into out, recording
-// counted responses in seen so the caller can dedup across files. A read
-// failure is an error: a transcript that was listed but can't be read means
-// the day's total is unknown, not smaller.
-func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageSet) (Totals, error) {
+// claudeFileDays sums one transcript's entries within [from, to) into days,
+// keyed by local calendar day, recording counted responses in seen so the
+// caller can dedup across files. A read failure is an error: a transcript
+// that was listed but can't be read means the totals are unknown, not
+// smaller.
+func claudeFileDays(path string, from, to time.Time, prices pricing.Table, seen claude.UsageSet, days map[string]Totals) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Totals{}, err
+		return err
 	}
-	var out Totals
 	claude.EachUsageLine(b, func(line claude.TranscriptLine) {
-		if !sameDay(line.Timestamp, day) {
-			return
-		}
-		if seen.Dup(line) {
+		day, ok := dayIn(line.Timestamp, from, to)
+		if !ok || seen.Dup(line) {
 			return
 		}
 		u := line.Message.Usage
@@ -163,15 +182,19 @@ func claudeFileTotals(path, day string, prices pricing.Table, seen claude.UsageS
 		// Same convention as session.tokens: input is everything sent,
 		// cache reads included, so tokens and cost share a denominator.
 		in := u.InputTokens + cacheWriteTotal + u.CacheReadInputTokens
-		out.Input += in
-		out.CachedInput += u.CacheReadInputTokens
-		out.Output += u.OutputTokens
-		out.Tokens += in + u.OutputTokens
+		var t Totals
+		t.Input = in
+		t.CachedInput = u.CacheReadInputTokens
+		t.Output = u.OutputTokens
+		t.Tokens = in + u.OutputTokens
 		if r, ok := prices.For(line.Message.Model); ok {
-			out.Cost += claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
+			t.Cost = claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 		}
+		acc := days[day]
+		acc.add(t)
+		days[day] = acc
 	})
-	return out, nil
+	return nil
 }
 
 func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
@@ -182,76 +205,99 @@ func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnk
 		float64(out)*r.Out) / 1_000_000
 }
 
-// CodexTotals sums today's tokens and estimated cost across Codex
-// sessions. root defaults to CODEX_HOME or ~/.codex. total_token_usage is
-// cumulative per session, so each session contributes its growth since local
-// midnight: the last cumulative snapshot minus the last snapshot before today
-// (zero for sessions started today). Rollouts live in their session's
-// START-day directory however long the session runs (#133, #188), so
-// candidates come from file mtime, not the directory date: only a file
-// modified today can hold today's growth.
+// CodexTotals sums today's tokens and estimated cost across Codex sessions:
+// the single-day case of CodexDays, so today's figure is the same whichever
+// entry point asks.
 func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
+	from := DayStart(now)
+	days, err := CodexDays(root, from, from.AddDate(0, 0, 1), prices)
+	if err != nil {
+		return Totals{}, err
+	}
+	return days[DayKey(now)], nil
+}
+
+// CodexDays sums tokens and estimated cost per local calendar day across
+// Codex sessions, for the days in [from, to) (local midnights, see
+// DayStart). Days without usage are absent from the result. root defaults to
+// CODEX_HOME or ~/.codex. total_token_usage is cumulative per session, so
+// each session contributes its growth within each day: the last cumulative
+// snapshot of the day minus the last snapshot before it (zero for sessions
+// started that day). Rollouts live in their session's START-day directory
+// however long the session runs (#133, #188), so candidates come from file
+// mtime, not the directory date: only a file modified since the window
+// opened can hold growth inside it.
+func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[string]Totals, error) {
 	var ok bool
 	root, ok = agentpath.CodexRoot(root)
 	if !ok {
-		return Totals{}, errors.New("codex root could not be resolved")
+		return nil, errors.New("codex root could not be resolved")
 	}
-	local := now.Local()
-	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
 	sessions := filepath.Join(root, "sessions")
-	todayDir := filepath.Join(sessions, local.Format("2006"), local.Format("01"), local.Format("02"))
 
-	// Today's directory must be listable when it exists: it holds today's
-	// sessions by default, so "can't list" means the total is unknown, not
-	// zero (#180) — the tree walk below skips non-directory entries silently.
-	if _, err := os.ReadDir(todayDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return Totals{}, err
+	// Each day directory in the window must be listable when it exists: it
+	// holds that day's sessions by default, so "can't list" means the totals
+	// are unknown, not zero (#180) — the tree walk below skips non-directory
+	// entries silently. The map also places timestamp-less rollouts on their
+	// own directory's day.
+	dayDirs := map[string]time.Time{}
+	window := map[string]bool{} // day keys inside [from, to)
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		dir := filepath.Join(sessions, d.Format("2006"), d.Format("01"), d.Format("02"))
+		if _, err := os.ReadDir(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		dayDirs[dir] = d
+		window[DayKey(d)] = true
 	}
 
 	files, err := codexRolloutFiles(sessions)
 	if err != nil {
-		return Totals{}, err // unknown total; callers keep daily null, not 0
+		return nil, err // unknown totals; callers keep daily null, not 0
 	}
 
-	var out Totals
-	// Dedup by session id (the UUID in the rollout filename) keeping the
-	// largest cumulative on each side of midnight, so a session that resumed
-	// into a second file isn't counted twice. Files without a parseable id
-	// can't be deduped and are summed as-is.
+	// Dedup by session id (the UUID in the rollout filename) so a session
+	// that resumed into a second file isn't counted twice. Files without a
+	// parseable id can't be deduped and are summed as-is (keyed by path).
 	bySession := map[string]*codexRollout{}
-	// addToday folds one today-modified rollout into the totals. Without any
-	// parsable timestamp the cumulative can't be split at midnight, so it is
-	// attributed to the file's own day directory (counted fully in today's
-	// directory, ignored elsewhere).
-	addToday := func(f codexRolloutFile, ro codexRollout) {
-		if ro.last == nil || (!ro.tsParsed && f.day != todayDir) {
+	// addRollout folds one window-modified rollout into its session. Without
+	// any parsable timestamp the cumulative can't be split across days, so it
+	// is attributed to the file's own day directory — as a snapshot at the
+	// end of that day — and ignored when the directory is outside the window.
+	addRollout := func(f codexRolloutFile, ro codexRollout) {
+		if ro.last == nil {
 			return
 		}
-		id, ok := codex.SessionID(filepath.Base(f.path))
+		if !ro.tsParsed {
+			day, ok := dayDirs[f.day]
+			if !ok {
+				return
+			}
+			ro.events = []codexTC{{ts: day.AddDate(0, 0, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model}}
+		}
+		key, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok {
-			t := codexRolloutTotals(ro, prices)
-			out.add(t)
-			return
+			key = f.path
 		}
-		mergeCodexRollout(bySession, id, ro)
+		mergeCodexRollout(bySession, key, ro)
 	}
 	var old []codexRolloutFile
 	for _, f := range files {
-		if f.mod.Before(dayStart) {
+		if f.mod.Before(from) {
 			old = append(old, f)
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, dayStart)
+		ro, err := codexRolloutUsage(f.path, from)
 		if err != nil {
-			return Totals{}, err // unknown total; callers keep daily null, not 0
+			return nil, err // unknown totals; callers keep daily null, not 0
 		}
-		addToday(f, ro)
+		addRollout(f, ro)
 	}
 	// The classification mtime is from enumeration and these are live
-	// sessions: re-stat each old file and count those appended past midnight
-	// since as today files after all (their content, not their mtime,
-	// decides the midnight split). This runs before base-linking so a
-	// promoted session's own delta base isn't skipped by ordering.
+	// sessions: re-stat each old file and count those appended since the
+	// window opened as candidates after all (their content, not their mtime,
+	// decides the day split). This runs before base-linking so a promoted
+	// session's own delta base isn't skipped by ordering.
 	var bases []codexRolloutFile
 	for _, f := range old {
 		info, err := os.Stat(f.path)
@@ -260,44 +306,91 @@ func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, erro
 			// classification instead of erroring, so long-dead junk (e.g. a
 			// dangling symlink in an ancient day directory) doesn't null the
 			// daily forever. If the file matters — it shares a session id
-			// with a today rollout — the linking pass reads it and surfaces
-			// the failure.
+			// with a candidate rollout — the linking pass reads it and
+			// surfaces the failure.
 			bases = append(bases, f)
 			continue
 		}
-		if info.ModTime().Before(dayStart) {
+		if info.ModTime().Before(from) {
 			bases = append(bases, f)
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, dayStart)
+		ro, err := codexRolloutUsage(f.path, from)
 		if err != nil {
-			return Totals{}, err // unknown total; callers keep daily null, not 0
+			return nil, err // unknown totals; callers keep daily null, not 0
 		}
-		addToday(f, ro)
+		addRollout(f, ro)
 	}
-	// A session resumed today carries its cumulative forward from an earlier
-	// file last written before midnight; that file holds the delta base (the
-	// last pre-midnight snapshot). Only files sharing a session id seen today
-	// can contribute, so only those are read.
+	// A session resumed inside the window carries its cumulative forward
+	// from an earlier file last written before the window opened; that file
+	// holds the delta base (the last pre-window snapshot). Only files sharing
+	// a session id seen in the window can contribute, so only those are read.
 	for _, f := range bases {
 		id, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok || bySession[id] == nil {
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, dayStart)
+		ro, err := codexRolloutUsage(f.path, from)
 		if err != nil {
-			return Totals{}, err // unknown total; callers keep daily null, not 0
+			return nil, err // unknown totals; callers keep daily null, not 0
 		}
 		if ro.last == nil || !ro.tsParsed {
 			continue
 		}
 		mergeCodexRollout(bySession, id, ro)
 	}
+
+	out := map[string]Totals{}
 	for _, ro := range bySession {
-		t := codexRolloutTotals(*ro, prices)
-		out.add(t)
+		for day, dayRo := range splitCodexRolloutByDay(*ro) {
+			if !window[day] {
+				continue // snapshots past the window's end
+			}
+			acc := out[day]
+			acc.add(codexRolloutTotals(dayRo, prices))
+			out[day] = acc
+		}
 	}
 	return out, nil
+}
+
+// splitCodexRolloutByDay slices one session's merged snapshots into a
+// rollout per local calendar day, so each day prices exactly like the
+// single-day computation: a day's delta base is the largest cumulative seen
+// before it (the pre-window base, then earlier days' snapshots), its last is
+// the largest snapshot within the day, and its events are the day's
+// snapshots. Snapshots are walked in emission order so a base carries the
+// model current at that point (#191). Days without a snapshot are absent.
+func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
+	events := append([]codexTC(nil), ro.events...)
+	sortCodexTC(events)
+	out := map[string]codexRollout{}
+	base, baseModel := ro.before, ro.beforeModel
+	model := ro.beforeModel // running last-seen turn_context model
+	for i := 0; i < len(events); {
+		day := DayKey(events[i].ts)
+		j := i
+		for j < len(events) && DayKey(events[j].ts) == day {
+			j++
+		}
+		var last *codex.TokenUsage
+		var lastModel string
+		for _, e := range events[i:j] {
+			if e.model != "" {
+				model = e.model
+			}
+			if last == nil || e.usage.TotalTokens > last.TotalTokens {
+				u := e.usage
+				last, lastModel = &u, model
+			}
+		}
+		out[day] = codexRollout{model: model, before: base, beforeModel: baseModel, last: last, tsParsed: true, events: events[i:j]}
+		if base == nil || last.TotalTokens > base.TotalTokens {
+			base, baseModel = last, lastModel
+		}
+		i = j
+	}
+	return out
 }
 
 // codexRolloutFile is one rollout candidate: its path, the day directory
@@ -431,12 +524,7 @@ func codexDeltaTotals(model string, before, last *codex.TokenUsage, prices prici
 // model, so a single-model day prices exactly like the endpoint computation
 // in codexDeltaTotals even when a cumulative component dips mid-day.
 func codexEventCost(events []codexTC, base *codex.TokenUsage, baseModel string, prices pricing.Table) float64 {
-	sort.SliceStable(events, func(i, j int) bool {
-		if events[i].ts.Equal(events[j].ts) {
-			return events[i].usage.TotalTokens < events[j].usage.TotalTokens
-		}
-		return events[i].ts.Before(events[j].ts)
-	})
+	sortCodexTC(events)
 	var prev codex.TokenUsage
 	if base != nil {
 		prev = *base
@@ -471,6 +559,17 @@ func codexEventCost(events []codexTC, base *codex.TokenUsage, baseModel string, 
 		cost += r.Cost(clamp0(in-cached), 0, cached, outTok)
 	}
 	return cost
+}
+
+// sortCodexTC restores emission order across resumed files: by timestamp,
+// with the cumulative total as the tie-break for equal times.
+func sortCodexTC(events []codexTC) {
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].ts.Equal(events[j].ts) {
+			return events[i].usage.TotalTokens < events[j].usage.TotalTokens
+		}
+		return events[i].ts.Before(events[j].ts)
+	})
 }
 
 func clamp0(v int64) int64 {
@@ -549,11 +648,13 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 	return ro, nil
 }
 
-// sameDay reports whether an RFC 3339 timestamp falls on the given local day.
-func sameDay(ts, day string) bool {
+// dayIn reports whether an RFC 3339 timestamp falls inside [from, to) and,
+// if so, which local calendar day it belongs to. An unparsable timestamp is
+// outside every window.
+func dayIn(ts string, from, to time.Time) (string, bool) {
 	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return false
+	if err != nil || t.Before(from) || !t.Before(to) {
+		return "", false
 	}
-	return t.Local().Format("2006-01-02") == day
+	return DayKey(t), true
 }

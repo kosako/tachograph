@@ -1,6 +1,9 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,5 +200,41 @@ func TestAddCodexSessionCostPreservesExistingEstimate(t *testing.T) {
 
 	if got := *tool.Fallback.EstimatedCostUSD; got != existing {
 		t.Errorf("EstimatedCostUSD = %v, want existing %v", got, existing)
+	}
+}
+
+// History lays each tool's per-day totals along the window, oldest first,
+// with zero days present and an unreadable tool left nil for every day.
+func TestHistoryAlignsDaysAndMarksUnknownTools(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
+	from, to := today.AddDate(0, 0, -2), today.AddDate(0, 0, 1)
+
+	// Codex fixture root has sessions; Claude root is a file, so its
+	// projects listing fails and the column is unknown.
+	claudeRoot := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(claudeRoot, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := History(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: today.Add(2 * time.Hour)}, from, to)
+
+	want := []string{"2026-07-02", "2026-07-03", "2026-07-04"}
+	if strings.Join(h.Days, ",") != strings.Join(want, ",") {
+		t.Fatalf("Days = %v, want %v", h.Days, want)
+	}
+	for _, tool := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
+		if len(h.Tools[tool]) != len(want) {
+			t.Fatalf("Tools[%s] has %d entries, want %d", tool, len(h.Tools[tool]), len(want))
+		}
+	}
+	for i, d := range h.Tools[schema.ToolClaudeCode] {
+		if d != nil {
+			t.Errorf("Claude day %d = %+v, want nil (projects unreadable)", i, d)
+		}
+	}
+	for i, d := range h.Tools[schema.ToolCodex] {
+		if d == nil || d.Tokens != 0 || d.CostUSD != nil {
+			t.Errorf("Codex day %d = %+v, want a zero Daily (fixture has no usage in the window)", i, d)
+		}
 	}
 }

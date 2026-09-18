@@ -27,8 +27,9 @@ window you have burned, when it resets, and what is currently running.
 ## Design principles
 
 1. **An instrument, not an observability platform.** No log accumulation, no
-   dashboards. Optimized for the quick glance (a single estimated daily cost
-   figure is the one exception).
+   dashboards. Optimized for the quick glance (the exceptions are the estimated
+   daily cost figure and `tacho daily`, a per-day listing recomputed from the
+   existing logs — tacho itself stores no history).
 2. **Collectors and renderers are separate.** The core emits a single unified
    JSON schema (`tacho status --json`); display targets are pluggable.
 3. **No resident daemon.** On-demand collection with a short-lived file cache.
@@ -103,6 +104,7 @@ To pin a specific version, use `tachograph@0.5.0` with npm or a tag like
 tacho                  # one-shot compact status, one line per agent
 tacho watch -n 5       # refresh continuously
 tacho status --json    # unified schema JSON (see docs/schema.md)
+tacho daily -days 30   # per-day estimated cost / tokens (default 30 days, recomputed from the logs)
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
 tacho cmux push|clear  # manage cmux sidebar pills manually
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
@@ -315,6 +317,39 @@ Claude transcript records 1-hour cache writes, they are priced at 2x the input
 rate. Models not in the price table are excluded from the cost calculation and
 don't count toward the total (if no priced model ran that day, cost shows as
 unknown, `--`).
+
+### Per-day cost / tokens (`tacho daily`)
+
+"How much did I use yesterday?" and "what did the last month look like?",
+as a table in the terminal.
+
+```sh
+tacho daily            # last 30 days
+tacho daily -days 7    # last 7 days
+```
+
+```
+day         claude $  claude tokens  codex $  codex tokens  total $
+2026-09-16   $138.28         126.9M    $0.14           21k  $138.42
+2026-09-17   $150.76           179M    $0.13           27k  $150.89
+2026-09-18    $46.08          23.9M    $0.00             0   $46.08
+-------------------------------------------------------------------
+total        $335.13         329.8M    $0.27           48k  $335.40
+```
+
+- The figures are defined exactly like the daily totals (`cost.all` /
+  `tokens.all`, the `/d` values in SwiftBar): today's row equals `daily` in
+  `tacho status`, and yesterday's row is what "today" was yesterday. The
+  tools shown follow the `tools` setting.
+- **tacho stores no history.** Every call recomputes from the Claude Code
+  transcripts and Codex session logs (a few seconds for 30 days), so the
+  table only ever shows what is still on disk: a day whose transcripts
+  Claude Code has deleted past its retention period reads smaller than it
+  was (that is what the footnote warns about). For long-term retention or
+  analysis, use a dedicated tool.
+- `--` means that tool's logs could not be read (unknown); 0 means the logs
+  hold no usage. Cost is `--` on a day without any priced model, as in the
+  daily totals.
 
 ### Codex TUI
 
