@@ -18,6 +18,7 @@ import (
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
+	"github.com/kosako/tachograph/internal/daily"
 	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/render"
@@ -61,6 +62,7 @@ const usage = `usage:
   tacho                 one-shot compact status
   tacho watch [-n sec]  refresh continuously
   tacho status --json   unified schema JSON (see docs/schema.md)
+  tacho daily [-days N] per-day cost / tokens for the last N days (default 30)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
   tacho version         print the installed version
   tacho cmux push       push status pills to the cmux sidebar once
@@ -83,6 +85,8 @@ func main() {
 		fmt.Println("tacho " + buildVersion())
 	case "status":
 		os.Exit(runStatus(args))
+	case "daily":
+		os.Exit(runDaily(args))
 	case "watch":
 		os.Exit(runWatch(args))
 	case "statusline":
@@ -346,6 +350,26 @@ func runOnce(args []string) int {
 	cfg := config.Load()
 	s := cfg.FilterStatus(core.Status(core.Options{Now: now, NoCache: *noCache}))
 	fmt.Println(render.StatusLines(s, now, style(*noColor, cfg)))
+	return 0
+}
+
+// runDaily prints the per-day table for the last N days ending today. The
+// figures are recomputed from the logs on every call — nothing is cached or
+// stored — so the table only ever shows what is still on disk (#242).
+func runDaily(args []string) int {
+	fs := flag.NewFlagSet("daily", flag.ExitOnError)
+	days := fs.Int("days", 30, "number of days to show, ending today")
+	fs.Parse(args)
+	if *days < 1 {
+		fmt.Fprintln(os.Stderr, "tacho: -days must be at least 1")
+		return 2
+	}
+
+	now := time.Now()
+	cfg := config.Load()
+	to := daily.DayStart(now).AddDate(0, 0, 1)
+	h := core.History(core.Options{Now: now}, to.AddDate(0, 0, -*days), to)
+	fmt.Print(render.DailyTable(h.Days, cfg.Tools, h.Tools))
 	return 0
 }
 

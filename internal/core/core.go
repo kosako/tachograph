@@ -121,3 +121,44 @@ func claudeTool(opts Options) schema.Tool {
 	}
 	return claude.Collect(claude.Options{Root: opts.ClaudeRoot, Now: opts.Now})
 }
+
+// DailyHistory is each tool's usage per local calendar day over a window,
+// oldest day first. Tools maps a tool name to one entry per day, aligned
+// with Days: a day without usage is a zero Daily, and a nil entry means the
+// tool's logs could not be read (unknown, not zero — the same contract as
+// Status's daily, #187).
+type DailyHistory struct {
+	Days  []string // "2006-01-02", oldest first
+	Tools map[string][]*schema.Daily
+}
+
+// History aggregates the days in [from, to) (local midnights, see
+// daily.DayStart) for both tools with the same accounting as Status's daily,
+// so today's row equals `tacho status` and yesterday's row is what today's
+// was. Nothing is cached: every call re-reads the logs (#242).
+func History(opts Options, from, to time.Time) DailyHistory {
+	prices := pricing.Load()
+	h := DailyHistory{Tools: map[string][]*schema.Daily{}}
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		h.Days = append(h.Days, daily.DayKey(d))
+	}
+	claudeDays, err := daily.ClaudeDays(opts.ClaudeRoot, from, to, prices)
+	h.Tools[schema.ToolClaudeCode] = historyColumn(h.Days, claudeDays, err)
+	codexDays, err := daily.CodexDays(opts.CodexRoot, from, to, prices)
+	h.Tools[schema.ToolCodex] = historyColumn(h.Days, codexDays, err)
+	return h
+}
+
+// historyColumn lays one tool's per-day totals out along days. A scan error
+// leaves every entry nil: the whole column is unknown, since a single
+// unreadable file can hold any of the days.
+func historyColumn(days []string, totals map[string]daily.Totals, err error) []*schema.Daily {
+	col := make([]*schema.Daily, len(days))
+	if err != nil {
+		return col
+	}
+	for i, d := range days {
+		col[i] = totals[d].Schema()
+	}
+	return col
+}

@@ -45,13 +45,15 @@ func claudeMsgCacheCreationTotal(ts time.Time, in, totalCC, cc5m, cc1h, cr, out 
 		ts.Format(time.RFC3339), in, totalCC, cr, out, cc5m, cc1h)
 }
 
-// TestSameDayLocalBoundary pins the local-day boundary used to slice "today":
+// TestDayInLocalBoundary pins the local-day boundary used to slice "today":
 // the first and last instant of the calendar day count, one second either side
-// does not. sameDay compares formatted calendar dates (no 24h arithmetic), so
-// this stays correct across DST transitions. Instants are built explicitly in
-// time.Local so the RFC 3339 offset matches what sameDay re-localizes to.
-func TestSameDayLocalBoundary(t *testing.T) {
-	day := "2026-06-28"
+// does not. The window is built from DayStart (time.Date in time.Local, no 24h
+// arithmetic), so this stays correct across DST transitions. Instants are
+// built explicitly in time.Local so the RFC 3339 offset matches what dayIn
+// re-localizes to.
+func TestDayInLocalBoundary(t *testing.T) {
+	from := DayStart(time.Date(2026, 6, 28, 12, 0, 0, 0, time.Local))
+	to := from.AddDate(0, 0, 1)
 	cases := []struct {
 		name string
 		ts   time.Time
@@ -64,9 +66,16 @@ func TestSameDayLocalBoundary(t *testing.T) {
 	}
 	for _, c := range cases {
 		ts := c.ts.Format(time.RFC3339)
-		if got := sameDay(ts, day); got != c.want {
-			t.Errorf("%s: sameDay(%q, %q) = %v, want %v", c.name, ts, day, got, c.want)
+		day, got := dayIn(ts, from, to)
+		if got != c.want {
+			t.Errorf("%s: dayIn(%q) = %v, want %v", c.name, ts, got, c.want)
 		}
+		if got && day != "2026-06-28" {
+			t.Errorf("%s: dayIn(%q) day = %q, want 2026-06-28", c.name, ts, day)
+		}
+	}
+	if _, got := dayIn("not a time", from, to); got {
+		t.Error("dayIn(unparsable) = true, want false")
 	}
 }
 
