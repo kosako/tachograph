@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kosako/tachograph/internal/schema"
@@ -259,4 +261,55 @@ func equalInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// A hand-edited file with unknown enum values still loads with the values
+// as written (the renderers fall back), and every ignored value is reported
+// by Warnings with what tacho shows instead (#230). A valid file has none.
+func TestLoadWarnsAboutUnknownValues(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	raw := `{"tools":["claude-code","cursor"],"menubar":{"style":"big","metric":"ctx"},"limits":{"display":"usage"},"notify":{"thresholds":[50,0,100]}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := Load()
+	if c.Limits.Display != "usage" || c.Menubar.Style != "big" || c.Menubar.Metric != "ctx" || len(c.Tools) != 2 {
+		t.Errorf("Load altered the written values: %+v", c)
+	}
+	if got := c.Notify.Thresholds; len(got) != 1 || got[0] != 50 {
+		t.Errorf("Notify.Thresholds = %v, want [50] (invalid dropped)", got)
+	}
+	want := []string{
+		`tools: "cursor" is not claude-code or codex — ignored`,
+		`menubar.style: "big" is not meter or number — shown as meter`,
+		`menubar.metric: "ctx" is not one of limit_5h, limit_weekly, cost, tokens — shown as --`,
+		`limits.display: "usage" is not remaining or used — shown as remaining`,
+		`notify.thresholds: 0 is not a whole percentage from 1 to 99 — dropped`,
+		`notify.thresholds: 100 is not a whole percentage from 1 to 99 — dropped`,
+	}
+	got := c.Warnings()
+	if len(got) != len(want) {
+		t.Fatalf("Warnings = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Warnings[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// The warnings never leak into the JSON that config show / Save emit.
+	if b, _ := json.Marshal(c); strings.Contains(string(b), "warning") {
+		t.Errorf("Warnings leaked into JSON: %s", b)
+	}
+
+	if err := Save(Default()); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Warnings(); len(got) != 0 {
+		t.Errorf("Warnings for a valid file = %q, want none", got)
+	}
+	if got := Default().Warnings(); len(got) != 0 {
+		t.Errorf("Warnings for defaults = %q, want none", got)
+	}
 }

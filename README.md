@@ -89,7 +89,7 @@ tacho daily -days 30   # 日ごとの推定コスト / トークン(既定 30 �
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
 tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
-tacho doctor           # インストール先・データソース・キャッシュ・連携の診断
+tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
 ```
 
 ```
