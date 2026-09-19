@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,22 @@ var defaults = map[string]Rate{
 
 // Table is the merged price table (overrides applied over defaults).
 type Table map[string]Rate
+
+// OverrideStamp identifies the user's pricing.json by its mtime and size
+// ("" when there is none), so a cache of priced figures can tell when the
+// override changed (#243). The built-in table is identified by the binary
+// version instead.
+func OverrideStamp() string {
+	dir := config.Dir()
+	if dir == "" {
+		return ""
+	}
+	info, err := os.Stat(filepath.Join(dir, "pricing.json"))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
+}
 
 // Load returns the built-in defaults merged with the user's pricing.json,
 // if present. Unparseable files are ignored (defaults stand).
