@@ -43,9 +43,11 @@ type Event struct {
 // event — for the deepest newly crossed threshold — and marks every crossed
 // threshold as announced, so a jump from 60% to 5% left says "5%" once
 // rather than once per threshold. A threshold re-arms when the headroom
-// rises back above it or the window's reset time changes. Tools that are
-// absent, errored, or stale are skipped and keep their record; thresholds
-// must already be normalized (see config.NormalizeThresholds).
+// rises back above it or the window's reset time changes. Only the 5h and
+// weekly windows are watched (a collector can report other window sizes);
+// tools that are absent, errored, or stale are skipped and keep their
+// record. thresholds must already be normalized (see
+// config.NormalizeThresholds).
 func Evaluate(s schema.Status, thresholds []int, st State) ([]Event, State) {
 	next := State{}
 	for k, w := range st {
@@ -60,7 +62,7 @@ func Evaluate(s schema.Status, thresholds []int, st State) ([]Event, State) {
 			continue
 		}
 		for _, l := range t.Limits {
-			if l.UsedPct == nil {
+			if l.UsedPct == nil || (l.Window != schema.WindowFiveHour && l.Window != schema.WindowWeekly) {
 				continue
 			}
 			key := t.Tool + "/" + l.Window

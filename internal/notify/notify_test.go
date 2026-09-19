@@ -89,6 +89,13 @@ func TestEvaluateSkipsAndPreservesState(t *testing.T) {
 	if ev, _ := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 99, 99, "")), nil, State{}); len(ev) != 0 {
 		t.Errorf("no thresholds: events = %+v, want none", ev)
 	}
+	// Only the 5h and weekly windows are watched: a collector-reported odd
+	// window size (e.g. Codex with an unexpected window_minutes) is ignored.
+	used := 99.0
+	odd := schema.Tool{Tool: schema.ToolCodex, Available: true, Limits: []schema.Limit{{Window: "6h", UsedPct: &used}}}
+	if ev, st := Evaluate(status(odd), th, State{}); len(ev) != 0 || len(st) != 0 {
+		t.Errorf("odd window: events = %+v, state = %+v, want none", ev, st)
+	}
 	// Re-arm through the same state must not have touched the caller's copy.
 	Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 10, 0, "")), th, st)
 	if got := st["claude-code/5h"].Notified; len(got) != len(before) || got[0] != before[0] {
