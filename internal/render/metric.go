@@ -8,8 +8,8 @@ import (
 
 // Metric identifiers selectable for display.
 const (
-	MetricLimit5h     = "limit_5h"     // 5-hour rate-limit headroom % (what's left)
-	MetricLimitWeekly = "limit_weekly" // weekly rate-limit headroom % (what's left)
+	MetricLimit5h     = "limit_5h"     // 5-hour rate-limit % (headroom, or use per limits.display)
+	MetricLimitWeekly = "limit_weekly" // weekly rate-limit % (headroom, or use per limits.display)
 	MetricContext     = "context"      // context window usage %
 	MetricCost        = "cost"         // estimated daily API cost
 	MetricTokens      = "tokens"       // daily token count
