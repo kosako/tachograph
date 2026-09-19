@@ -301,6 +301,31 @@ tacho config set limits.display used    # 5h / weekly as usage instead of headro
 tacho config set tools codex            # show only Codex
 ```
 
+#### Headroom notifications (off by default)
+
+When a 5h / weekly window's headroom drops to a percentage you set, tacho
+raises a macOS notification. There is no daemon: the check rides on
+SwiftBar's 30-second refresh, so notifications only happen **while the
+SwiftBar plugin is running** (the status line and `tacho` never notify).
+
+```sh
+tacho config set notify.thresholds 50,30,10   # notify at 50% / 30% / 10% left
+tacho config set notify.thresholds ""         # off (the default)
+```
+
+- Thresholds are "% left" (whole numbers 1–99, several allowed). They stay
+  headroom figures even when `limits.display` shows usage, and so does the
+  notification text.
+- One list applies to every shown tool (`tools`) × 5h / weekly. The text names
+  both, e.g. `Claude weekly: 28% left · resets ↻09/20`.
+- Each (tool, window, threshold) fires **once per reset cycle**; it re-arms
+  when the headroom rises back above the threshold or the reset time changes.
+  Dropping past several thresholds at once fires only the deepest one.
+- Stale values never fire. A notification that fails to send is retried on
+  the next refresh.
+- What has been announced is kept in `notify-state.json` in the cache
+  directory; deleting it only means one more notification.
+
 #### Cost price table (approximate, overridable)
 
 `cost` and `tokens` are **today's totals across all sessions** (`tokens` counts

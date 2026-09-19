@@ -224,6 +224,21 @@ tacho config set limits.display used       # 5h / weekly を残量→使用率�
 tacho config set tools codex               # Codexだけ表示
 ```
 
+#### 残量の通知(既定オフ)
+
+5h / weekly の残量が設定した % まで下がったら、macOS の通知で知らせます。常駐プロセスはなく、SwiftBar の 30 秒更新に便乗して判定するので、**SwiftBar でプラグインが動いているときだけ**通知されます(ステータスラインや `tacho` からは通知しません)。
+
+```sh
+tacho config set notify.thresholds 50,30,10   # 残り 50% / 30% / 10% で通知
+tacho config set notify.thresholds ""         # オフ(既定)
+```
+
+- 閾値は「残り %」(1〜99 の整数、複数可)。`limits.display` が使用率表示でも、閾値と通知文は残量で統一です
+- 表示しているツール(`tools`)× 5h / weekly の全部に同じ閾値が効きます。通知文は `Claude weekly: 28% left · resets ↻09/20` のようにツールと枠を含みます
+- 同じ (ツール, 枠, 閾値) は**リセット周期ごとに 1 回**だけ鳴ります。残量が閾値を上回るか、リセット時刻が変わると再び鳴るようになります。一度に複数の閾値を跨いだときは最も深い 1 つだけ鳴ります
+- stale(古い)値からは鳴りません。通知の送信に失敗した場合は次の更新で再試行します
+- 通知の既読状態は `notify-state.json`(キャッシュ dir)に持ちます。消しても再び 1 回鳴るだけです
+
 #### コスト料金表(概算・上書き可)
 
 `cost` / `tokens` は**当日の全セッション合計**です(`tokens` は cache read を含む課金対象トークンで、`cost` と同じ分母)。Claude Code は通常セッションに加え、その配下の subagents / workflows transcript も集計します。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):

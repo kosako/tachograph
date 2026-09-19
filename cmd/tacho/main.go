@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/daily"
 	"github.com/kosako/tachograph/internal/menubar"
+	"github.com/kosako/tachograph/internal/notify"
 	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
@@ -157,7 +159,30 @@ func runSwiftbar(args []string) int {
 	}
 	hist := core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, build)
 	fmt.Print(swiftbar.Render(s, now, dark, cfg, hist))
+	notifyLimits(shown, cfg, now)
 	return 0
+}
+
+// notifyLimits raises the headroom notifications (#244) for the tools on
+// display. It only runs under SwiftBar — SWIFTBAR_PLUGIN_PATH is the
+// running plugin file — and only when thresholds are configured. A failed
+// `open` is not fatal to the tick; the window is retried next time.
+//
+// The plugin is identified to swiftbar://notify by its full, symlink-resolved
+// path: that is the plugin id SwiftBar matches first in every version. The
+// bare file name the README suggests only matches from SwiftBar 2.1.2 on;
+// 2.1.1 drops such a notification silently (without ever asking macOS for
+// notification permission).
+func notifyLimits(shown schema.Status, cfg config.Config, now time.Time) {
+	plugin := os.Getenv("SWIFTBAR_PLUGIN_PATH")
+	if plugin == "" || len(cfg.Notify.Thresholds) == 0 {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(plugin); err == nil {
+		plugin = resolved
+	}
+	st := notify.Run(shown, cfg.Notify.Thresholds, notify.LoadState(), plugin, now, notify.Open)
+	_ = notify.SaveState(st) // the notification was already sent; a lost record only risks a repeat
 }
 
 const configUsage = `usage:
@@ -172,6 +197,8 @@ keys:
   menubar.style   meter | number
   menubar.metric  ` + "limit_5h | limit_weekly | cost | tokens" + `
   limits.display  remaining | used  (what 5h / weekly percentages show)
+  notify.thresholds  comma-separated "% left" values, e.g. 50,30,10 (SwiftBar
+                  notifies when a 5h / weekly window drops to one; empty = off)
 `
 
 func runConfig(args []string) int {
@@ -319,6 +346,21 @@ func configSet(key, val string) int {
 			return 2
 		}
 		c.Limits.Display = val
+	case "notify.thresholds":
+		thresholds := []int{} // non-nil so "off" persists as [] rather than null
+		for _, f := range strings.Split(val, ",") {
+			f = strings.TrimSpace(f)
+			if f == "" {
+				continue
+			}
+			n, err := strconv.Atoi(f)
+			if err != nil || !config.ValidThreshold(n) {
+				fmt.Fprintf(os.Stderr, "tacho: invalid threshold %q (want whole percentages from 1 to 99, e.g. 50,30,10)\n", f)
+				return 2
+			}
+			thresholds = append(thresholds, n)
+		}
+		c.Notify.Thresholds = config.NormalizeThresholds(thresholds)
 	default:
 		fmt.Fprintf(os.Stderr, "tacho: unknown key %q\n", key)
 		fmt.Fprint(os.Stderr, configUsage)

@@ -161,6 +161,26 @@ func readSnapshotFile(tool string) (*snapshotFile, bool) {
 	return &snap, true
 }
 
+// ReadJSON decodes the named cache file into v. False when the file is
+// missing or not valid JSON for v.
+func ReadJSON(name string, v any) bool {
+	dir, err := Dir()
+	if err != nil {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(b, v) == nil
+}
+
+// WriteJSON writes v as the named cache file, tmp-file + rename so
+// concurrent readers never see partial JSON.
+func WriteJSON(name string, v any) error {
+	return writeJSON(name, v)
+}
+
 func writeJSON(name string, v any) error {
 	dir, err := Dir()
 	if err != nil {
