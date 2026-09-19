@@ -164,16 +164,24 @@ func runSwiftbar(args []string) int {
 }
 
 // notifyLimits raises the headroom notifications (#244) for the tools on
-// display. It only runs under SwiftBar — SWIFTBAR_PLUGIN_PATH names the
-// plugin file the notification is attributed to — and only when thresholds
-// are configured. A failed `open` is not fatal to the tick; the window is
-// retried next time.
+// display. It only runs under SwiftBar — SWIFTBAR_PLUGIN_PATH is the
+// running plugin file — and only when thresholds are configured. A failed
+// `open` is not fatal to the tick; the window is retried next time.
+//
+// The plugin is identified to swiftbar://notify by its full, symlink-resolved
+// path: that is the plugin id SwiftBar matches first in every version. The
+// bare file name the README suggests only matches from SwiftBar 2.1.2 on;
+// 2.1.1 drops such a notification silently (without ever asking macOS for
+// notification permission).
 func notifyLimits(shown schema.Status, cfg config.Config, now time.Time) {
 	plugin := os.Getenv("SWIFTBAR_PLUGIN_PATH")
 	if plugin == "" || len(cfg.Notify.Thresholds) == 0 {
 		return
 	}
-	st := notify.Run(shown, cfg.Notify.Thresholds, notify.LoadState(), filepath.Base(plugin), now, notify.Open)
+	if resolved, err := filepath.EvalSymlinks(plugin); err == nil {
+		plugin = resolved
+	}
+	st := notify.Run(shown, cfg.Notify.Thresholds, notify.LoadState(), plugin, now, notify.Open)
 	_ = notify.SaveState(st) // the notification was already sent; a lost record only risks a repeat
 }
 

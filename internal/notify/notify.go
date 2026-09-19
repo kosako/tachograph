@@ -119,8 +119,8 @@ func Body(ev Event, now time.Time) string {
 	return body
 }
 
-// URL builds the swiftbar://notify URL for an event. plugin is the running
-// plugin's file name, which SwiftBar uses to attribute the notification.
+// URL builds the swiftbar://notify URL for an event. plugin identifies the
+// running plugin to SwiftBar (its full path, see cmd's notifyLimits).
 func URL(ev Event, plugin string, now time.Time) string {
 	q := url.Values{}
 	q.Set("plugin", plugin)

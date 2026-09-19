@@ -118,8 +118,8 @@ func TestBodyAndURL(t *testing.T) {
 	if got := Body(ev, now); got != "Codex weekly: 28% left" {
 		t.Errorf("Body without reset = %q", got)
 	}
-	u := URL(ev, "tacho.30s.sh", now)
-	if !strings.HasPrefix(u, "swiftbar://notify?") || !strings.Contains(u, "plugin=tacho.30s.sh") ||
+	u := URL(ev, "/Users/me/.config/swiftbar/plugins/tacho.30s.sh", now)
+	if !strings.HasPrefix(u, "swiftbar://notify?") || !strings.Contains(u, "plugin=%2FUsers%2Fme%2F.config%2Fswiftbar%2Fplugins%2Ftacho.30s.sh") ||
 		!strings.Contains(u, "body=Codex%20weekly%3A%2028%25%20left") || strings.Contains(u, "+") {
 		t.Errorf("URL = %q", u)
 	}
