@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -107,8 +108,10 @@ func TestBodyAndURL(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-09-19T10:00:00+09:00")
 	resets := "2026-09-19T14:30:00+09:00"
 	ev := Event{Tool: schema.ToolClaudeCode, Window: schema.WindowWeekly, Remaining: 28.4, Threshold: 30, ResetsAt: &resets}
-	if got := Body(ev, now); got != "Claude weekly: 28% left · resets ↻14:30" {
-		t.Errorf("Body = %q", got)
+	// The reset time renders in the runner's local zone (render.ResetShort);
+	// build the expectation the same way so this holds on any CI timezone.
+	if got, want := Body(ev, now), "Claude weekly: 28% left · resets "+render.ResetShort(resets, now); got != want {
+		t.Errorf("Body = %q, want %q", got, want)
 	}
 	ev.ResetsAt = nil
 	ev.Tool = schema.ToolCodex
