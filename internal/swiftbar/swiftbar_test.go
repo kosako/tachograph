@@ -359,10 +359,10 @@ func TestRenderHistory(t *testing.T) {
 
 	out := Render(s, now, true, config.Default(), hist)
 	for _, want := range []string{
-		"直近 3 日の cost/tokens | color=" + colorGray,
-		"07/02  C   $3.21/12.3M   X --             | font=" + dataFont,
+		"直近 3 日の cost/tokens(青 = cost 上位 3 日) | color=" + colorGray,
+		"07/02  C " + ansiBlue + "  $3.21/12.3M " + ansiReset + "  X --             | font=" + dataFont + " color=" + ink() + " ansi=true ",
 		"07/03  C   $0.00/0       X      --/900k   | font=" + dataFont,
-		"07/04  C  $12.30/59M     X   $4.10/20.4M  | font=" + dataFont,
+		"07/04  C " + ansiBlue + " $12.30/59M   " + ansiReset + "  X " + ansiBlue + "  $4.10/20.4M " + ansiReset + " | font=" + dataFont,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history row %q missing in:\n%s", want, out)
@@ -373,11 +373,36 @@ func TestRenderHistory(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools = []string{schema.ToolCodex}
 	only := Render(s, now, true, cfg, hist)
-	if !strings.Contains(only, "07/04  X   $4.10/20.4M  | font=") || strings.Contains(only, "07/04  C") {
+	if !strings.Contains(only, "07/04  X "+ansiBlue+"  $4.10/20.4M "+ansiReset+" | font=") || strings.Contains(only, "07/04  C") {
 		t.Errorf("codex-only history rows wrong:\n%s", only)
 	}
 
 	if none := Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") {
 		t.Errorf("empty history should add no section:\n%s", none)
+	}
+}
+
+// Only known, non-zero costs compete for the highlight; at most historyTop
+// days per tool are picked, ties keeping the earlier day.
+func TestTopCostDays(t *testing.T) {
+	col := []*schema.Daily{
+		{Tokens: 1, CostUSD: usd(5)},
+		nil,         // unknown
+		{},          // no usage
+		{Tokens: 1}, // cost unknown
+		{Tokens: 1, CostUSD: usd(9)},
+		{Tokens: 1, CostUSD: usd(9)}, // tie: the earlier day (index 4) ranks first
+		{Tokens: 1, CostUSD: usd(7)},
+		{Tokens: 1, CostUSD: usd(1)},
+	}
+	got := topCostDays(col, 3)
+	if len(got) != 3 || !got[4] || !got[5] || !got[6] {
+		t.Errorf("topCostDays = %v, want {4 5 6}", got)
+	}
+	if got := topCostDays(col[:2], 3); len(got) != 1 || !got[0] {
+		t.Errorf("topCostDays(short) = %v, want {0}", got)
+	}
+	if got := topCostDays(nil, 3); len(got) != 0 {
+		t.Errorf("topCostDays(nil) = %v, want empty", got)
 	}
 }

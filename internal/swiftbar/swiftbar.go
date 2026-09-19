@@ -7,6 +7,7 @@ package swiftbar
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -270,16 +271,36 @@ func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.Lim
 	metricRow(b, t, render.MetricTokens, "tokens", limits)
 }
 
+// historyTop is how many of a tool's costliest days the history rows
+// highlight (#247).
+const historyTop = 3
+
+// ANSI SGR codes for the highlight. SwiftBar maps 34 to NSColor.systemBlue,
+// which adapts to the menu appearance, and 0 restores the row's own font —
+// bold (SGR 1) is not used because SwiftBar renders it in the system font,
+// which would knock the monospace columns out of line.
+const (
+	ansiBlue  = "\x1b[34m"
+	ansiReset = "\x1b[0m"
+)
+
 // history renders one row per day, oldest first, with each shown tool's
 // cost/tokens: the same figures as the cost / tokens rows above, for the
 // last HistoryDays days. Tools follow the config order; a tool without a
-// column is skipped, an unknown day reads "--".
+// column is skipped, an unknown day reads "--". Each tool's historyTop
+// costliest days are shown in blue so the heavy days stand out.
 func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 	if len(h.Days) == 0 {
 		return
 	}
 	b.WriteString("---\n")
-	fmt.Fprintf(b, "直近 %d 日の cost/tokens | color=%s size=11 %s\n", len(h.Days), colorGray, enableParams)
+	fmt.Fprintf(b, "直近 %d 日の cost/tokens(青 = cost 上位 %d 日) | color=%s size=11 %s\n", len(h.Days), historyTop, colorGray, enableParams)
+	top := map[string]map[int]bool{}
+	for _, name := range cfg.Tools {
+		if col, ok := h.Tools[name]; ok {
+			top[name] = topCostDays(col, historyTop)
+		}
+	}
 	for i, day := range h.Days {
 		line := historyDay(day)
 		for _, name := range cfg.Tools {
@@ -287,10 +308,31 @@ func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 			if !ok {
 				continue
 			}
-			line += "  " + toolInitial(name) + " " + historyCell(col[i])
+			cell := historyCell(col[i])
+			if top[name][i] {
+				cell = ansiBlue + cell + ansiReset
+			}
+			line += "  " + toolInitial(name) + " " + cell
 		}
-		dataRow(b, line, ink())
+		fmt.Fprintf(b, "%s | font=%s color=%s ansi=true %s\n", line, dataFont, ink(), enableParams)
 	}
+}
+
+// topCostDays picks the indexes of the n costliest days in col. Only days
+// with a known, non-zero cost qualify; ties keep the earlier day.
+func topCostDays(col []*schema.Daily, n int) map[int]bool {
+	var idx []int
+	for i, d := range col {
+		if d != nil && d.CostUSD != nil && *d.CostUSD > 0 {
+			idx = append(idx, i)
+		}
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return *col[idx[a]].CostUSD > *col[idx[b]].CostUSD })
+	out := map[int]bool{}
+	for _, i := range idx[:min(n, len(idx))] {
+		out[i] = true
+	}
+	return out
 }
 
 // historyDay shortens a "2006-01-02" day key to MM/DD, as the reset times
