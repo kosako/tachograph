@@ -53,6 +53,9 @@ func runDoctor(args []string) int {
 
 	fmt.Println("config (" + config.Dir() + "):")
 	reportJSONFile("config.json", filepath.Join(config.Dir(), "config.json"))
+	for _, w := range configValueWarnings() {
+		fmt.Println("    warning:  " + w)
+	}
 	reportFile("statusline.tmpl", filepath.Join(config.Dir(), "statusline.tmpl"))
 	reportJSONFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"))
 	fmt.Println()
@@ -331,6 +334,18 @@ func reportFile(label, path string) {
 	} else {
 		fmt.Println("  " + label + ":  (default)")
 	}
+}
+
+// configValueWarnings lists the config.json values the read path ignores
+// (unknown tools, styles, metrics, limit displays, out-of-range thresholds)
+// with what tacho shows instead (#230). Nothing when the file is missing or
+// isn't valid JSON — reportJSONFile covers those.
+func configValueWarnings() []string {
+	c, err := config.LoadStrict()
+	if err != nil {
+		return nil
+	}
+	return c.Warnings()
 }
 
 // reportJSONFile is reportFile plus a syntax check, so a broken config.json /

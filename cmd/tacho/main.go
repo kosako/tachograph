@@ -217,6 +217,11 @@ func runConfig(args []string) int {
 		if err != nil {
 			return 1
 		}
+		// Values no renderer understands are kept in the JSON as written;
+		// say what tacho does with them instead (#230).
+		for _, w := range c.Warnings() {
+			fmt.Fprintln(os.Stderr, "tacho: config warning:", w)
+		}
 		return 0
 	case "path":
 		fmt.Println(config.Path())
@@ -243,7 +248,7 @@ func runConfig(args []string) int {
 
 // configToggleTool adds or removes a tool, keeping canonical order.
 func configToggleTool(name string) int {
-	if name != schema.ToolClaudeCode && name != schema.ToolCodex {
+	if !config.ValidTool(name) {
 		fmt.Fprintf(os.Stderr, "tacho: unknown tool %q\n", name)
 		return 2
 	}
@@ -321,7 +326,7 @@ func configSet(key, val string) int {
 			if t == "" {
 				continue
 			}
-			if t != schema.ToolClaudeCode && t != schema.ToolCodex {
+			if !config.ValidTool(t) {
 				fmt.Fprintf(os.Stderr, "tacho: unknown tool %q (want claude-code or codex)\n", t)
 				return 2
 			}
@@ -329,7 +334,7 @@ func configSet(key, val string) int {
 		}
 		c.Tools = tools
 	case "menubar.style":
-		if val != config.StyleMeter && val != config.StyleNumber {
+		if !config.ValidStyle(val) {
 			fmt.Fprintf(os.Stderr, "tacho: invalid style %q (want meter or number)\n", val)
 			return 2
 		}

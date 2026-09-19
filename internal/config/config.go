@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -33,6 +35,59 @@ type Config struct {
 	Menubar Menubar  `json:"menubar"`
 	Limits  Limits   `json:"limits"`
 	Notify  Notify   `json:"notify"`
+
+	// warnings describes the values in the loaded file that no renderer
+	// understands (see Warnings). Unexported so it stays out of the JSON
+	// that `config show` prints and Save writes.
+	warnings []string
+}
+
+// Warnings lists the values of the loaded config file that are not valid
+// choices, with what tacho does instead (#230). Load keeps such values as
+// written so the read path always renders something — an unknown style is
+// drawn as meter, an unknown metric as "--", an unknown limits display as
+// remaining, an unknown tool is ignored, an out-of-range threshold is
+// dropped — and this is how `tacho doctor` / `tacho config show` surface
+// the typo. The checks are the ones `tacho config set` rejects up front.
+func (c Config) Warnings() []string {
+	return c.warnings
+}
+
+// ValidStyle reports whether v is a menu bar display style.
+func ValidStyle(v string) bool {
+	return v == StyleMeter || v == StyleNumber
+}
+
+// ValidTool reports whether name is a tool tacho knows.
+func ValidTool(name string) bool {
+	return name == schema.ToolClaudeCode || name == schema.ToolCodex
+}
+
+// valueWarnings checks every enum-like key of a loaded config against the
+// same validators `config set` uses. thresholds are the raw values, before
+// NormalizeThresholds drops the invalid ones.
+func valueWarnings(c Config, thresholds []int) []string {
+	var w []string
+	for _, t := range c.Tools {
+		if !ValidTool(t) {
+			w = append(w, fmt.Sprintf("tools: %q is not claude-code or codex — ignored", t))
+		}
+	}
+	if !ValidStyle(c.Menubar.Style) {
+		w = append(w, fmt.Sprintf("menubar.style: %q is not meter or number — shown as meter", c.Menubar.Style))
+	}
+	if !render.ValidMenubarMetric(c.Menubar.Metric) {
+		w = append(w, fmt.Sprintf("menubar.metric: %q is not one of %s — shown as --", c.Menubar.Metric, strings.Join(render.MenubarMetrics, ", ")))
+	}
+	if !render.ValidLimitDisplay(c.Limits.Display) {
+		w = append(w, fmt.Sprintf("limits.display: %q is not remaining or used — shown as remaining", c.Limits.Display))
+	}
+	for _, t := range thresholds {
+		if !ValidThreshold(t) {
+			w = append(w, fmt.Sprintf("notify.thresholds: %d is not a whole percentage from 1 to 99 — dropped", t))
+		}
+	}
+	return w
 }
 
 type Menubar struct {
@@ -160,7 +215,9 @@ func load() (Config, error) {
 	}
 	// Out-of-range or duplicate thresholds in a hand-edited file are dropped
 	// rather than failing the load (Load never fails); `config set` rejects
-	// them up front.
+	// them up front. Every ignored value is kept as a warning for doctor /
+	// config show (#230).
+	c.warnings = valueWarnings(c, c.Notify.Thresholds)
 	c.Notify.Thresholds = NormalizeThresholds(c.Notify.Thresholds)
 	return c, nil
 }

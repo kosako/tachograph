@@ -42,3 +42,27 @@ func TestJSONFileState(t *testing.T) {
 		t.Errorf("dir = %q, want unreadable diagnosis", got)
 	}
 }
+
+// The doctor's config section lists the values Load ignores; a missing or
+// unparsable file yields no value warnings (its state is reported instead).
+func TestConfigValueWarnings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if got := configValueWarnings(); len(got) != 0 {
+		t.Errorf("no file: warnings = %q, want none", got)
+	}
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"limits":{"display":"usage"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := configValueWarnings()
+	if len(got) != 1 || !strings.Contains(got[0], `limits.display: "usage"`) {
+		t.Errorf("warnings = %q, want the limits.display one", got)
+	}
+	if err := os.WriteFile(path, []byte(`{"limits": INVALID`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := configValueWarnings(); len(got) != 0 {
+		t.Errorf("invalid JSON: warnings = %q, want none (reported as invalid JSON instead)", got)
+	}
+}

@@ -108,7 +108,7 @@ tacho daily -days 30   # per-day estimated cost / tokens (default 30 days, recom
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
 tacho cmux push|clear  # manage cmux sidebar pills manually
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
-tacho doctor           # diagnose install path, data sources, cache, and integrations
+tacho doctor           # diagnose install path, data sources, cache, integrations (and unknown config values)
 ```
 
 ```
