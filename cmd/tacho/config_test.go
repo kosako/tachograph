@@ -137,3 +137,28 @@ func TestConfigShowExitCodes(t *testing.T) {
 		t.Errorf("show with broken config = %d, want 1", code)
 	}
 }
+
+// notify.thresholds accepts a comma-separated list of 1–99, normalizes it
+// (descending, deduped), rejects anything else, and an empty value turns
+// notifications off.
+func TestConfigSetNotifyThresholds(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	for _, bad := range []string{"0", "100", "abc", "50,x", "-5"} {
+		if code := configSet("notify.thresholds", bad); code == 0 {
+			t.Errorf("configSet notify.thresholds %q returned 0, want non-zero", bad)
+		}
+	}
+	if code := configSet("notify.thresholds", "30, 50,10,30"); code != 0 {
+		t.Fatalf("configSet notify.thresholds returned %d, want 0", code)
+	}
+	got := config.Load().Notify.Thresholds
+	if len(got) != 3 || got[0] != 50 || got[1] != 30 || got[2] != 10 {
+		t.Errorf("Load().Notify.Thresholds = %v, want [50 30 10]", got)
+	}
+	if code := configSet("notify.thresholds", ""); code != 0 {
+		t.Fatalf("configSet notify.thresholds \"\" returned %d, want 0", code)
+	}
+	if got := config.Load().Notify.Thresholds; len(got) != 0 {
+		t.Errorf("Load().Notify.Thresholds after clearing = %v, want []", got)
+	}
+}

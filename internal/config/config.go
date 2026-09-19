@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -31,6 +32,7 @@ type Config struct {
 	Tools   []string `json:"tools"` // which tools to show, in order
 	Menubar Menubar  `json:"menubar"`
 	Limits  Limits   `json:"limits"`
+	Notify  Notify   `json:"notify"`
 }
 
 type Menubar struct {
@@ -42,6 +44,36 @@ type Limits struct {
 	Display string `json:"display"` // see render.LimitDisplay
 }
 
+// Notify configures the rate-limit headroom notifications raised from the
+// SwiftBar refresh (#244). Thresholds are "% left" figures: a notification
+// fires when a 5h / weekly window's headroom drops to or below one of them,
+// once per reset cycle. Empty (the default) means off.
+type Notify struct {
+	Thresholds []int `json:"thresholds"`
+}
+
+// ValidThreshold reports whether t is a usable headroom threshold: a whole
+// percentage strictly inside the 0–100 range.
+func ValidThreshold(t int) bool {
+	return t >= 1 && t <= 99
+}
+
+// NormalizeThresholds drops invalid and duplicate thresholds and sorts the
+// rest descending, so callers see the highest (first crossed) threshold
+// first. It never returns nil, so an empty selection persists as [].
+func NormalizeThresholds(in []int) []int {
+	seen := map[int]bool{}
+	out := []int{}
+	for _, t := range in {
+		if ValidThreshold(t) && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(out)))
+	return out
+}
+
 // Default is the configuration applied when no file exists — it preserves the
 // original behavior (both tools, meter style, 5-hour limit, headroom).
 func Default() Config {
@@ -49,6 +81,7 @@ func Default() Config {
 		Tools:   []string{schema.ToolClaudeCode, schema.ToolCodex},
 		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric},
 		Limits:  Limits{Display: DefaultLimitDisplay},
+		Notify:  Notify{Thresholds: []int{}},
 	}
 }
 
@@ -125,6 +158,10 @@ func load() (Config, error) {
 	if c.Limits.Display == "" {
 		c.Limits.Display = DefaultLimitDisplay
 	}
+	// Out-of-range or duplicate thresholds in a hand-edited file are dropped
+	// rather than failing the load (Load never fails); `config set` rejects
+	// them up front.
+	c.Notify.Thresholds = NormalizeThresholds(c.Notify.Thresholds)
 	return c, nil
 }
 

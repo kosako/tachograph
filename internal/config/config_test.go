@@ -212,3 +212,51 @@ func TestLoadStrictContract(t *testing.T) {
 		t.Error("unreadable file: error = nil, want read error")
 	}
 }
+
+// notify.thresholds round-trips normalized (invalid and duplicate values
+// dropped, descending), a file written before the key existed reads as off,
+// and off persists as an explicit empty list.
+func TestNotifyThresholdsRoundTripAndNormalize(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if got := Load().Notify.Thresholds; got == nil || len(got) != 0 {
+		t.Errorf("default Notify.Thresholds = %#v, want []", got)
+	}
+	c := Default()
+	c.Notify.Thresholds = []int{30, 50, 30, 0, 100, 10}
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	got := Load().Notify.Thresholds
+	if want := []int{50, 30, 10}; !equalInts(got, want) {
+		t.Errorf("Notify.Thresholds = %v, want %v (saved as given, normalized on load)", got, want)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tools":["codex"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Notify.Thresholds; got == nil || len(got) != 0 {
+		t.Errorf("Notify.Thresholds without the key = %#v, want [] (off)", got)
+	}
+}
+
+func TestNormalizeThresholds(t *testing.T) {
+	if got := NormalizeThresholds(nil); got == nil || len(got) != 0 {
+		t.Errorf("NormalizeThresholds(nil) = %#v, want []", got)
+	}
+	if got := NormalizeThresholds([]int{10, 99, 1, 10, -5, 100}); !equalInts(got, []int{99, 10, 1}) {
+		t.Errorf("NormalizeThresholds = %v, want [99 10 1]", got)
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
