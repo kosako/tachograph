@@ -23,8 +23,8 @@ type Rate struct {
 
 // defaults are approximate first-party API prices (USD per million tokens),
 // matched by model-id prefix. Cache rates follow each provider's convention:
-// Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / Mythos 5.1, the one
-// documented exception), write (5-min ephemeral) = 1.25x input;
+// Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / Mythos 5.1 and 0.05x
+// on Opus 5.5, the documented exceptions), write (5-min ephemeral) = 1.25x input;
 // OpenAI uses its published cached-input price for reads. For cache writes,
 // gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
 // separately), while gpt-5.6 and later publish a 1.25x-input write price.
@@ -36,7 +36,11 @@ var defaults = map[string]Rate{
 	// resolves here by prefix; no dedicated entry needed (unlike Sonnet 5).
 	"claude-opus":     {In: 5, Out: 25, CacheRead: 0.5, CacheWrite: 6.25},
 	"claude-opus-4-1": {In: 15, Out: 75, CacheRead: 1.5, CacheWrite: 18.75}, // Opus 4.1 kept the older $15/$75
-	"claude-sonnet":   {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75},   // Sonnet 4.6 and earlier
+	// Opus 5.5 (2026-09-23) cut the price to $4/$20 and bills cache hits at
+	// 0.05x input ($0.20); without this key it would resolve to claude-opus
+	// and be over-billed (#252).
+	"claude-opus-5-5": {In: 4, Out: 20, CacheRead: 0.2, CacheWrite: 5},
+	"claude-sonnet":   {In: 3, Out: 15, CacheRead: 0.3, CacheWrite: 3.75}, // Sonnet 4.6 and earlier
 	// Sonnet 5's launch price. Announced as introductory through 2026-08-31,
 	// but Anthropic made it permanent — the scheduled increase to $3/$15 on
 	// 2026-09-01 was cancelled (#200). The bare "sonnet" alias below can't
@@ -51,11 +55,13 @@ var defaults = map[string]Rate{
 	// resolve to the 5 series by prefix and bill cache reads at 4x (#225).
 	"claude-fable-5-1":  {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
 	"claude-mythos-5-1": {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
-	// GPT-6 ships as the single "gpt-6-astra" id (released 2026-09-03), which
-	// Codex logs verbatim. OpenAI publishes no bare "gpt-6" alias, so none is
-	// added here — an unknown future gpt-6 tier stays unpriced rather than
-	// guessing. Cache write is the published $12.50 (1.25x input) — #220.
+	// GPT-6 ships as per-tier ids — Astra (2026-09-03, #220), Sol and Luna
+	// (2026-09-23, #252) — which Codex logs verbatim. OpenAI publishes no bare
+	// "gpt-6" alias, so none is added here — an unknown future gpt-6 tier stays
+	// unpriced rather than guessing. Cache writes are the published 1.25x input.
 	"gpt-6-astra": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},
+	"gpt-6-sol":   {In: 2, Out: 10, CacheRead: 0.2, CacheWrite: 2.5},
+	"gpt-6-luna":  {In: 0.1, Out: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
 	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
 	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.

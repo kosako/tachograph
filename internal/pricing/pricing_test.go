@@ -76,6 +76,15 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-opus-5", Rate{5, 25, 0.5, 6.25}},              // same price as 4.8; resolves via the claude-opus key (#213)
 		{"anthropic.claude-opus-5", Rate{5, 25, 0.5, 6.25}},    // Bedrock form of the same
 		{"claude-opus-4-1-20250805", Rate{15, 75, 1.5, 18.75}}, // 4.1 kept the older price; not shadowed by claude-opus
+		// 5.5 cut the price and bills cache hits at 0.05x input, so it needs its
+		// own key rather than falling to claude-opus's $5/$25 and 0.1x (#252).
+		{"claude-opus-5-5", Rate{4, 20, 0.2, 5}},
+		{"anthropic.claude-opus-5-5", Rate{4, 20, 0.2, 5}}, // Bedrock form of the same
+		{"claude-opus-5-5-20260923", Rate{4, 20, 0.2, 5}},  // dated id → 5.5 key
+		{"claude-opus-5-5[1m]", Rate{4, 20, 0.2, 5}},       // 1M-context suffix → 5.5 key
+		// Neighbouring Opus 5 ids must not be captured by the 5.5 key.
+		{"claude-opus-5[1m]", Rate{5, 25, 0.5, 6.25}},
+		{"claude-opus-5-20260501", Rate{5, 25, 0.5, 6.25}},
 		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
 		{"claude-sonnet-5", Rate{2, 10, 0.2, 2.5}},          // launch price made permanent, no 2026-09-01 increase (#200)
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
@@ -87,6 +96,8 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-mythos-5-1", Rate{10, 50, 0.25, 12.5}},
 		{"claude-fable-5-1-20260901", Rate{10, 50, 0.25, 12.5}}, // dated id → 5.1 key
 		{"gpt-6-astra", Rate{10, 50, 1, 12.5}},                  // GPT-6 Astra, launched 2026-09-03; previously unpriced (#220)
+		{"gpt-6-sol", Rate{2, 10, 0.2, 2.5}},                    // GPT-6 Sol, launched 2026-09-23; previously unpriced (#252)
+		{"gpt-6-luna", Rate{0.1, 0.5, 0.01, 0.125}},             // GPT-6 Luna, launched 2026-09-23; previously unpriced (#252)
 		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                        // Sol (default tier), promo price since 2026-08-21 (#216)
 		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},                    // full Sol id → base alias
 		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},                // 2026-07-30 cut
