@@ -80,6 +80,11 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		// own key rather than falling to claude-opus's $5/$25 and 0.1x (#252).
 		{"claude-opus-5-5", Rate{4, 20, 0.2, 5}},
 		{"anthropic.claude-opus-5-5", Rate{4, 20, 0.2, 5}}, // Bedrock form of the same
+		{"claude-opus-5-5-20260923", Rate{4, 20, 0.2, 5}},  // dated id → 5.5 key
+		{"claude-opus-5-5[1m]", Rate{4, 20, 0.2, 5}},       // 1M-context suffix → 5.5 key
+		// Neighbouring Opus 5 ids must not be captured by the 5.5 key.
+		{"claude-opus-5[1m]", Rate{5, 25, 0.5, 6.25}},
+		{"claude-opus-5-20260501", Rate{5, 25, 0.5, 6.25}},
 		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
 		{"claude-sonnet-5", Rate{2, 10, 0.2, 2.5}},          // launch price made permanent, no 2026-09-01 increase (#200)
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
