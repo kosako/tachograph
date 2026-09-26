@@ -13,6 +13,7 @@
 - セッションごとの現在使用モデル
 - レートリミットの残量(5時間枠 / 週次枠)とリセット時刻
 - コンテキストウィンドウ使用率
+- 推定コスト / トークン(現セッション・当日合計。日ごとの一覧は `tacho daily`)
 
 対応エージェント: **Claude Code** / **Codex CLI**
 
@@ -22,9 +23,9 @@
 
 ## 設計原則
 
-1. **計器であって観測基盤ではない。** ログ蓄積・ダッシュボードは作らない。「パッと見」に特化する(例外はコスト系の当日合計と、既存ログから再計算する日次一覧 `tacho daily` のみ。tacho 自身は履歴を保存しない)
+1. **計器であって観測基盤ではない。** ログ蓄積・ダッシュボードは作らない。「パッと見」に特化する(例外はコスト系の当日合計と、既存ログから再計算する日次一覧(`tacho daily` と SwiftBar の直近 7 日表示)のみ。tacho 自身は履歴を保存しない。SwiftBar 用の `daily-history.json` はログから作り直せる派生キャッシュ)
 2. **コレクタ(収集)とレンダラ(表示)の分離。** コアは統一スキーマのJSON(`tacho status --json`)を出力し、表示先はプラガブル
-3. **常駐デーモンなし。** オンデマンド収集+短命のファイルキャッシュのみ
+3. **常駐デーモンなし。** オンデマンド収集+ファイルキャッシュのみ
 4. **薄く作る。** エージェントが既にディスクへ書いているデータを読むだけ
 
 ## インストール
@@ -35,17 +36,19 @@
 npm install -g tachograph
 ```
 
-postinstall でGitHubリリースから該当プラットフォームのバイナリを取得します。対応バイナリが無い環境や、Goユーザは `go install` でもどうぞ:
+postinstall でGitHubリリースから該当プラットフォームのバイナリ(macOS / Linux / Windows の x64・arm64)を取得します。対応バイナリが無い環境や、Goユーザは `go install` でもどうぞ:
 
 ```sh
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
+npm も Go も使わない場合は、[GitHub Releases](https://github.com/kosako/tachograph/releases) から環境に合ったアーカイブ(`tachograph_<os>_<arch>.tar.gz`、Windows は `.zip`)を取得し、中の `tacho` を PATH の通った場所に置いても使えます。
+
 ### PATHを通す(go install の場合)
 
 > npm で入れた場合は不要です(`tacho` は自動でPATHに入ります)。
 
-`go install` はバイナリを `$(go env GOPATH)/bin`(既定 `~/go/bin`)に置きます。ここがPATHに通っていないと `tacho` で実行できません(Claude CodeのstatusLineも起動できず無言で失敗します)。
+`go install` はバイナリを `$(go env GOPATH)/bin`(既定 `~/go/bin`)に置きます(`GOBIN` が設定されていればそちら。mise などのバージョン管理ツールが設定していることがあるので、`go env GOBIN` が空でなければ、以下の `$(go env GOPATH)/bin` はその値に読み替えてください)。ここがPATHに通っていないと `tacho` で実行できません(Claude CodeのstatusLineも起動できず無言で失敗します)。
 
 ```sh
 command -v tacho            # 出れば通っている。何も出なければ未通
@@ -82,7 +85,7 @@ go install github.com/kosako/tachograph/cmd/tacho@latest
 ## 使い方
 
 ```sh
-tacho                  # ワンショット表示(1エージェント=1行)
+tacho                  # ワンショット表示(1エージェント=1行。結果は 30 秒キャッシュし、--no-cache で取り直す)
 tacho watch -n 5       # 定期再描画
 tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
 tacho daily -days 30   # 日ごとの推定コスト / トークン(既定 30 日、ログから再計算)
@@ -90,6 +93,8 @@ tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読�
 tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
 tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
+tacho version          # インストール済みの版を表示(tacho --version も可)
+tacho config show|set  # 設定の表示 / 変更(~/.config/tachograph/config.json。show は未知の値も警告。statusline-preset などは後述)
 ```
 
 ```
@@ -97,18 +102,18 @@ claude Fable 5              ctx 32%  5h ███░░░░░ 37% ↻10:30  w
 codex  gpt-5.5        ⚠6h   ctx 13%  5h █░░░░░░░  7% ↻06/13  wk ░░░░░░░░  2% ↻06/17
 ```
 
-`⚠6h` は古いデータの印(数値は経過時間)で、その行は全体が薄く表示されます — stale な値は最終観測時点の残量で、その後のリセット(残量の回復)や別セッションでの消費は反映していません。stale 扱いになる閾値はツール別で、Claude は60分(約1時間)、Codex はライブ入力が無くリミット枠が数時間有効なため5時間です。レートリミット枠が存在しないバックエンド(Bedrock上のClaude Code等)では、セッショントークン数と推定コストの表示に自動で切り替わります。
+`⚠6h` は古いデータの印(数値は経過時間)で、その行は全体が薄く表示されます — stale な値は最終観測時点の残量で、その後のリセット(残量の回復)や別セッションでの消費は反映していません。stale 扱いになる閾値はツール別で、Claude は60分(約1時間)、Codex はライブ入力が無くリミット枠が数時間有効なため5時間です。レートリミット枠の情報が無いとき(Bedrock上のClaude Codeのように枠が存在しないバックエンドなど)は、セッショントークン数と推定コスト(分かる場合)の表示に自動で切り替わります。Claude のレートリミットとコンテキスト% は statusLine 経由でしか取得できないため、statusLine を設定して Claude Code で一度動かすまで(直近 30 日にスナップショットが無いとき)は、サブスクリプションでも Claude の行はトランスクリプトから数えたセッショントークン数だけの表示になります(ctx は `--%`。statusLine は後述の `tacho setup claude` で設定できます)。
 
 ### Claude Code ステータスライン
 
 一番簡単なのは tacho に設定させることです:
 
 ```sh
-tacho setup claude --write   # ~/.claude/settings.json にマージ(既存設定は保持・.bakを作成)
+tacho setup claude --write   # ~/.claude/settings.json にマージ(statusLine だけ置き換え、他の設定は保持。.bak が無ければ作成)
 tacho setup claude           # 貼り付け用スニペットを表示するだけ(自動編集しない)
 ```
 
-PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusline`、そうでなければ(PATH 未通、または別のインストールが PATH にある場合)解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json` に追加:
+PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusline`、そうでなければ(PATH 未通、または別のインストールが PATH にある場合)解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json`(`CLAUDE_CONFIG_DIR` を設定している場合はその下の `settings.json`。`--write` の書き込み先も同じ)に追加:
 
 ```json
 {
@@ -120,26 +125,26 @@ PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusl
 }
 ```
 
-うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・cmux/SwiftBar連携・statusLineの設定状況を診断します。
+うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・cmux/SwiftBar連携・各ツールの現在の取得状態(ok / stale / エラー時の対処ヒント)・statusLineの設定状況を診断します。
 
 Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります。ctx / セッションのトークン・コストは「直近に観測したセッション」の値なので、stale になると `--` になります)。
 
 ### ステータスラインのカスタマイズ
 
-`~/.config/tachograph/statusline.tmpl` にテンプレート1行を置きます(または `--template`)。
+`~/.config/tachograph/statusline.tmpl` にテンプレート1行を置きます(または `tacho statusline --template '…'` でテンプレート文字列を直接渡します。ファイルのパスではありません)。
 
 #### プリセット(まずはここから)
 
 「こうしたい」に合う**プリセット**を選ぶだけでも始められます:
 
 ```sh
-tacho config statusline-preset --list   # 一覧(名前 + テンプレ文字列)
-tacho config statusline-preset moon      # 選んで statusline.tmpl に書き込み
+tacho config statusline-preset --list   # 一覧(名前・説明・テンプレ文字列)
+tacho config statusline-preset moon      # 選んで statusline.tmpl に書き込み(既存のファイルは上書き)
 ```
 
 | プリセット | 用途 | 例 |
 |---|---|---|
-| `bar` | デフォルト。コンテキスト+5hゲージ+週次 | `Fable 5 ctx 8% · 5h █░░░░░ 24% ↻06/12 · wk 41% · …` |
+| `bar` | デフォルト。コンテキスト+5hゲージ+週次(Codex の 5h/週次も併記) | `Fable 5 ctx 8% · 5h █░░░░░ 24% ↻06/12 · wk 41% · …` |
 | `minimal` | モデル+5h/週次の%だけ | `Fable 5 5h 24% · wk 41%` |
 | `dial` | 1文字ダイヤルでコンパクト(`○◔◑◕●`) | `Fable 5 ctx 8% · 5h ◔ 24% ↻06/12 · wk ◑ · codex ◔◑` |
 | `moon` | 月齢ダイヤル(`🌑🌒🌓🌔🌕`) | `Fable 5 5h 🌒 24% · wk 🌓 · codex 🌒🌓` |
@@ -158,40 +163,40 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `effort` | reasoning effort、`⚡xhi `(`low`/`med`/`high`/`xhi`/`max`、印+末尾スペース。Claudeのみ、非対応モデルでは空) |
 | `ctx` | コンテキストウィンドウ使用率、`8%` |
 | `5h.pct` / `wk.pct` | 5時間枠 / 週次枠のリミット**残量**(残り割合)、`76%`。`limits.display: used` なら使用率 |
-| `5h.bar:8` / `wk.bar:8` | 指定幅の残量ゲージ(使うほど減る。`used` なら使うほど増える)、`██████░░` |
+| `5h.bar:8` / `wk.bar:8` | 指定幅の残量ゲージ(`:幅` 省略時は 8。使うほど減る。`used` なら使うほど増える。データ無しでも幅を保った空のゲージ `░░░░░░░░` になるので、欠損は `pct` の `--` で見分ける)、`██████░░` |
 | `5h.dial` / `wk.dial` | 1文字の残量ダイヤル、`○◔◑◕●`(● = 全部残っている。`used` なら ● = 使い切り。データ無しは `◌`) |
 | `5h.moon` / `wk.moon` | 大きめの月齢残量ダイヤル、`🌑🌒🌓🌔🌕`(🌕 = 全部残っている。`used` なら 🌕 = 使い切り。絵文字のため色分け対象外。データ無しは `◌`) |
-| `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(当日)または `↻06/15` |
+| `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(24時間以内)または `↻06/15`(それ以外) |
 | `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
 | `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
 | `tokens.all` | **当日の全セッション合計**トークン、`12.7M/d`(`/d`=当日合計) |
-| `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(statusline では Claude Code が渡す推定値) |
+| `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(Claude は Claude Code が statusline に渡す推定値。Codex は料金表から tacho が概算し、セッションの累積トークンを現在のモデルの単価で換算) |
 | `cost.session.today` | **現セッションの当日分**推定コスト(Claudeのみ)、`$1.84` |
 | `cost.all` | **当日の全セッション**推定コスト(料金表ベース・概算)、`$1.20/d` |
-| `plan` | プラン名(`prolite` 等) |
+| `plan` | プラン名(`prolite` 等。Codex の `rate_limits.plan_type` 由来で、Claude では常に `--`) |
 | `credits` | クレジット残高(Codex の `rate_limits.credits` 由来。値が無いツール/プランでは `--`)、`23.5` |
 | `cwd` | 作業ディレクトリ(basename) |
-| `stale` | 60分超で `⚠1h `(印+経過時間)、それ以外は空(Codexはライブ入力が無く、リミット枠が数時間有効なため5時間超で stale) |
+| `stale` | 60分超で `⚠1h `(印+経過時間)、それ以外は空(Codexはライブ入力が無く、リミット枠が数時間有効なため5時間超で stale。statusline の Claude は Claude Code から毎回受け取る値なので `{claude.stale}` は通常空) |
 | `age` | データの経過時間、`42s` / `5m` / `1h` / `3d` |
 
-`tokens` 系はどのスコープも**課金対象トークン**(input + cache write + cache read + output)で、`cost` と同じ分母です(v0.5.0 以降。以前の `tokens.all` / `tokens.session.today` は cache read を除いた「新規トークン」でした)。`*.session.today` はCodexでは取れません(Codexのトークン数は累積記録で、当日分だけを切り出せないため `--`)。
+`tokens` 系はどのスコープも**課金対象トークン**(input + cache write + cache read + output)で、`cost` と同じ分母です(v0.5.0 以降。以前の `tokens.all` / `tokens.session.today` は cache read を除いた「新規トークン」でした)。`*.session.today` はClaudeのみです(tacho は Codex の現セッションの当日分を集計しないため、Codex では `--`)。
 
-欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
+欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま。`remaining` で既定の残量表示に戻ります)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
 
 ### cmux サイドバー
 
-[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は既定で残量、`limits.display` に従う。ctx は使用率)で、使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、同梱のcmux CLI経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
+[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は既定で残量、`limits.display` に従う。ctx は使用率。レートリミット枠が無いときは `claude ctx24% 989ktok` のようにセッショントークン数を出し、stale のときはツール名の直後に `⚠1h` のような経過時間が付く)で、5h / wk のうち高い方の使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、cmux CLI(`TACHO_CMUX_BIN` → PATH 上の `cmux` → cmux.app 同梱の順に探す)経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
 
 手動操作:
 
 ```sh
-tacho cmux push    # ピルを一回push(cron等からも使える)
+tacho cmux push    # ピルを一回push(cmux のターミナル内で実行。cron など cmux の外からは既定では届かない)
 tacho cmux clear   # tachoのピルを削除
 ```
 
 ### macOSメニューバー(SwiftBar)
 
-どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、既定の残量表示では満月 = 全部残っている。使用率表示では満月 = 使い切り)にフォールバックできます。
+どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが既定では 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる。後述の「指標」で weekly 枠にも切り替え可)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。stale の印が出るのはリングだけで、数字や月齢テキストの表示では古い値がそのまま並ぶため、データの古さはドロップダウンの各ツールの見出し(`⚠` + 経過時間)で確認します。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、既定の残量表示では満月 = 全部残っている。使用率表示では満月 = 使い切り)にフォールバックできます。
 
 ```sh
 brew install swiftbar   # 未導入なら
@@ -199,34 +204,34 @@ cp contrib/tacho.30s.sh <SwiftBarのプラグインフォルダ>/
 chmod +x <プラグインフォルダ>/tacho.30s.sh
 ```
 
-ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけの2行なので、出力を変えたければ tacho 側のレンダラを直します。
+ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけなので、出力を変えたければ tacho 側のレンダラを直します。SwiftBar から起動されるプラグインにはシェルの設定(`~/.zshrc` など)が効かないことがあるため、`TACHO_APPEARANCE` / `TACHO_SWIFTBAR_TEXT` はこのファイルの `exec` の行の前に書きます(例: `export TACHO_APPEARANCE=light`)。また、このファイルが PATH に足すのは `/opt/homebrew/bin` と `~/go/bin` だけなので、それ以外の場所(nvm / mise 管理下の npm グローバルなど)に入れた場合は、`exec` の行の `tacho` を `tacho doctor` の `running:` に出る絶対パスに書き換えてください。
 
 #### 表示内容の設定
 
-ドロップダウンには各ツールの全メトリクス(5h / weekly / context / cost / tokens)が並びます。メニューバーはそのうち選んだ1つを表示します。
+ドロップダウンには各ツールの全メトリクス(5h / weekly / context / cost / tokens)が並びます。メニューバーはそのうち選んだ1つを表示します。選んだ 5h / weekly 枠をツールが報告していないとき(例: Codex の 5h 枠が無いとき)は、報告のある枠で代わりに表示します(数字表示では `X wk85%` のように枠名が付きます)。
 
-その下に**直近 7 日の cost/tokens**が 1 日 1 行で並びます(`09/17  C $150.76/179M  X $0.13/27k`)。値は `tacho daily` と同じ定義で、今日の行は上の cost / tokens 行と同じ値です。ツールごとに cost 上位 3 日は青で示します(重かった日を一瞥するため。cost が 0 / 不明の日は対象外)。昨日以前の行は、日付が変わった最初の更新で昨日 1 日分だけを集計して `daily-history.json`(キャッシュ dir、`tacho doctor` で場所が分かります)に持ち、7 日より古い分は捨てます。これはログから作り直せる派生キャッシュで、tacho のバイナリ(版)や `pricing.json` が変わると作り直されます。消しても次の更新で再生成されるだけです。
+その下に**直近 7 日の cost/tokens**が 1 日 1 行で並びます(`09/17  C $150.76/179M  X $0.13/27k`)。値は `tacho daily` と同じ定義で、今日の行は上の cost / tokens 行と同じ値です。ツールごとに cost 上位 3 日は青で示します(重かった日を一瞥するため。cost が 0 / 不明の日は対象外)。昨日以前の行は、キャッシュに無い日だけを集計して(ふだんは日付が変わった後に昨日 1 日分。初回やキャッシュを作り直すときは昨日までの 6 日分をまとめて)`daily-history.json`(キャッシュ dir、`tacho doctor` で場所が分かります)に持ち、7 日より古い分は捨てます。これはログから作り直せる派生キャッシュで、tacho のバイナリ(版)や `pricing.json` が変わると作り直されます。消しても次の更新で再生成されるだけです。
 
 ドロップダウン下部の **Settings** サブメニューから、一覧から選ぶだけで切り替えられます(現在の選択に ✓ / ☑):
 
-- **表示形式**: メーター(ゲージ)/ 数字
+- **表示形式**: メーター(ゲージ)/ 数字(cost / tokens はゲージにできないため、メーターでも数字で表示)
 - **指標**: 5h limit / weekly limit / cost / tokens(ラジオ選択。contextはセッションごとに変動が大きくメニューバー向きでないため除外)。cost / tokens は当日合計(`/d` 付き)で、当日合計が不明なときは現セッション値(`/d` なし)に切り替わる
 - **リミット表示**: 残量 / 使用率(5h / weekly のパーセント・ゲージ・リングが示す値。ステータスラインや `tacho` にも同じ設定が効く。色分けは使用率基準のまま)
-- **表示するツール**: Claude / Codex(チェックボックス)
+- **表示するツール**: Claude / Codex(チェックボックス)。メニューバー・ドロップダウン・通知に加え、`tacho` / `tacho watch` / `tacho daily` / cmux のピルもこの設定で絞り込まれ、`tools` に書いた順に並ぶ。ステータスライン(テンプレートに書いたツールがそのまま出る。既定のテンプレートは Codex も含む)と `tacho status --json`(常に両ツール)には効かない
 
-CLI でも設定できます(設定は `~/.config/tachograph/config.json`):
+CLI でも設定できます(設定は `~/.config/tachograph/config.json`。`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/tachograph/` の下になり、`statusline.tmpl` / `pricing.json` も同じ場所です。実際のパスは `tacho config path` で確認できます):
 
 ```sh
 tacho config show
-tacho config set menubar.style number      # メーター→数字
-tacho config set menubar.metric cost       # 使った金額を表示
-tacho config set limits.display used       # 5h / weekly を残量→使用率で表示
-tacho config set tools codex               # Codexだけ表示
+tacho config set menubar.style number      # メーター→数字(meter / number)
+tacho config set menubar.metric cost       # 使った金額を表示(limit_5h / limit_weekly / cost / tokens)
+tacho config set limits.display used       # 5h / weekly を残量→使用率で表示(remaining / used)
+tacho config set tools codex               # Codexだけ表示(claude-code / codex をカンマ区切り、書いた順に表示)
 ```
 
 #### 残量の通知(既定オフ)
 
-5h / weekly の残量が設定した % まで下がったら、macOS の通知で知らせます。常駐プロセスはなく、SwiftBar の 30 秒更新に便乗して判定するので、**SwiftBar でプラグインが動いているときだけ**通知されます(ステータスラインや `tacho` からは通知しません)。
+5h / weekly の残量が設定した % まで下がったら、macOS の通知で知らせます。常駐プロセスはなく、SwiftBar がプラグインを実行するたび(同梱の `tacho.30s.sh` なら 30 秒ごと)に便乗して判定するので、**SwiftBar でプラグインが動いているときだけ**通知されます(ステータスラインや `tacho` からは通知しません)。通知は SwiftBar のアプリ通知として届くので、macOS の通知設定で SwiftBar を許可しておいてください。
 
 ```sh
 tacho config set notify.thresholds 50,30,10   # 残り 50% / 30% / 10% で通知
@@ -237,11 +242,11 @@ tacho config set notify.thresholds ""         # オフ(既定)
 - 表示しているツール(`tools`)× 5h / weekly の全部に同じ閾値が効きます。通知文は `Claude weekly: 28% left · resets ↻09/20` のようにツールと枠を含みます
 - 同じ (ツール, 枠, 閾値) は**リセット周期ごとに 1 回**だけ鳴ります。残量が閾値を上回るか、リセット時刻が変わると再び鳴るようになります。一度に複数の閾値を跨いだときは最も深い 1 つだけ鳴ります
 - stale(古い)値からは鳴りません。通知の送信に失敗した場合は次の更新で再試行します
-- 通知の既読状態は `notify-state.json`(キャッシュ dir)に持ちます。消しても再び 1 回鳴るだけです
+- 通知済みの記録は `notify-state.json`(キャッシュ dir)に持ちます。消しても再び 1 回鳴るだけです
 
-#### コスト料金表(概算・上書き可)
+### コスト料金表(概算・上書き可)
 
-`cost` / `tokens` は**当日の全セッション合計**です(`tokens` は cache read を含む課金対象トークンで、`cost` と同じ分母)。Claude Code は通常セッションに加え、その配下の subagents / workflows transcript も集計します。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):
+メニューバー / ドロップダウンの `cost` / `tokens`(ステータスラインでは `cost.all` / `tokens.all`)は**当日の全セッション合計**です(`tokens` は cache read を含む課金対象トークンで、`cost` と同じ分母)。Claude Code は通常セッションに加え、その配下の subagents / workflows transcript も集計します。コストはモデル別の料金表(トークン×単価)から推定します。料金は正確ではなく目安なので、`~/.config/tachograph/pricing.json` で上書き・追加できます(単位はUSD/100万トークン):
 
 ```json
 {
@@ -250,7 +255,7 @@ tacho config set notify.thresholds ""         # オフ(既定)
 }
 ```
 
-指定したフィールドだけが組み込みの既定値に上書きされます(例: `input` だけ書けば他の単価は既定のまま。部分上書き)。料金表に無い**新規モデルID**は既定が無いため、未指定の単価は `0` になります。キーはモデルIDの前方一致(`claude-fable` は `claude-fable-5` 等にマッチ)。**より長く一致するキーが優先される**ため、組み込みで専用の行を持つティア(`claude-fable-5-1` / `claude-mythos-5-1` / `claude-opus-5-5` / `claude-sonnet-5` など)を上書きするときは、そのキー自体を書いてください(`claude-fable` の上書きは `claude-fable-5-1` には効きません)。Claude transcript が 1h cache write を記録している場合、input 単価の2倍として計算します。料金表に無いモデルはコスト計算から除外され、その分は合計に含まれません(当日に価格付きモデルが一つも無ければコストは「不明」= `--` 表示)。
+指定したフィールドだけが組み込みの既定値に上書きされます(例: `input` だけ書けば他の単価は既定のまま。部分上書き)。料金表に無い**新規モデルID**は既定が無いため、未指定の単価は `0` になります(`claude-fable-5-2` のように組み込みキーを延ばしたキーも同じで、`claude-fable` の単価は引き継がれません)。キーはモデルIDの前方一致(`claude-fable` は `claude-fable-5` 等にマッチ)。**より長く一致するキーが優先される**ため、組み込みで専用の行を持つティア(`claude-fable-5-1` / `claude-mythos-5-1` / `claude-opus-5-5` / `claude-sonnet-5` など)を上書きするときは、そのキー自体を書いてください(`claude-fable` の上書きは `claude-fable-5-1` には効きません)。Bedrock 形式の ID(`us.anthropic.claude-…` など)は、そのままではどのキーにも一致しないとき `[リージョン.]anthropic.` / `openai.` を外して照合し直します(`us.anthropic.claude-fable-5` のように接頭辞付きのキーを書けば、そのキーで始まる Bedrock の ID だけに効きます。これも新規モデルID扱いなので、4 つの単価をすべて書いてください)。Claude transcript が 1h cache write を記録している場合、input 単価の2倍として計算します(`cache_write` は 5 分キャッシュの単価で、1h cache write には使われません)。料金表に無いモデルもトークン数の合計には含まれますが、コストは計算されず、コストの合計にも含まれません(当日に価格付きモデルが一つも無ければコストは「不明」= `--` 表示)。`pricing.json` が読めない(JSON の構文エラーや、数値を文字列で書くなどの型違い)ときはファイル全体が無視され、組み込みの料金のままになります。構文エラーは `tacho doctor` が知らせます。
 
 ### 日ごとのコスト / トークン(`tacho daily`)
 
@@ -268,11 +273,13 @@ day         claude $  claude tokens  codex $  codex tokens  total $
 2026-09-18    $46.08          23.9M    $0.00             0   $46.08
 -------------------------------------------------------------------
 total        $335.13         329.8M    $0.27           48k  $335.40
+
+note: recomputed from the logs still on disk; days past Claude Code's transcript retention are under-reported.
 ```
 
-- 値の定義は当日合計(`cost.all` / `tokens.all`、SwiftBar の `/d`)と同じです。今日の行は `tacho status` の `daily` と一致し、昨日の行は昨日の時点の「今日」がそのまま残ったものです。表示するツールは `tools` 設定に従います
+- 値の定義は当日合計(`cost.all` / `tokens.all`、SwiftBar の `/d`)と同じです。今日の行は `tacho status` の `daily` と一致し、昨日の行は、昨日の時点で「今日」だった値をログから計算し直したものです。表示するツールは `tools` 設定に従います
 - **tacho は履歴を保存しません。** 毎回 Claude Code の transcript と Codex のセッションログから再計算します(30 日で数秒)。したがって表に出るのはディスクに残っているログの分だけで、Claude Code が保持期間を過ぎた transcript を削除した日は小さく出ます(脚注はその注意です)。長期保存や分析が要る場合は、別のツールに任せてください
-- `--` はそのツールのログが読めなかった(不明)印です。0 は「ログ上に使用が無い」を意味します。コストは価格付きモデルが一つも無い日は `--` になります(当日合計と同じ扱い)
+- `--` はそのツールのログが読めなかった(不明)印です。0 は「ログ上に使用が無い」を意味します。コストは、使用があるのに価格付きモデルが一つも無い日は `--`、使用が 0 の日は `$0.00` です。`total` 行は、不明な日を 1 日でも含むとそのツールの列が `--` に、コストが `--` の日を含むとコストが `--` になります
 
 ### Codex TUI
 
@@ -280,7 +287,7 @@ Codex自身のステータスラインはネイティブ設定です — TUIで 
 
 ## どの版が反映される?
 
-tachograph はローカルのログ(`~/.claude/projects`、`~/.codex/sessions`)を読みます。ターミナル/デスクトップ/IDE のどの版でも、そこに書き込むものは集計対象です。
+tachograph はローカルのログ(`~/.claude/projects`、`~/.codex/sessions`。`CLAUDE_CONFIG_DIR` / `CODEX_HOME` を設定している場合はその配下の `projects` / `sessions`)を読みます。ターミナル/デスクトップ/IDE のどの版でも、そこに書き込むものは集計対象です。
 
 | | トークン / コスト(当日) | レートリミット / コンテキスト |
 |---|---|---|
