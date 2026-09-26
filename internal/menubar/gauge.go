@@ -1,9 +1,11 @@
 // Package menubar renders the SwiftBar menu bar image: each tool's logo
 // ringed by an iOS-app-download-style progress ring whose fill tracks the
-// 5-hour rate-limit usage. The ring is colored by usage (green/yellow/red),
+// selected menubar.metric (5h headroom by default; the used share when
+// limits.display is "used"). The ring is colored by usage (green/yellow/red),
 // so the output is a full-color PNG. Because a colored image can't be tinted
-// by the menu bar, the logo and track follow the system appearance (white on
-// dark, near-black on light) to stay legible on both.
+// by the menu bar, the logo and track use a fixed ink that the caller picks:
+// white by default (dark or wallpaper-tinted menu bars), near-black with
+// TACHO_APPEARANCE=light.
 package menubar
 
 import (
@@ -21,8 +23,8 @@ import (
 )
 
 // Logo marks, rasterized from assets/logos/*.svg to monochrome PNGs (see
-// the README's contributing notes). Embedded so the runtime stays
-// stdlib-only — no SVG rasterizer dependency.
+// assets/logos/README.md). Embedded so the runtime stays stdlib-only — no SVG
+// rasterizer dependency.
 //
 //go:embed assets/claude.png assets/codex.png
 var assetFS embed.FS
@@ -83,9 +85,10 @@ const (
 )
 
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
-// there is nothing to draw. dark selects the system appearance so the logo
-// and track stay legible; metric selects which value drives the ring and d
-// whether a limit ring fills with headroom or use.
+// there is nothing to draw. dark picks the logo/track ink: white when true,
+// near-black when false (the caller passes false for TACHO_APPEARANCE=light);
+// metric selects which value drives the ring and d whether a limit ring fills
+// with headroom or use.
 func PNGBase64(s schema.Status, dark bool, metric string, d render.LimitDisplay) (string, bool) {
 	if len(s.Tools) == 0 {
 		return "", false

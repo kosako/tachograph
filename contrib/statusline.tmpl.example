@@ -1,10 +1,13 @@
 # tachograph statusline template — pick ONE preset.
 #
-# Copy this file to ~/.config/tachograph/statusline.tmpl and uncomment exactly
-# one line (remove the leading "# "). tacho ignores blank lines and lines
-# starting with "#", and uses the first non-comment line as the template.
+# Copy this file to ~/.config/tachograph/statusline.tmpl (more precisely, next
+# to the config.json that `tacho config path` prints, which honors
+# XDG_CONFIG_HOME / TACHO_CONFIG_DIR) and uncomment exactly one line (remove
+# the leading "# "). tacho ignores blank lines and lines starting with "#",
+# and uses the first non-comment line as the template.
 #
-# Or skip the file entirely:  tacho config statusline-preset <name>
+# Or have tacho write statusline.tmpl for you (replaces any existing one):
+#   tacho config statusline-preset <name>   (--list shows the presets)
 #
 # Placeholders are {tool.field[:width]}, tool = claude | codex. Full field list
 # is in the README ("ステータスラインのカスタマイズ" / "Customizing the status line").
