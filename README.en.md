@@ -229,7 +229,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `effort` | reasoning effort, `⚡xhi ` (`low`/`med`/`high`/`xhi`/`max`, marker + trailing space; Claude only, empty when the model doesn't support it) |
 | `ctx` | context window usage, `8%` |
 | `5h.pct` / `wk.pct` | rate-limit **headroom** (percent left) for the 5-hour / weekly window, `76%`; usage with `limits.display: used` |
-| `5h.bar:8` / `wk.bar:8` | headroom gauge of the given width (8 when `:width` is omitted; drains as you use it; fills with `used`; with no data it still renders an empty gauge of the same width, `░░░░░░░░`, so check `pct` for `--`), `██████░░` |
+| `5h.bar:8` / `wk.bar:8` | headroom gauge of the given width (8 when `:width` is omitted; drains as you use it; fills with `used`; with no data it keeps its width as a broken line, `┄┄┄┄┄┄┄┄`, distinct from the empty `░░░░░░░░` of 0% left), `██████░░` |
 | `5h.dial` / `wk.dial` | single-character headroom dial, `○◔◑◕●` (● = all left, or used up with `used`; `◌` when no data) |
 | `5h.moon` / `wk.moon` | larger moon-phase headroom dial, `🌑🌒🌓🌔🌕` (🌕 = all left, or used up with `used`; emoji, so not colored; `◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (within the next 24 hours) or `↻06/15` (otherwise) |

@@ -118,7 +118,8 @@ func TestTemplateBasics(t *testing.T) {
 		"{claude.stale}":                "",
 		"{codex.model}":                 Missing, // unavailable tool
 		"{codex.5h.pct}":                Missing,
-		"{codex.5h.bar:4}":              "░░░░", // bars keep their width when absent
+		"{codex.5h.bar:4}":              "┄┄┄┄", // bars keep their width when absent, unlike an empty ░ gauge (#271)
+		"{codex.5h.bar}":                "┄┄┄┄┄┄┄┄",
 		"{claude.plan}":                 Missing,
 		"{claude.credits}":              "23.5", // trailing zeros trimmed
 		"{codex.credits}":               Missing,
