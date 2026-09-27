@@ -129,9 +129,7 @@ func (st Style) dim(s string) string {
 
 // Bar renders pct (0-100) as a fixed-width gauge, e.g. "██░░░░░░".
 func Bar(pct float64, width int) string {
-	if width <= 0 {
-		width = 8
-	}
+	width = barWidth(width)
 	if pct < 0 {
 		pct = 0
 	}
@@ -140,6 +138,21 @@ func Bar(pct float64, width int) string {
 	}
 	filled := int(pct/100*float64(width) + 0.5)
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+// BarMissing keeps a bar's width when it has no data, drawn as a broken
+// line: an empty track (░) would read as 0% left under the default
+// headroom display (#271).
+func BarMissing(width int) string {
+	return strings.Repeat("┄", barWidth(width))
+}
+
+// barWidth is a bar's width, 8 when unset (a placeholder without :width).
+func barWidth(width int) int {
+	if width <= 0 {
+		return 8
+	}
+	return width
 }
 
 // Dial renders pct (0-100) as a single-character gauge: ○◔◑◕●.

@@ -238,7 +238,7 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 	if limit == nil || limit.UsedPct == nil {
 		switch field {
 		case "bar":
-			return Bar(0, width) // keep alignment even when absent
+			return BarMissing(width) // keep alignment even when absent
 		case "dial", "moon":
 			return DialMissing
 		}
