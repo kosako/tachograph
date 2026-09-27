@@ -2,7 +2,7 @@
 // docs/schema.md is the authoritative specification.
 package schema
 
-const Version = "2.0"
+const Version = "3.0"
 
 // Tool name values.
 const (
@@ -85,7 +85,7 @@ type Session struct {
 	ContextWindow  *int64   `json:"context_window"`
 	ContextUsedPct *float64 `json:"context_used_pct"`
 	Tokens         *Tokens  `json:"tokens"`
-	TranscriptPath *string  `json:"transcript_path,omitempty"` // local jsonl; used to total today's session usage
+	TranscriptPath *string  `json:"transcript_path,omitempty"` // local jsonl; the session tree totals are read from it
 }
 
 type Tokens struct {

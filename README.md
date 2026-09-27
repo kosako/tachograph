@@ -167,7 +167,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 | `5h.dial` / `wk.dial` | 1文字の残量ダイヤル、`○◔◑◕●`(● = 全部残っている。`used` なら ● = 使い切り。データ無しは `◌`) |
 | `5h.moon` / `wk.moon` | 大きめの月齢残量ダイヤル、`🌑🌒🌓🌔🌕`(🌕 = 全部残っている。`used` なら 🌕 = 使い切り。絵文字のため色分け対象外。データ無しは `◌`) |
 | `5h.resets` / `wk.resets` | リセット時刻、`↻02:00`(24時間以内)または `↻06/15`(それ以外) |
-| `tokens` / `tokens.session` | **現セッション**のトークン、`989k` |
+| `tokens` / `tokens.session` | **現セッション**のトークン、`989k`(Claude は、そのセッションの subagents / workflows も含む) |
 | `tokens.session.today` | **現セッションの当日分**トークン(Claudeのみ)、`68k` |
 | `tokens.all` | **当日の全セッション合計**トークン、`12.7M/d`(`/d`=当日合計) |
 | `cost` / `cost.session` | **現セッション**の推定コスト、`$0.05`(Claude は Claude Code が statusline に渡す推定値。Codex は料金表から tacho が概算し、セッションの累積トークンを現在のモデルの単価で換算) |
