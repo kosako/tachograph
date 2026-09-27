@@ -90,7 +90,7 @@ tacho watch -n 5       # 定期再描画
 tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
 tacho daily -days 30   # 日ごとの推定コスト / トークン(既定 30 日、ログから再計算)
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
-tacho cmux push|clear  # cmuxサイドバーのピルを手動操作
+tacho cmux push|clear  # cmuxサイドバーのピルを手動操作(非推奨)
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
 tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
 tacho version          # インストール済みの版を表示(tacho --version も可)
@@ -184,6 +184,8 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま。`remaining` で既定の残量表示に戻ります)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
 
 ### cmux サイドバー
+
+> **非推奨**: cmux サイドバー連携(ステータスラインからの自動ミラーと `tacho cmux push` / `clear`)は v0.6.3 で非推奨になり、今後の minor リリースで削除する予定です([#273](https://github.com/kosako/tachograph/issues/273))。ほかの表示面は変わりません。
 
 [cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は既定で残量、`limits.display` に従う。ctx は使用率。レートリミット枠が無いときは `claude ctx24% 989ktok` のようにセッショントークン数を出し、stale のときはツール名の直後に `⚠1h` のような経過時間が付く)で、報告されたリミット枠(5h / wk など)のうち最も高い使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、cmux CLI(`TACHO_CMUX_BIN` → PATH 上の `cmux` → cmux.app 同梱の順に探す)経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
 

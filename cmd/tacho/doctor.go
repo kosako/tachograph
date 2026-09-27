@@ -195,6 +195,7 @@ func reportCacheFile(label, path string, maxAge, staleAfter time.Duration, now t
 
 func reportIntegrations() {
 	fmt.Println("integrations:")
+	fmt.Println("  cmux:       deprecated — " + cmuxDeprecation)
 	if cli := cmuxbar.FindCLI(); cli != "" {
 		fmt.Println("  cmux CLI:   " + cli)
 	} else {
