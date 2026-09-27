@@ -77,6 +77,26 @@ func TestJSONFileStateFlagsWrongTypes(t *testing.T) {
 	if got := jsonFileState(ok, pricing.Validate); got != "present" {
 		t.Errorf("well-typed pricing.json = %q, want present", got)
 	}
+	// A number that overflows float64 in a field the loader skips is still
+	// accepted by the loaders, so doctor must not call it invalid JSON.
+	for _, c := range []struct {
+		name, content string
+		validate      func([]byte) error
+	}{
+		{"big-config.json", `{"tools":["codex"],"extra":1e1000}`, config.Validate},
+		{"big-pricing.json", `{"claude-opus":{"input":99,"note":1e1000}}`, pricing.Validate},
+	} {
+		p := filepath.Join(dir, c.name)
+		if err := os.WriteFile(p, []byte(c.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.validate([]byte(c.content)); err != nil {
+			t.Fatalf("%s: the loader rejects it (%v); the case assumes it is accepted", c.name, err)
+		}
+		if got := jsonFileState(p, c.validate); got != "present" {
+			t.Errorf("%s = %q, want present (the loader accepts it)", c.name, got)
+		}
+	}
 }
 
 // The doctor's config section lists the values Load ignores; a missing or

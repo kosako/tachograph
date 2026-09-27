@@ -368,8 +368,12 @@ func jsonFileState(path string, validate func([]byte) error) string {
 	if err != nil {
 		return "unreadable — " + err.Error()
 	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
+	// Syntax only: decoding into json.RawMessage checks the JSON grammar
+	// without converting values, so a number that overflows float64 in a
+	// field the loader skips (e.g. "extra": 1e1000) isn't misreported — the
+	// loaders accept such a file, and validate is what decides the rest.
+	var raw json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return "present but INVALID JSON (ignored) — " + err.Error()
 	}
 	if validate != nil {
