@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/kosako/tachograph/internal/schema"
 )
 
 // ClaudeSessionTree counts one session across its main transcript and the
@@ -84,19 +82,19 @@ type memTreeCache struct {
 type memTreeEntry struct {
 	size  int64
 	mtime time.Time
-	tok   schema.Tokens
+	data  []byte
 }
 
-func (c *memTreeCache) Get(path string, size int64, mtime time.Time) (schema.Tokens, bool) {
+func (c *memTreeCache) Get(path string, size int64, mtime time.Time) ([]byte, bool) {
 	e, ok := c.m[path]
 	if !ok || e.size != size || !e.mtime.Equal(mtime) {
-		return schema.Tokens{}, false
+		return nil, false
 	}
-	return e.tok, true
+	return e.data, true
 }
 
-func (c *memTreeCache) Put(path string, size int64, mtime time.Time, tok schema.Tokens) {
-	c.m[path] = memTreeEntry{size, mtime, tok}
+func (c *memTreeCache) Put(path string, size int64, mtime time.Time, data []byte) {
+	c.m[path] = memTreeEntry{size, mtime, data}
 	c.puts++
 }
 
@@ -138,5 +136,49 @@ func TestClaudeSessionTreeCachesOlderFiles(t *testing.T) {
 	writeFile(t, old, claudeMsg(yesterday, 1000, 1000, 1000, 1000)+"\n"+claudeMsg(yesterday, 1, 1, 1, 1)+"\n", yesterday)
 	if cum, _, _ := ClaudeSessionTree(mainPath, now, noPrices, fc); cum.Total != 135+4000+4+56 {
 		t.Errorf("after growth: cumulative %d, want %d (re-read)", cum.Total, 135+4000+4+56)
+	}
+}
+
+// Codex review (#262): an older nested file must be deduplicated against the
+// rest of the tree too. A response present in both the main transcript and a
+// child counts once — on the day it happened and on every later day, when the
+// child has become an older (cached) file.
+func TestClaudeSessionTreeDedupsOlderFilesAcrossTree(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+	shared := claudeMsgID(yesterday, "msg_shared", "req_shared", 10, 20, 100, 5) // 135
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath, shared+"\n"+claudeMsg(now, 1, 2, 50, 3)+"\n", now) // 135 + 56
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "child.jsonl"),
+		shared+"\n"+claudeMsg(yesterday, 4, 5, 60, 6)+"\n", yesterday) // dup 135 + 75, an older file
+
+	fc := &memTreeCache{m: map[string]memTreeEntry{}}
+	for pass, cache := range []TreeFileCache{nil, fc, fc} { // uncached, filling the cache, from the cache
+		if cum, _, _ := ClaudeSessionTree(mainPath, now, noPrices, cache); cum.Total != 135+56+75 {
+			t.Errorf("pass %d: cumulative %d, want %d (the shared response once)", pass, cum.Total, 135+56+75)
+		}
+	}
+}
+
+// Codex review (#262): today's portion keeps session_today's own dedup — a
+// response whose content blocks straddle midnight still counts today, as it
+// always did (the window is checked before dedup, so yesterday's block can't
+// hide today's).
+func TestClaudeSessionTreeTodayAcrossMidnight(t *testing.T) {
+	root := t.TempDir()
+	start := DayStart(time.Now())
+	now := start.Add(time.Hour)
+	before := claudeMsgID(start.Add(-time.Second), "msg_mid", "req_mid", 10, 20, 100, 5)
+	after := claudeMsgID(start.Add(time.Second), "msg_mid", "req_mid", 10, 20, 100, 5)
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath, before+"\n"+after+"\n", now)
+
+	cum, today, _ := ClaudeSessionTree(mainPath, now, noPrices, nil)
+	if today.Tokens != 135 {
+		t.Errorf("today = %d, want 135 (the block after midnight counts today)", today.Tokens)
+	}
+	if cum.Total != 135 {
+		t.Errorf("cumulative = %d, want 135 (one response)", cum.Total)
 	}
 }

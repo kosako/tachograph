@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/kosako/tachograph/internal/schema"
 )
 
 // The session-tree cache round-trips through its file, misses on a changed
@@ -15,7 +13,7 @@ func TestSessionTreeCacheRoundTrip(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	now := time.Now()
 	mtime := now.Add(-48 * time.Hour).Truncate(time.Second)
-	tok := schema.Tokens{Input: 40, CachedInput: 10, Output: 2, Total: 42}
+	tok := []byte{1, 2, 3}
 
 	c := OpenSessionTree("/p/session-a")
 	if _, ok := c.Get("/p/session-a/sub.jsonl", 100, mtime); ok {
@@ -27,7 +25,7 @@ func TestSessionTreeCacheRoundTrip(t *testing.T) {
 	}
 
 	c = OpenSessionTree("/p/session-a")
-	if got, ok := c.Get("/p/session-a/sub.jsonl", 100, mtime); !ok || got != tok {
+	if got, ok := c.Get("/p/session-a/sub.jsonl", 100, mtime); !ok || string(got) != string(tok) {
 		t.Errorf("reopened Get = %+v, %v, want %+v", got, ok, tok)
 	}
 	if _, ok := c.Get("/p/session-a/sub.jsonl", 101, mtime); ok {
@@ -55,11 +53,39 @@ func TestSessionTreeCachePrunesOldFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := OpenSessionTree("/p/session-a")
-	c.Put("/p/session-a/sub.jsonl", 1, now, schema.Tokens{Total: 1})
+	c.Put("/p/session-a/sub.jsonl", 1, now, []byte{1})
 	if err := c.Save(now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Error("a session-tree cache file unused for 31 days should be removed")
+	}
+}
+
+// Codex review (#262): a cache that is only read (no new entries) still
+// counts as used, so it isn't pruned after 30 days while its tree is active.
+func TestSessionTreeCacheTouchedWhenUsed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CACHE_DIR", dir)
+	now := time.Now()
+	c := OpenSessionTree("/p/session-a")
+	c.Put("/p/session-a/sub.jsonl", 1, now, []byte{1})
+	if err := c.Save(now); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, c.name)
+	old := now.Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	c = OpenSessionTree("/p/session-a")
+	if _, ok := c.Get("/p/session-a/sub.jsonl", 1, now); !ok {
+		t.Fatal("expected a hit")
+	}
+	if err := c.Save(now); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(p); err != nil || now.Sub(info.ModTime()) > time.Hour {
+		t.Errorf("a used cache file must be touched; mtime %v", info.ModTime())
 	}
 }

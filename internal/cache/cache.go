@@ -253,22 +253,23 @@ func WriteDailyHistory(key string, days map[string]map[string]DailyHistoryEntry)
 	return writeJSON("daily-history.json", dailyHistoryFile{SchemaVersion: schema.Version, Key: key, Days: days})
 }
 
-// SessionTreeCache persists, for one Claude session tree, the cumulative
-// tokens of its transcripts last written before today (daily.TreeFileCache),
-// so the statusline doesn't re-read a long session's finished subagents on
-// every call (#262). One small file per session tree; entries are keyed by
-// path and invalidated by size or mtime, and the whole file by the schema
-// version.
+// SessionTreeCache persists, for one Claude session tree, what
+// daily.ClaudeSessionTree needs from its transcripts last written before
+// today (an opaque blob per file, daily.TreeFileCache), so the statusline
+// doesn't re-read a long session's finished subagents on every call (#262).
+// One small file per session tree; entries are keyed by path and invalidated
+// by size or mtime, and the whole file by the schema version.
 type SessionTreeCache struct {
 	name    string
 	entries map[string]sessionTreeEntry
-	dirty   bool
+	dirty   bool // Put changed entries: write on Save
+	used    bool // Get hit: keep the file from looking unused
 }
 
 type sessionTreeEntry struct {
-	Size   int64         `json:"size"`
-	MTime  int64         `json:"mtime"` // unix nanoseconds
-	Tokens schema.Tokens `json:"tokens"`
+	Size  int64  `json:"size"`
+	MTime int64  `json:"mtime"` // unix nanoseconds
+	Data  []byte `json:"data"`  // base64 in the file
 }
 
 type sessionTreeFile struct {
@@ -295,35 +296,44 @@ func OpenSessionTree(sessionDir string) *SessionTreeCache {
 	return c
 }
 
-// Get returns the cached tokens for path while its size and mtime match.
-func (c *SessionTreeCache) Get(path string, size int64, mtime time.Time) (schema.Tokens, bool) {
+// Get returns the cached blob for path while its size and mtime match.
+func (c *SessionTreeCache) Get(path string, size int64, mtime time.Time) ([]byte, bool) {
 	e, ok := c.entries[path]
 	if !ok || e.Size != size || e.MTime != mtime.UnixNano() {
-		return schema.Tokens{}, false
+		return nil, false
 	}
-	return e.Tokens, true
+	c.used = true
+	return e.Data, true
 }
 
-// Put records path's tokens for its current size and mtime.
-func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, tokens schema.Tokens) {
-	c.entries[path] = sessionTreeEntry{Size: size, MTime: mtime.UnixNano(), Tokens: tokens}
+// Put records path's blob for its current size and mtime.
+func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, data []byte) {
+	c.entries[path] = sessionTreeEntry{Size: size, MTime: mtime.UnixNano(), Data: data}
 	c.dirty = true
 }
 
-// Save writes the cache when Put changed it, and removes other session-tree
-// cache files unused for sessionTreeMaxAge.
+// Save writes the cache when Put changed it — or, when it was only read,
+// refreshes the file's mtime at most daily so an active tree's cache isn't
+// taken for unused — and removes other session-tree cache files unused for
+// sessionTreeMaxAge.
 func (c *SessionTreeCache) Save(now time.Time) error {
+	dir, err := Dir()
+	if err != nil {
+		return nil
+	}
 	if !c.dirty {
+		if c.used {
+			p := filepath.Join(dir, c.name)
+			if info, err := os.Stat(p); err == nil && now.Sub(info.ModTime()) > 24*time.Hour {
+				_ = os.Chtimes(p, now, now)
+			}
+		}
 		return nil
 	}
 	if err := WriteJSON(c.name, sessionTreeFile{SchemaVersion: schema.Version, Entries: c.entries}); err != nil {
 		return err
 	}
 	c.dirty = false
-	dir, err := Dir()
-	if err != nil {
-		return nil
-	}
 	old, _ := filepath.Glob(filepath.Join(dir, "session-tree-*.json"))
 	for _, p := range old {
 		if filepath.Base(p) == c.name {
