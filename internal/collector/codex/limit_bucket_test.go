@@ -235,6 +235,39 @@ func TestLastEventsLimitsSearchBounded(t *testing.T) {
 	}
 }
 
+// A non-account bucket's token_count carrying only a plan (no usage info, no
+// windows) is not usable: when it is all the freshest rollout holds, the
+// previous valid session — with its account limits — keeps showing.
+func TestCollectSkipsPlanOnlyNonAccountBucket(t *testing.T) {
+	root, day := bucketDay(t)
+	writeRollout(t, day, "rollout-2026-09-26T10-00-00-019e5933-2289-7e72-88fd-000000000011.jsonl",
+		ctxLine("2026-09-26T10:00:00.000Z", "gpt-valid", "/v")+"\n"+
+			bucketTcLine("2026-09-26T10:05:00.000Z", "codex", 150, 10080, 40),
+		time.Date(2026, 9, 26, 10, 5, 0, 0, time.UTC))
+	writeRollout(t, day, "rollout-2026-09-26T10-06-00-019e5933-2289-7e72-88fd-000000000012.jsonl",
+		ctxLine("2026-09-26T10:06:00.000Z", "gpt-plan-only", "/p")+"\n"+
+			`{"timestamp":"2026-09-26T10:06:01.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","primary":null,"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":"plus"}}}`,
+		time.Date(2026, 9, 26, 10, 6, 1, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-09-26T10:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	if got.Model == nil || got.Model.ID != "gpt-valid" {
+		t.Errorf("Model = %+v, want gpt-valid (the plan-only premium token_count must not win)", got.Model)
+	}
+	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 150 {
+		t.Errorf("Session.Tokens = %+v, want the valid session's 150", got.Session)
+	}
+	var mins *int
+	var used *float64
+	if len(got.Limits) > 0 {
+		mins, used = got.Limits[0].WindowMinutes, got.Limits[0].UsedPct
+	}
+	onlyLimit(t, len(got.Limits), 10080, mins, used, 40)
+}
+
 func TestAccountLimits(t *testing.T) {
 	cases := []struct {
 		line string
