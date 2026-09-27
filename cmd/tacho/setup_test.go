@@ -432,6 +432,7 @@ func TestSetupSwiftBarWriteRefusesUnsafe(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // os.UserHomeDir's source on Windows
 	if code := write(); code != 1 {
 		t.Errorf("no config dir: exit = %d, want 1", code)
 	}
