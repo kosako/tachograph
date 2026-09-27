@@ -294,3 +294,28 @@ func TestAccountLimits(t *testing.T) {
 		}
 	}
 }
+
+// schema.md promises limits in ascending window_minutes, but Codex reports
+// primary / secondary in whatever order the server assigns them (the weekly
+// window moved to primary when the 5h one was lifted in 2026-07). A 5h window
+// returning as secondary must still come first (#268).
+func TestCollectLimitsAscendingWindowMinutes(t *testing.T) {
+	root, day := bucketDay(t)
+	tc := `{"timestamp":"2026-09-26T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":0,"total_tokens":1},"model_context_window":200000},"rate_limits":{"limit_id":"codex","primary":{"used_percent":40,"window_minutes":10080,"resets_at":1790000000},"secondary":{"used_percent":7,"window_minutes":300,"resets_at":1790000000},"credits":null,"plan_type":"plus"}}}`
+	writeRollout(t, day, "rollout-2026-09-26T10-00-00-019e5933-2289-7e72-88fd-000000000268.jsonl",
+		ctxLine("2026-09-26T10:00:00.000Z", "gpt-x", "/x")+"\n"+tc,
+		time.Date(2026, 9, 26, 10, 5, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-09-26T10:06:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v", got.Error)
+	}
+	var order []string
+	for _, l := range got.Limits {
+		order = append(order, l.Window)
+	}
+	if len(order) != 2 || order[0] != "5h" || order[1] != "weekly" {
+		t.Errorf("limit windows = %v, want [5h weekly]", order)
+	}
+}
