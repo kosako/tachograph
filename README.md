@@ -67,7 +67,7 @@ PATHを通したくない場合は、`tacho` を絶対パス(例 `~/go/bin/tacho
 
 ### アップデート
 
-npm で入れた場合は、再インストールで最新版に入れ替わります(同じ場所を上書きするので、statusLineやSwiftBarの設定はそのままでOK):
+npm で入れた場合は、再インストールで最新版に入れ替わります(同じ場所を上書きするので、statusLineやSwiftBarの設定はそのままでOK。ただし Node の版を切り替えた後は入る場所が変わるので、`tacho setup claude --write` をやり直してください):
 
 ```sh
 npm install -g tachograph@latest
@@ -113,7 +113,7 @@ tacho setup claude --write   # ~/.claude/settings.json にマージ(statusLine �
 tacho setup claude           # 貼り付け用スニペットを表示するだけ(自動編集しない)
 ```
 
-PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusline`、そうでなければ(PATH 未通、または別のインストールが PATH にある場合)解決済みの絶対パスを自動で埋めます。手で書く場合は `~/.claude/settings.json`(`CLAUDE_CONFIG_DIR` を設定している場合はその下の `settings.json`。`--write` の書き込み先も同じ)に追加:
+PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusline`、そうでなければ(PATH 未通、または別のインストールが PATH にある場合)解決済みの絶対パスを自動で埋めます。npm で入れた場合も、statusLine の更新のたびに Node を起動しないよう、Node の版ごとのディレクトリにある実体の絶対パスを埋めます。Node の版を切り替えたり入れ直したりしたら `tacho setup claude --write` をやり直してください(statusLine が別の tacho を指したままだと `tacho doctor` が警告します)。手で書く場合は `~/.claude/settings.json`(`CLAUDE_CONFIG_DIR` を設定している場合はその下の `settings.json`。`--write` の書き込み先も同じ)に追加:
 
 ```json
 {

@@ -37,8 +37,13 @@ func runDoctor(args []string) int {
 	}
 	if onPath {
 		if p, err := exec.LookPath("tacho"); err == nil {
-			fmt.Println("  on PATH:   yes (" + p + ")")
-			if exe != "" && !sameExecutable(p, exe) {
+			switch {
+			case exe == "" || sameExecutable(p, exe):
+				fmt.Println("  on PATH:   yes (" + p + ")")
+			case sameInstall(p, exe):
+				fmt.Println("  on PATH:   yes (" + p + ", the npm launcher for this binary)")
+			default:
+				fmt.Println("  on PATH:   yes (" + p + ")")
 				fmt.Println("  warning:   the `tacho` on PATH is a different binary than the one running")
 			}
 		} else {
@@ -84,8 +89,8 @@ func runDoctor(args []string) int {
 		fmt.Println("  settings.json is not valid JSON — fix it, then `tacho setup claude`")
 	default:
 		fmt.Println("  command:   " + cmd)
-		if !statusLineResolves(cmd) {
-			fmt.Println("  warning:   that command does not resolve — re-run `tacho setup claude --write`")
+		if w := statusLineWarning(cmd, exe); w != "" {
+			fmt.Println("  warning:   " + w)
 		}
 	}
 	return 0
