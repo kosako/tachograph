@@ -108,14 +108,7 @@ func TestDoctorErrorHints(t *testing.T) {
 // user-chosen PluginDirectory, SWIFTBAR_PLUGINS_PATH, or the default folder,
 // under any tacho.*.sh name (#265).
 func TestFindSwiftBarPlugin(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SWIFTBAR_PLUGINS_PATH", "")
-	t.Setenv("SWIFTBAR_PLUGIN_PATH", "")
-	setting := ""
-	orig := swiftBarPluginDirectory
-	swiftBarPluginDirectory = func() string { return setting }
-	t.Cleanup(func() { swiftBarPluginDirectory = orig })
+	home, setting := isolateSwiftBar(t)
 
 	write := func(dir, name string) string {
 		t.Helper()
@@ -147,7 +140,7 @@ func TestFindSwiftBarPlugin(t *testing.T) {
 
 	// The PluginDirectory setting is searched before the default folder.
 	custom := write(filepath.Join(t.TempDir(), "plugins"), "tacho.30s.sh")
-	setting = filepath.Dir(custom)
+	*setting = filepath.Dir(custom)
 	if got := findSwiftBarPlugin(); got != custom {
 		t.Errorf("PluginDirectory: got %q, want %q", got, custom)
 	}
@@ -163,6 +156,22 @@ func TestFindSwiftBarPlugin(t *testing.T) {
 	if got := findSwiftBarPlugin(); got != self {
 		t.Errorf("SWIFTBAR_PLUGIN_PATH: got %q, want %q", got, self)
 	}
+}
+
+// isolateSwiftBar keeps doctor's plugin detection off the machine's real
+// SwiftBar setup: a temp HOME, no SwiftBar plugin variables, and a
+// PluginDirectory setting read from *setting (initially empty).
+func isolateSwiftBar(t *testing.T) (home string, setting *string) {
+	t.Helper()
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SWIFTBAR_PLUGINS_PATH", "")
+	t.Setenv("SWIFTBAR_PLUGIN_PATH", "")
+	setting = new(string)
+	orig := swiftBarPluginDirectory
+	swiftBarPluginDirectory = func() string { return *setting }
+	t.Cleanup(func() { swiftBarPluginDirectory = orig })
+	return home, setting
 }
 
 // The bare-command decision must check identity, not mere presence: a

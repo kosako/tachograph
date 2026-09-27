@@ -51,6 +51,7 @@ func TestRunCmuxShowsDeprecation(t *testing.T) {
 // doctor's integrations section flags cmux as deprecated (#273).
 func TestReportIntegrationsShowsCmuxDeprecation(t *testing.T) {
 	t.Setenv("CMUX_WORKSPACE_ID", "")
+	isolateSwiftBar(t)
 	out := capture(t, &os.Stdout, reportIntegrations)
 	if !strings.Contains(out, "cmux:       deprecated") {
 		t.Errorf("integrations = %q, want the cmux deprecation line", out)
