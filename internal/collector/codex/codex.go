@@ -86,10 +86,11 @@ type pick struct {
 // session) is skipped so it can't hide older valid data. The account's rate
 // limits are tracked the same way but separately: the freshest session may
 // hold only non-account buckets (#258), so the walk continues until a file
-// can improve neither the session nor the limits. Without limits found yet,
-// the search looks back at most staleAfterMinutes before the session — older
-// limits would only render stale, and sessions that never carry limits
-// (API-key use) must not make every rollout get read.
+// can improve neither the session nor the limits. Limits are only taken
+// from within staleAfterMinutes before the session's token_count — older
+// ones would make a fresh session render stale — so the walk never looks
+// back past that window, and sessions that never carry limits (API-key use)
+// don't make every rollout get read.
 func pickSession(dir string) pick {
 	files := rolloutsByMtime(dir)
 	acc := pick{sawFile: len(files) > 0}
@@ -100,8 +101,8 @@ func pickSession(dir string) pick {
 				acc.readErr = err
 				continue
 			}
-			limCutoff := acc.ts.Add(-staleAfterMinutes * time.Minute)
-			if acc.lim != nil {
+			limCutoff := limitsFloor(acc.ts)
+			if acc.lim != nil && acc.limTS.After(limCutoff) {
 				limCutoff = acc.limTS
 			}
 			if info.ModTime().Before(acc.ts) && info.ModTime().Before(limCutoff) {
@@ -126,7 +127,18 @@ func pickSession(dir string) pick {
 			}
 		}
 	}
+	// Judged against the final session: a fresher session found later in the
+	// walk can push earlier-accepted limits out of the window.
+	if acc.tc != nil && acc.lim != nil && acc.limTS.Before(limitsFloor(acc.ts)) {
+		acc.lim = nil
+	}
 	return acc
+}
+
+// limitsFloor is the oldest account-limits timestamp still used alongside a
+// session whose token_count is at sessionTS.
+func limitsFloor(sessionTS time.Time) time.Time {
+	return sessionTS.Add(-staleAfterMinutes * time.Minute)
 }
 
 // rolloutFile is one .jsonl candidate with its modification time.
@@ -265,16 +277,27 @@ func allLines(path string) ([][]byte, error) {
 // empty token_count (a usage-limit-refused request, #205) is skipped so it
 // can't hide the session's — or an older session's — last valid data; a
 // non-account bucket's token_count (#258) can supply session usage but never
-// the limits.
+// the limits. Once the token_count and turn_context are found, the search for
+// limits stops at limitsFloor: older limits would be discarded anyway, and a
+// session without limits (API-key use) must not be parsed back to its start.
 func lastEvents(lines [][]byte) (tc, lim *TokenCount, turn *TurnContext) {
+	var floor time.Time
 	for i := len(lines) - 1; i >= 0; i-- {
 		ev, evOK := ParseEvent(lines[i])
 		if !evOK {
 			continue
 		}
+		if tc != nil && turn != nil && !floor.IsZero() {
+			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil && ts.Before(floor) {
+				break
+			}
+		}
 		if c := ev.TokenCount(); c != nil {
 			if tc == nil && c.Usable() {
 				tc = c
+				if ts, err := time.Parse(time.RFC3339Nano, c.timestamp); err == nil {
+					floor = limitsFloor(ts)
+				}
 			}
 			if lim == nil && c.AccountLimits() {
 				lim = c

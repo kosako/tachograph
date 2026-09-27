@@ -156,6 +156,85 @@ func TestCollectLimitsSearchBoundedByStaleWindow(t *testing.T) {
 	}
 }
 
+// The stale-window bound applies to the limits' event time, not the file's
+// mtime: an older rollout touched recently (a later non-token event) must not
+// contribute limits recorded 9h before the freshest session.
+func TestCollectLimitsBoundByEventTimeNotMtime(t *testing.T) {
+	root, day := bucketDay(t)
+	writeRollout(t, day, "rollout-2026-09-26T01-00-00-019e5933-2289-7e72-88fd-000000000007.jsonl",
+		ctxLine("2026-09-26T01:00:00.000Z", "gpt-old", "/old")+"\n"+
+			bucketTcLine("2026-09-26T01:05:00.000Z", "codex", 100, 10080, 40)+"\n"+
+			ctxLine("2026-09-26T10:09:00.000Z", "gpt-old", "/old"),
+		time.Date(2026, 9, 26, 10, 9, 0, 0, time.UTC))
+	writeRollout(t, day, "rollout-2026-09-26T10-08-00-019e5933-2289-7e72-88fd-000000000008.jsonl",
+		ctxLine("2026-09-26T10:08:00.000Z", "gpt-new", "/new")+"\n"+
+			tcLine("2026-09-26T10:10:00.000Z", 500),
+		time.Date(2026, 9, 26, 10, 10, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-09-26T10:11:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Limits != nil || got.Plan != nil {
+		t.Errorf("Limits = %+v, Plan = %v, want none (limits recorded 9h before the session)", got.Limits, got.Plan)
+	}
+	if got.Stale {
+		t.Error("Stale = true, want false (the session itself is fresh)")
+	}
+}
+
+// When session and limits come from different token_counts, collected_at and
+// stale follow the older one: here the limits (10:05) are past the 5h stale
+// threshold at 15:07 while the session (10:10) is not.
+func TestCollectCollectedAtFollowsOlderSource(t *testing.T) {
+	root, day := bucketDay(t)
+	writeRollout(t, day, "rollout-2026-09-26T10-00-00-019e5933-2289-7e72-88fd-000000000009.jsonl",
+		ctxLine("2026-09-26T10:00:00.000Z", "gpt-old", "/old")+"\n"+
+			bucketTcLine("2026-09-26T10:05:00.000Z", "codex", 100, 10080, 40),
+		time.Date(2026, 9, 26, 10, 5, 0, 0, time.UTC))
+	writeRollout(t, day, "rollout-2026-09-26T10-08-00-019e5933-2289-7e72-88fd-000000000010.jsonl",
+		ctxLine("2026-09-26T10:08:00.000Z", "gpt-new", "/new")+"\n"+
+			bucketTcLine("2026-09-26T10:10:00.000Z", "premium", 500, 0, 0),
+		time.Date(2026, 9, 26, 10, 10, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-09-26T15:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if len(got.Limits) != 1 {
+		t.Fatalf("len(Limits) = %d, want 1 (limits within the window are used)", len(got.Limits))
+	}
+	want := time.Date(2026, 9, 26, 10, 5, 0, 0, time.UTC)
+	if got.CollectedAt == nil {
+		t.Fatal("CollectedAt is nil")
+	}
+	if at, err := time.Parse(time.RFC3339, *got.CollectedAt); err != nil || !at.Equal(want) {
+		t.Errorf("CollectedAt = %s, want %s (the older source)", *got.CollectedAt, want.Local().Format(time.RFC3339))
+	}
+	if !got.Stale {
+		t.Error("Stale = false, want true (the limits are 5h02m old)")
+	}
+}
+
+// lastEvents stops looking for limits past the stale window once the
+// session's token_count and turn_context are found, instead of parsing a
+// limits-less session back to its start.
+func TestLastEventsLimitsSearchBounded(t *testing.T) {
+	lines := [][]byte{
+		[]byte(bucketTcLine("2026-09-26T03:00:00.000Z", "codex", 50, 10080, 40)),
+		[]byte(ctxLine("2026-09-26T09:59:00.000Z", "gpt-x", "/x")),
+		[]byte(tcLine("2026-09-26T10:00:00.000Z", 100)),
+	}
+	tc, lim, turn := lastEvents(lines)
+	if tc == nil || turn == nil {
+		t.Fatalf("tc = %v, turn = %v, want both found", tc, turn)
+	}
+	if lim != nil {
+		t.Errorf("lim = %+v, want nil (7h before the session, past the window)", lim)
+	}
+	// Within the window the same line is found.
+	lines[0] = []byte(bucketTcLine("2026-09-26T06:00:00.000Z", "codex", 50, 10080, 40))
+	if _, lim, _ := lastEvents(lines); lim == nil {
+		t.Error("lim = nil, want the codex bucket 4h before the session")
+	}
+}
+
 func TestAccountLimits(t *testing.T) {
 	cases := []struct {
 		line string
