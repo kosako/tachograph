@@ -93,7 +93,9 @@ func TestSameInstallWindowsShims(t *testing.T) {
 			}
 		}
 	}
-	if got := npmLauncherTargets(filepath.Join(global, "tacho")); got != nil {
+	// The platform binary itself (tacho.exe on Windows, tacho elsewhere) is
+	// not a launcher.
+	if got := npmLauncherTargets(filepath.Join(global, name)); got != nil {
 		t.Errorf("a plain binary is not a launcher, got %q", got)
 	}
 
