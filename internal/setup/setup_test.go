@@ -133,15 +133,32 @@ func TestSwiftBarPlugin(t *testing.T) {
 		t.Errorf("path with a space not quoted:\n%s", q)
 	}
 
+	// Apart from the PATH note and the exec line, the plugin is the bundled
+	// one line for line (metadata, PATH, display tweaks).
 	contrib, err := os.ReadFile(filepath.Join("..", "..", "contrib", "tacho.30s.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, line := range strings.Split(string(contrib), "\n") {
-		if strings.HasPrefix(line, "#!") || strings.HasPrefix(line, "# <xbar.") || strings.HasPrefix(line, "# export TACHO_") || strings.HasPrefix(line, "# Optional display") {
-			if !strings.Contains(got, line+"\n") {
-				t.Errorf("generated plugin lacks contrib line %q", line)
+	strip := func(script, note string) string {
+		var keep []string
+		inNote := false
+		for _, line := range strings.Split(script, "\n") {
+			switch {
+			case strings.HasPrefix(line, note):
+				inNote = true
+				continue
+			case inNote && strings.HasPrefix(line, "# "):
+				continue
+			case strings.HasPrefix(line, "exec "):
+				line = "exec <tacho> swiftbar"
 			}
+			inNote = false
+			keep = append(keep, line)
 		}
+		return strings.Join(keep, "\n")
+	}
+	want := strip(string(contrib), "# SwiftBar may not see your shell's PATH")
+	if rest := strip(got, "# Written by `tacho setup swiftbar`"); rest != want {
+		t.Errorf("plugin differs from contrib/tacho.30s.sh beyond the PATH note and exec line:\n%s\n--- want ---\n%s", rest, want)
 	}
 }

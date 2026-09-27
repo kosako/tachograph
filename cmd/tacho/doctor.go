@@ -233,26 +233,27 @@ func findSwiftBarPlugin() string {
 		return p
 	}
 	for _, dir := range swiftBarPluginDirs() {
-		if p := tachoPluginIn(dir); p != "" {
+		// A missing or unreadable folder just has no plugin to report.
+		if p, _ := tachoPluginIn(dir); p != "" {
 			return p
 		}
 	}
 	return ""
 }
 
-// tachoPluginIn returns the first tacho plugin file (tacho.*.sh) in dir, or
-// "" when there is none or dir can't be read.
-func tachoPluginIn(dir string) string {
+// tachoPluginIn returns the first tacho plugin file (tacho.*.sh) in dir, ""
+// when there is none, or the error listing dir.
+func tachoPluginIn(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	for _, e := range entries {
 		if p := filepath.Join(dir, e.Name()); isTachoPluginName(e.Name()) && isRegularFile(p) {
-			return p
+			return p, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // swiftBarPluginDirs lists the plugin folders to search: SwiftBar's

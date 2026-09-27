@@ -125,8 +125,13 @@ func runSetupSwiftBar(args []string) int {
 		return 1
 	}
 	// Replace an installed tacho plugin in place, keeping its name (the name
-	// carries the refresh interval); otherwise add tacho.30s.sh.
-	path := tachoPluginIn(dir)
+	// carries the refresh interval); otherwise add tacho.30s.sh. A folder that
+	// can't be listed could hide an installed plugin, so nothing is written.
+	path, err := tachoPluginIn(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tacho: cannot read SwiftBar's plugin folder:", err)
+		return 1
+	}
 	if path == "" {
 		path = filepath.Join(dir, "tacho.30s.sh")
 	}
@@ -138,7 +143,12 @@ func runSetupSwiftBar(args []string) int {
 	if len(existing) > 0 && string(existing) != plugin {
 		// The replaced script may carry export lines the user added. Keep it
 		// outside the plugin folder, where SwiftBar won't try to run it.
-		bak := filepath.Join(config.Dir(), "swiftbar-plugin.bak")
+		cfgDir := config.Dir()
+		if cfgDir == "" {
+			fmt.Fprintln(os.Stderr, "tacho: cannot locate the config directory for the backup; leaving "+path+" untouched")
+			return 1
+		}
+		bak := filepath.Join(cfgDir, "swiftbar-plugin.bak")
 		if err := os.MkdirAll(filepath.Dir(bak), 0o755); err != nil {
 			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 			return 1

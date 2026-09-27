@@ -408,3 +408,52 @@ func TestSetupSwiftBarWrite(t *testing.T) {
 		t.Errorf("backup %s = %q, want the replaced script", bak, b)
 	}
 }
+
+// --write changes nothing when it can't do so safely: no config directory
+// for the backup, or a plugin folder it can't list (which could hide an
+// installed tacho plugin and leave two of them).
+func TestSetupSwiftBarWriteRefusesUnsafe(t *testing.T) {
+	_, setting := isolateSwiftBar(t)
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+	write := func() int {
+		var code int
+		capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+		return code
+	}
+
+	*setting = t.TempDir()
+	installed := filepath.Join(*setting, "tacho.1m.sh")
+	old := "#!/bin/bash\nexec tacho swiftbar\n"
+	if err := os.WriteFile(installed, []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TACHO_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	if code := write(); code != 1 {
+		t.Errorf("no config dir: exit = %d, want 1", code)
+	}
+	if b, _ := os.ReadFile(installed); string(b) != old {
+		t.Errorf("no config dir: plugin rewritten to %q", b)
+	}
+
+	if runtime.GOOS == "windows" {
+		return // directory permission bits don't block listing there
+	}
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if err := os.Chmod(*setting, 0o300); err != nil { // writable, not listable
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(*setting, 0o755) })
+	if _, err := os.ReadDir(*setting); err == nil {
+		t.Skip("directory stays listable (running as root?)")
+	}
+	if code := write(); code != 1 {
+		t.Errorf("unlistable folder: exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
+		t.Error("unlistable folder: added tacho.30s.sh next to the installed plugin")
+	}
+}

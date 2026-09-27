@@ -38,9 +38,11 @@ func shellWord(exe string) string {
 
 // SwiftBarPlugin renders the SwiftBar / xbar plugin script for the tacho
 // binary at exe (#270). It is contrib/tacho.30s.sh with the binary's
-// absolute path on the exec line in place of a PATH lookup: SwiftBar starts
+// absolute path on the exec line in place of a PATH lookup — SwiftBar starts
 // plugins with launchd's minimal PATH, which misses GOBIN, nvm / mise, and
-// most other install locations. Callers must pass a non-empty exe.
+// most other install locations — and the PATH note rewritten to match.
+// Everything else stays as in contrib, including the PATH line, so the
+// plugin's environment is the same. Callers must pass a non-empty exe.
 func SwiftBarPlugin(exe string) string {
 	return `#!/bin/bash
 # <xbar.title>tachograph</xbar.title>
@@ -50,6 +52,7 @@ func SwiftBarPlugin(exe string) string {
 # Written by ` + "`tacho setup swiftbar`" + `. SwiftBar doesn't see your shell's
 # PATH, so the exec line runs tacho by absolute path: re-run it after moving
 # or reinstalling tacho (for an npm install, also after switching Node).
+export PATH="/opt/homebrew/bin:$HOME/go/bin:$PATH"
 # Optional display tweaks (see the README's SwiftBar section):
 # export TACHO_APPEARANCE=light   # near-black logo/track for a light menu bar
 # export TACHO_SWIFTBAR_TEXT=1    # moon-dial text instead of the gauge image
