@@ -131,8 +131,7 @@ func Load() Table {
 	// Merge field-by-field over the existing rate so a partial override
 	// (e.g. {"claude-opus":{"input":20}}) tweaks one price without zeroing the
 	// others. Pointer fields distinguish an explicit 0 from an omitted field.
-	var over map[string]rateOverride
-	if json.Unmarshal(b, &over) == nil {
+	if over, err := parseOverrides(b); err == nil {
 		for k, o := range over {
 			r := t[k] // existing default, or zero Rate for a brand-new model id
 			if o.In != nil {
@@ -151,6 +150,21 @@ func Load() Table {
 		}
 	}
 	return t
+}
+
+// Validate reports whether b decodes as a pricing.json the way Load reads it.
+// Load ignores the whole file on any decode error — a wrongly typed value as
+// much as a syntax error — so doctor uses this to surface both (#260).
+func Validate(b []byte) error {
+	_, err := parseOverrides(b)
+	return err
+}
+
+// parseOverrides is the single decode path shared by Load and Validate.
+func parseOverrides(b []byte) (map[string]rateOverride, error) {
+	var over map[string]rateOverride
+	err := json.Unmarshal(b, &over)
+	return over, err
 }
 
 // rateOverride mirrors Rate with pointer fields so an omitted price keeps the

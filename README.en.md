@@ -418,7 +418,7 @@ the price table still count toward the token total, but are excluded from the
 cost calculation and the cost total (if no priced model ran that day, cost
 shows as unknown, `--`). If `pricing.json` can't be parsed (bad JSON, or a
 value of the wrong type), the whole file is ignored and the built-in prices
-stand; `tacho doctor` flags JSON syntax errors.
+stand; `tacho doctor` flags both syntax errors and wrongly typed values.
 
 ### Per-day cost / tokens (`tacho daily`)
 

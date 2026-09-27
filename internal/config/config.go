@@ -192,6 +192,26 @@ func load() (Config, error) {
 	if err != nil {
 		return c, err
 	}
+	c, err = parse(b)
+	if err != nil {
+		return c, fmt.Errorf("%s: %w", p, err)
+	}
+	return c, nil
+}
+
+// Validate reports whether b decodes as a config.json the way Load reads it.
+// Load falls back to all defaults on any decode error — a wrongly typed value
+// as much as a syntax error — so doctor uses this to surface both (#260).
+// Unknown enum values are not errors: they load and are listed by Warnings.
+func Validate(b []byte) error {
+	_, err := parse(b)
+	return err
+}
+
+// parse is the single decode path shared by load and Validate. On error it
+// returns clean defaults.
+func parse(b []byte) (Config, error) {
+	c := Default()
 	// Unmarshal onto the defaults: absent keys keep their default values. A
 	// JSON array (including an explicit empty []) replaces Tools, so "show
 	// nothing" is honored; only an absent/null tools key leaves it nil and
@@ -199,7 +219,7 @@ func load() (Config, error) {
 	// selection so that distinction survives a round-trip.
 	if err := json.Unmarshal(b, &c); err != nil {
 		// A partial unmarshal may have touched c; hand back clean defaults.
-		return Default(), fmt.Errorf("%s: %w", p, err)
+		return Default(), err
 	}
 	if c.Tools == nil {
 		c.Tools = Default().Tools

@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kosako/tachograph/internal/config"
+	"github.com/kosako/tachograph/internal/pricing"
 )
 
 // jsonFileState feeds the doctor's config.json / pricing.json lines; each
@@ -12,7 +15,7 @@ import (
 func TestJSONFileState(t *testing.T) {
 	dir := t.TempDir()
 
-	if got := jsonFileState(filepath.Join(dir, "missing.json")); got != "(default)" {
+	if got := jsonFileState(filepath.Join(dir, "missing.json"), nil); got != "(default)" {
 		t.Errorf("missing = %q, want (default)", got)
 	}
 
@@ -20,7 +23,7 @@ func TestJSONFileState(t *testing.T) {
 	if err := os.WriteFile(valid, []byte(`{"tools": []}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := jsonFileState(valid); got != "present" {
+	if got := jsonFileState(valid, nil); got != "present" {
 		t.Errorf("valid = %q, want present", got)
 	}
 
@@ -28,7 +31,7 @@ func TestJSONFileState(t *testing.T) {
 	if err := os.WriteFile(broken, []byte(`{broken`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := jsonFileState(broken); !strings.HasPrefix(got, "present but INVALID JSON") {
+	if got := jsonFileState(broken, nil); !strings.HasPrefix(got, "present but INVALID JSON") {
 		t.Errorf("broken = %q, want INVALID JSON diagnosis", got)
 	}
 
@@ -38,8 +41,61 @@ func TestJSONFileState(t *testing.T) {
 	if err := os.Mkdir(asDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := jsonFileState(asDir); !strings.HasPrefix(got, "unreadable — ") {
+	if got := jsonFileState(asDir, nil); !strings.HasPrefix(got, "unreadable — ") {
 		t.Errorf("dir = %q, want unreadable diagnosis", got)
+	}
+}
+
+// A file that is valid JSON but doesn't decode into what the loader expects
+// (a wrongly typed value) is ignored in full by the render path, so doctor
+// must flag it too — not report it as present (#260).
+func TestJSONFileStateFlagsWrongTypes(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name     string
+		content  string
+		validate func([]byte) error
+	}{
+		{"pricing.json", `{"claude-fable":{"input":"10"},"claude-opus":{"input":99}}`, pricing.Validate},
+		{"config.json", `{"tools":"codex","menubar":{"metric":"cost"}}`, config.Validate},
+	}
+	for _, c := range cases {
+		p := filepath.Join(dir, c.name)
+		if err := os.WriteFile(p, []byte(c.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := jsonFileState(p, c.validate)
+		if !strings.HasPrefix(got, "present but INVALID (ignored) — ") {
+			t.Errorf("%s = %q, want the INVALID (ignored) diagnosis", c.name, got)
+		}
+	}
+	// A well-typed file stays "present" under the same validators.
+	ok := filepath.Join(dir, "ok.json")
+	if err := os.WriteFile(ok, []byte(`{"claude-opus":{"input":99}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := jsonFileState(ok, pricing.Validate); got != "present" {
+		t.Errorf("well-typed pricing.json = %q, want present", got)
+	}
+	// A number that overflows float64 in a field the loader skips is still
+	// accepted by the loaders, so doctor must not call it invalid JSON.
+	for _, c := range []struct {
+		name, content string
+		validate      func([]byte) error
+	}{
+		{"big-config.json", `{"tools":["codex"],"extra":1e1000}`, config.Validate},
+		{"big-pricing.json", `{"claude-opus":{"input":99,"note":1e1000}}`, pricing.Validate},
+	} {
+		p := filepath.Join(dir, c.name)
+		if err := os.WriteFile(p, []byte(c.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.validate([]byte(c.content)); err != nil {
+			t.Fatalf("%s: the loader rejects it (%v); the case assumes it is accepted", c.name, err)
+		}
+		if got := jsonFileState(p, c.validate); got != "present" {
+			t.Errorf("%s = %q, want present (the loader accepts it)", c.name, got)
+		}
 	}
 }
 

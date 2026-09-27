@@ -15,6 +15,7 @@ import (
 	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
+	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -52,12 +53,12 @@ func runDoctor(args []string) int {
 	fmt.Println()
 
 	fmt.Println("config (" + config.Dir() + "):")
-	reportJSONFile("config.json", filepath.Join(config.Dir(), "config.json"))
+	reportJSONFile("config.json", filepath.Join(config.Dir(), "config.json"), config.Validate)
 	for _, w := range configValueWarnings() {
 		fmt.Println("    warning:  " + w)
 	}
 	reportFile("statusline.tmpl", filepath.Join(config.Dir(), "statusline.tmpl"))
-	reportJSONFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"))
+	reportJSONFile("pricing.json", filepath.Join(config.Dir(), "pricing.json"), pricing.Validate)
 	fmt.Println()
 
 	reportDataSources(now)
@@ -339,7 +340,7 @@ func reportFile(label, path string) {
 // configValueWarnings lists the config.json values the read path ignores
 // (unknown tools, styles, metrics, limit displays, out-of-range thresholds)
 // with what tacho shows instead (#230). Nothing when the file is missing or
-// isn't valid JSON — reportJSONFile covers those.
+// can't be decoded — reportJSONFile covers those.
 func configValueWarnings() []string {
 	c, err := config.LoadStrict()
 	if err != nil {
@@ -348,15 +349,18 @@ func configValueWarnings() []string {
 	return c.Warnings()
 }
 
-// reportJSONFile is reportFile plus a syntax check, so a broken config.json /
+// reportJSONFile is reportFile plus a decode check, so a broken config.json /
 // pricing.json is visible here instead of being silently ignored by the
-// lenient render-path loaders.
-func reportJSONFile(label, path string) {
-	fmt.Println("  " + label + ":  " + jsonFileState(path))
+// lenient render-path loaders. validate is the loader's own decode check
+// (config.Validate / pricing.Validate), which also catches a wrongly typed
+// value: the loaders ignore the whole file for that too (#260).
+func reportJSONFile(label, path string, validate func([]byte) error) {
+	fmt.Println("  " + label + ":  " + jsonFileState(path, validate))
 }
 
-// jsonFileState classifies a JSON config file for the doctor report.
-func jsonFileState(path string) string {
+// jsonFileState classifies a JSON config file for the doctor report. A nil
+// validate checks JSON syntax only.
+func jsonFileState(path string, validate func([]byte) error) string {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "(default)"
@@ -364,9 +368,18 @@ func jsonFileState(path string) string {
 	if err != nil {
 		return "unreadable — " + err.Error()
 	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
+	// Syntax only: decoding into json.RawMessage checks the JSON grammar
+	// without converting values, so a number that overflows float64 in a
+	// field the loader skips (e.g. "extra": 1e1000) isn't misreported — the
+	// loaders accept such a file, and validate is what decides the rest.
+	var raw json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return "present but INVALID JSON (ignored) — " + err.Error()
+	}
+	if validate != nil {
+		if err := validate(b); err != nil {
+			return "present but INVALID (ignored) — " + err.Error()
+		}
 	}
 	return "present"
 }
