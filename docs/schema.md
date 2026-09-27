@@ -94,7 +94,7 @@
 | `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路・snapshot経路とも)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う。statusline 以外の経路の Claude では、`session` / `fallback` / `session_today` は「直近に観測したセッション」の値で、stale になると null(不明)に落ちる(snapshot 経路・transcript 経路とも、#235)。snapshot が stale のときは transcript 経路と比べ、transcript の方が新しければその `session` / `model` / `collected_at` を使い、snapshot の `limits` のうちリセット時刻を過ぎていない枠を持ち越す(どちらもサブスクリプションのときだけ、#263)。snapshot の `limits` / `model` / `plan` / `credits` は最大 30 日保持 |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
-| `limits` | nullable。並び順はツールの報告順(Claude は 5h → weekly、Codex は `rate_limits.primary` → `secondary`)で、`window_minutes` 昇順は保証しない(#268)。枠は配列の位置ではなく `window` / `window_minutes` で引く |
+| `limits` | nullable。`window_minutes` の昇順(Claude は 5h → weekly。Codex は `rate_limits.primary` / `secondary` をサーバーの割り当て順ではなく長さで並べる、#268)。枠は配列の位置ではなく `window` / `window_minutes` で引く |
 | `used_pct` | 「使った割合」(%)。ツールが報告した値をそのまま入れる(通常は 0–100 だが範囲外の補正はせず、0–100 に丸めるのは表示のときだけ)。JSON はこの意味のまま。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト)。値自体は `limits` の有無に関わらず取れる限り入る(`session_tokens` は `session.tokens.total` と同じ値) |
 | `daily.tokens` / `session_today.tokens` | 課金対象トークン(`input` + `output`。`input` は cache write / cache read 込み)で、`session.tokens.total` および `cost_usd` と分母が同じ(#234)。`input` / `cached_input` / `output` の内訳を併せて持つ。Codex は `total_token_usage` の増分をそのまま使う |

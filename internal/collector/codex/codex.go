@@ -384,6 +384,12 @@ func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) s
 		if rl.Secondary != nil {
 			limits = append(limits, toLimit(rl.Secondary))
 		}
+		// primary / secondary is the server's assignment, not a size order
+		// (the weekly window moved to primary when the 5h one was lifted in
+		// 2026-07); schema.md promises ascending window_minutes (#268).
+		sort.SliceStable(limits, func(i, j int) bool {
+			return *limits[i].WindowMinutes < *limits[j].WindowMinutes
+		})
 		t.Limits = limits
 	}
 	return t
