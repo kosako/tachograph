@@ -10,7 +10,11 @@ import (
 // to print only the one-shot flags (-h) or fail as an unknown command (help)
 // (#269).
 func TestRunHelp(t *testing.T) {
-	for _, args := range [][]string{{"-h"}, {"-help"}, {"--help"}, {"help"}, {"doctor", "-h"}} {
+	for _, args := range [][]string{
+		{"-h"}, {"--h"}, {"-help"}, {"--help"}, {"help"}, {"doctor", "-h"},
+		// After other one-shot flags, where the FlagSet used to answer.
+		{"-no-color", "-h"}, {"--no-cache", "--help"}, {"-no-color", "-no-cache", "-help"},
+	} {
 		var code int
 		out := capture(t, &os.Stdout, func() { code = run(args) })
 		if code != 0 {
@@ -28,6 +32,25 @@ func TestRunVersionFlag(t *testing.T) {
 		out := capture(t, &os.Stdout, func() { code = run([]string{arg}) })
 		if code != 0 || !strings.HasPrefix(out, "tacho ") {
 			t.Errorf("run(%q) = %d, stdout %q; want 0 and the version", arg, code, out)
+		}
+	}
+}
+
+// Flag parsing stops at the first non-flag argument or "--", so a -h after
+// them is not a help request.
+func TestOneShotWantsHelp(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"-no-color", "-h"}, true},
+		{[]string{"-no-color"}, false},
+		{[]string{"--", "-h"}, false},
+		{[]string{"extra", "-h"}, false},
+		{nil, false},
+	} {
+		if got := oneShotWantsHelp(c.args); got != c.want {
+			t.Errorf("oneShotWantsHelp(%q) = %v, want %v", c.args, got, c.want)
 		}
 	}
 }

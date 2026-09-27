@@ -117,16 +117,14 @@ func run(args []string) int {
 		return 0
 	case "":
 		// Answer help and version here: the one-shot FlagSet would print only
-		// its own flags for -h and reject -version (#269).
-		if len(args) > 0 {
-			switch {
-			case isHelpFlag(args[0]):
-				fmt.Print(usage)
-				return 0
-			case args[0] == "--version" || args[0] == "-version":
-				fmt.Println("tacho " + buildVersion())
-				return 0
-			}
+		// its own flags (on stderr) for -h and reject -version (#269).
+		if oneShotWantsHelp(args) {
+			fmt.Print(usage)
+			return 0
+		}
+		if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
+			fmt.Println("tacho " + buildVersion())
+			return 0
 		}
 		return runOnce(args)
 	default:
@@ -135,9 +133,30 @@ func run(args []string) int {
 	}
 }
 
-// isHelpFlag reports whether arg is -h, -help, or --help.
+// isHelpFlag reports whether arg asks for help in one of the spellings the
+// flag package treats as help: -h, --h, -help, --help.
 func isHelpFlag(arg string) bool {
-	return arg == "-h" || arg == "-help" || arg == "--help"
+	switch arg {
+	case "-h", "--h", "-help", "--help":
+		return true
+	}
+	return false
+}
+
+// oneShotWantsHelp reports whether the one-shot flags ask for help anywhere,
+// e.g. `tacho -no-color -h`. Those flags are all booleans, so every argument
+// is a flag until the first non-flag argument or "--", where the flag package
+// stops parsing too.
+func oneShotWantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" || !strings.HasPrefix(a, "-") {
+			return false
+		}
+		if isHelpFlag(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func style(noColor bool, cfg config.Config) render.Style {
