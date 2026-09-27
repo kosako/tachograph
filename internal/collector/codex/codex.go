@@ -52,15 +52,19 @@ func Collect(opts Options) schema.Tool {
 		}
 		return schema.Unavailable(schema.ToolCodex)
 	}
-	return build(res.path, res.tc, res.turn, now)
+	return build(res.path, res.tc, res.lim, res.turn, now)
 }
 
-// pick is the freshest usable session found while walking the date tree.
+// pick is the freshest usable session found while walking the date tree,
+// plus the freshest token_count carrying the account's rate limits (lim),
+// which can sit in an older rollout than the session (#258).
 type pick struct {
 	tc      *TokenCount
 	turn    *TurnContext
 	path    string
 	ts      time.Time
+	lim     *TokenCount
+	limTS   time.Time
 	sawFile bool  // any .jsonl was seen (to distinguish no_token_count vs unavailable)
 	readErr error // last read error, surfaced only when no usable session was found
 }
@@ -79,7 +83,13 @@ type pick struct {
 // The freshest token_count — not the newest file by mtime — is still what
 // decides (rate limits are account-global, so any session's latest
 // token_count is valid); a rollout without a token_count yet (just-started
-// session) is skipped so it can't hide older valid data.
+// session) is skipped so it can't hide older valid data. The account's rate
+// limits are tracked the same way but separately: the freshest session may
+// hold only non-account buckets (#258), so the walk continues until a file
+// can improve neither the session nor the limits. Without limits found yet,
+// the search looks back at most staleAfterMinutes before the session — older
+// limits would only render stale, and sessions that never carry limits
+// (API-key use) must not make every rollout get read.
 func pickSession(dir string) pick {
 	files := rolloutsByMtime(dir)
 	acc := pick{sawFile: len(files) > 0}
@@ -90,24 +100,30 @@ func pickSession(dir string) pick {
 				acc.readErr = err
 				continue
 			}
-			if info.ModTime().Before(acc.ts) {
+			limCutoff := acc.ts.Add(-staleAfterMinutes * time.Minute)
+			if acc.lim != nil {
+				limCutoff = acc.limTS
+			}
+			if info.ModTime().Before(acc.ts) && info.ModTime().Before(limCutoff) {
 				continue
 			}
 		}
-		tc, turn, err := sessionEvents(f.path)
+		tc, lim, turn, err := sessionEvents(f.path)
 		if err != nil {
 			acc.readErr = err
 			continue
 		}
-		if tc == nil {
-			continue
+		if tc != nil {
+			if ts, err := time.Parse(time.RFC3339Nano, tc.timestamp); err == nil &&
+				(acc.tc == nil || ts.After(acc.ts)) {
+				acc.tc, acc.turn, acc.path, acc.ts = tc, turn, f.path, ts
+			}
 		}
-		ts, err := time.Parse(time.RFC3339Nano, tc.timestamp)
-		if err != nil {
-			continue
-		}
-		if acc.tc == nil || ts.After(acc.ts) {
-			acc.tc, acc.turn, acc.path, acc.ts = tc, turn, f.path, ts
+		if lim != nil {
+			if ts, err := time.Parse(time.RFC3339Nano, lim.timestamp); err == nil &&
+				(acc.lim == nil || ts.After(acc.limTS)) {
+				acc.lim, acc.limTS = lim, ts
+			}
 		}
 	}
 	return acc
@@ -179,24 +195,29 @@ func subdirsDesc(dir string) []string {
 	return out
 }
 
-// sessionEvents reads one rollout's most recent token_count and turn_context,
+// sessionEvents reads one rollout's most recent usable token_count, most
+// recent token_count carrying the account's rate limits, and turn_context,
 // reading the tail first and falling back to a full scan when the tail misses
-// either. turn_context is emitted at turn start and token_count at the end, so a
-// single turn longer than the tail can leave turn_context out of reach (model/cwd
-// would silently go null) — the full scan recovers it.
-func sessionEvents(path string) (tc *TokenCount, turn *TurnContext, err error) {
+// the token_count or turn_context. turn_context is emitted at turn start and
+// token_count at the end, so a single turn longer than the tail can leave
+// turn_context out of reach (model/cwd would silently go null) — the full scan
+// recovers it. A missing lim alone doesn't trigger the full scan: the codex
+// bucket is written just before the other buckets of the same turn, and
+// sessions without limits (API-key use) would otherwise be read in full on
+// every call; pickSession looks for limits in other rollouts instead.
+func sessionEvents(path string) (tc, lim *TokenCount, turn *TurnContext, err error) {
 	lines, err := tailLines(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	tc, turn, ok := lastEvents(lines)
-	if !ok || turn == nil {
+	tc, lim, turn = lastEvents(lines)
+	if tc == nil || turn == nil {
 		if lines, err = allLines(path); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		tc, turn, _ = lastEvents(lines)
+		tc, lim, turn = lastEvents(lines)
 	}
-	return tc, turn, nil
+	return tc, lim, turn, nil
 }
 
 func errTool(code, msg string) schema.Tool {
@@ -239,32 +260,40 @@ func allLines(path string) ([][]byte, error) {
 	return bytes.Split(b, []byte("\n")), nil
 }
 
-// lastEvents scans backwards for the most recent usable token_count and
-// turn_context. ok reports whether a usable token_count was found: an empty
-// token_count (a usage-limit-refused request, #205) is skipped so it can't
-// hide the session's — or an older session's — last valid data.
-func lastEvents(lines [][]byte) (tc *TokenCount, turn *TurnContext, ok bool) {
+// lastEvents scans backwards for the most recent usable token_count, the most
+// recent token_count carrying the account's rate limits, and turn_context. An
+// empty token_count (a usage-limit-refused request, #205) is skipped so it
+// can't hide the session's — or an older session's — last valid data; a
+// non-account bucket's token_count (#258) can supply session usage but never
+// the limits.
+func lastEvents(lines [][]byte) (tc, lim *TokenCount, turn *TurnContext) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		ev, evOK := ParseEvent(lines[i])
 		if !evOK {
 			continue
 		}
-		if tc == nil {
-			if c := ev.TokenCount(); c != nil && c.Usable() {
+		if c := ev.TokenCount(); c != nil {
+			if tc == nil && c.Usable() {
 				tc = c
+			}
+			if lim == nil && c.AccountLimits() {
+				lim = c
 			}
 		}
 		if turn == nil {
 			turn = ev.TurnContext()
 		}
-		if tc != nil && turn != nil {
+		if tc != nil && lim != nil && turn != nil {
 			break
 		}
 	}
-	return tc, turn, tc != nil
+	return tc, lim, turn
 }
 
-func build(path string, tc *TokenCount, turn *TurnContext, now time.Time) schema.Tool {
+// build assembles the tool from the session's token_count (tc) and the
+// account's rate limits (lim, nil when none was found). The row is as old as
+// its older source, so collected_at and stale follow the older timestamp.
+func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) schema.Tool {
 	t := schema.Tool{
 		Tool:      schema.ToolCodex,
 		Available: true,
@@ -272,6 +301,11 @@ func build(path string, tc *TokenCount, turn *TurnContext, now time.Time) schema
 	}
 
 	if ts, err := time.Parse(time.RFC3339Nano, tc.timestamp); err == nil {
+		if lim != nil {
+			if lts, err := time.Parse(time.RFC3339Nano, lim.timestamp); err == nil && lts.Before(ts) {
+				ts = lts
+			}
+		}
 		s := ts.Local().Format(time.RFC3339)
 		t.CollectedAt = &s
 		t.Stale = now.Sub(ts) > staleAfterMinutes*time.Minute
@@ -309,7 +343,10 @@ func build(path string, tc *TokenCount, turn *TurnContext, now time.Time) schema
 	}
 	t.Session = sess
 
-	if rl := tc.RateLimits; rl != nil {
+	if lim == nil {
+		return t
+	}
+	if rl := lim.RateLimits; rl != nil {
 		t.Plan = rl.PlanType
 		if rl.PlanType != nil {
 			t.Backend = schema.BackendSubscription

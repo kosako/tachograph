@@ -33,7 +33,7 @@
   "available": true,                  // データソース(セッションファイル等)が見つかったか
   "error": null,                      // 取得失敗時 {"code": "...", "message": "..."}
   "stale": false,                     // 最終観測データが古いとき true(閾値はツール別: Claude transcript / snapshot 経路=60分 StaleAfterMinutes、Codex=5時間)
-  "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(Claude transcript経路は最後の usage 行、Codex は最後の token_count イベントの timestamp。statusline 経由は受信時刻)。不明なら null
+  "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(Claude transcript経路は最後の usage 行、Codex は最後の token_count イベントの timestamp で、リミットを別の token_count から取ったときは古い方。statusline 経由は受信時刻)。不明なら null
   "backend": "subscription",          // "subscription" | "api" | "bedrock" | "vertex" | "unknown"
   "plan": "prolite",                  // プラン名。不明なら null
   "model": {
@@ -109,7 +109,7 @@
 | `session.tokens` | 現セッション transcript 本体(`<session>.jsonl` 1 ファイル)の `message.usage` 集計(同名ディレクトリ配下の subagents / workflows transcript は含まないため、`daily` / `session_today` とは集計範囲が異なる。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `session.context_used_pct` | statusline `context_window.used_percentage`(transcripts経路では null) | `last_token_usage.total_tokens` ÷ `model_context_window` × 100(直近リクエストの総量による近似) |
-| `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary` |
+| `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
 | `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |
 | `backend` | 環境変数から判定: `CLAUDE_CODE_USE_BEDROCK` → `bedrock`、`CLAUDE_CODE_USE_VERTEX` → `vertex`、`ANTHROPIC_API_KEY` → `api`、いずれも無ければ `subscription`(上から優先。statusline 経路では `api` と判定してもレートリミット枠があれば `subscription`。transcripts経路では tacho を実行したプロセスの環境変数を見る) | `rate_limits.plan_type` があれば `subscription`、無ければ `unknown` |
 | `credits` | —(null) | `rate_limits.credits` |
