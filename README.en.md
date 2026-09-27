@@ -107,8 +107,8 @@ same path under `$GOPATH/bin`):
 go install github.com/kosako/tachograph/cmd/tacho@latest
 ```
 
-To pin a specific version, use `tachograph@0.6.3` with npm or a tag like
-`@v0.6.3` with go. `tacho version` reports the version embedded at install time
+To pin a specific version, use `tachograph@0.7.0` with npm or a tag like
+`@v0.7.0` with go. `tacho version` reports the version embedded at install time
 (the tag) — an untagged local build shows a commit-based pseudo-version.
 
 ## Usage
