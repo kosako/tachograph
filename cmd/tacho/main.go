@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -116,12 +117,7 @@ func run(args []string) int {
 		fmt.Print(usage)
 		return 0
 	case "":
-		// Answer help and version here: the one-shot FlagSet would print only
-		// its own flags (on stderr) for -h and reject -version (#269).
-		if oneShotWantsHelp(args) {
-			fmt.Print(usage)
-			return 0
-		}
+		// The one-shot FlagSet would reject -version (#269).
 		if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
 			fmt.Println("tacho " + buildVersion())
 			return 0
@@ -139,22 +135,6 @@ func isHelpFlag(arg string) bool {
 	switch arg {
 	case "-h", "--h", "-help", "--help":
 		return true
-	}
-	return false
-}
-
-// oneShotWantsHelp reports whether the one-shot flags ask for help anywhere,
-// e.g. `tacho -no-color -h`. Those flags are all booleans, so every argument
-// is a flag until the first non-flag argument or "--", where the flag package
-// stops parsing too.
-func oneShotWantsHelp(args []string) bool {
-	for _, a := range args {
-		if a == "--" || !strings.HasPrefix(a, "-") {
-			return false
-		}
-		if isHelpFlag(a) {
-			return true
-		}
 	}
 	return false
 }
@@ -441,10 +421,23 @@ func systemDark() bool {
 }
 
 func runOnce(args []string) int {
-	fs := flag.NewFlagSet("tacho", flag.ExitOnError)
+	fs := flag.NewFlagSet("tacho", flag.ContinueOnError)
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	noCache := fs.Bool("no-cache", false, "bypass the TTL cache")
-	fs.Parse(args)
+	// A help flag wherever the flag package sees one (`tacho -no-color -h`)
+	// prints the full usage on stdout; it used to list only these flags on
+	// stderr (#269). Other parse errors keep what flag.ExitOnError did: the
+	// message and the flag list on stderr, exit 2.
+	var parseOut strings.Builder
+	fs.SetOutput(&parseOut)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Print(usage)
+			return 0
+		}
+		fmt.Fprint(os.Stderr, parseOut.String())
+		return 2
+	}
 
 	now := time.Now()
 	cfg := config.Load()
