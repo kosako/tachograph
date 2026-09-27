@@ -7,7 +7,9 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"regexp"
+	"strconv"
 )
 
 // Event is one rollout line's envelope.
@@ -98,8 +100,8 @@ type rlWindow struct {
 }
 
 // Usable reports whether the token_count carries anything a renderer can
-// show: usage info, a rate-limit window, a plan, or a numeric credits
-// balance. Codex also writes an empty token_count (info null, no windows)
+// show: usage info, a rate-limit window, a plan, or a credits balance.
+// Codex also writes an empty token_count (info null, no windows)
 // when a request is refused for a hit usage limit; selecting it as current
 // would mask the last valid session's limits at exactly the moment they
 // matter most (#205).
@@ -112,11 +114,11 @@ func (tc *TokenCount) Usable() bool {
 }
 
 // AccountLimits reports whether the token_count carries the account's rate
-// limits: a window, a plan, or a numeric credits balance from the "codex"
-// bucket (or a pre-bucket token_count without limit_id). Other buckets are
-// not the account's windows — taking limits from a "premium" token_count
-// (no windows) blanked them, and a model-specific bucket would stand in for
-// the account's weekly window (#258).
+// limits: a window, a plan, or a credits balance from the "codex" bucket (or
+// a pre-bucket token_count without limit_id). Other buckets are not the
+// account's windows — taking limits from a "premium" token_count (no
+// windows) blanked them, and a model-specific bucket would stand in for the
+// account's weekly window (#258).
 func (tc *TokenCount) AccountLimits() bool {
 	rl := tc.RateLimits
 	if rl == nil || (rl.LimitID != "" && rl.LimitID != "codex") {
@@ -125,8 +127,36 @@ func (tc *TokenCount) AccountLimits() bool {
 	if rl.Primary != nil || rl.Secondary != nil || rl.PlanType != nil {
 		return true
 	}
-	_, isFloat := rl.Credits.(float64)
-	return isFloat
+	_, ok := creditsBalance(rl.Credits)
+	return ok
+}
+
+// creditsBalance returns the balance a rate_limits.credits value carries.
+// Current Codex writes an object — {"has_credits", "unlimited", "balance"},
+// with the balance as a decimal string — while older versions wrote a plain
+// number, which is still read. ok is false when there is no finite balance
+// to show: a plan without credits, unlimited credits, or a missing or
+// unparsable balance (#267). The has_credits:false object on the empty
+// token_count of a refused run (#205) therefore keeps it unusable.
+func creditsBalance(v any) (balance float64, ok bool) {
+	switch c := v.(type) {
+	case float64:
+		return c, true
+	case map[string]any:
+		has, _ := c["has_credits"].(bool)
+		unlimited, _ := c["unlimited"].(bool)
+		s, isStr := c["balance"].(string)
+		if !has || unlimited || !isStr {
+			return 0, false
+		}
+		// ParseFloat accepts "NaN" / "Inf", which encoding/json can't emit.
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, false
+		}
+		return f, true
+	}
+	return 0, false
 }
 
 // TurnContext is a turn_context event's payload (emitted at turn start).

@@ -63,7 +63,7 @@
       "saved_resets": null            // Codex「保存式リセット」用に予約。現状は常に null
     }
   ],
-  "credits": null,                    // クレジット残高。概念がない/不明なら null
+  "credits": null,                    // クレジット残高。概念がない/無制限/不明なら null
   "fallback": {                       // limits が null のときレンダラが主表示に使う
     "session_tokens": 989120,
     "estimated_cost_usd": null
@@ -112,7 +112,7 @@
 | `limits` | statusline `rate_limits.five_hour/seven_day`(transcript 自体からは取れない。snapshot が stale で transcript の方が新しいときは、条件を満たす snapshot の枠を持ち越す — `stale` の項を参照) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
 | `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |
 | `backend` | 環境変数から判定: `CLAUDE_CODE_USE_BEDROCK` → `bedrock`、`CLAUDE_CODE_USE_VERTEX` → `vertex`、`ANTHROPIC_API_KEY` → `api`、いずれも無ければ `subscription`(上から優先。statusline 経路では `api` と判定してもレートリミット枠があれば `subscription`。transcripts経路では tacho を実行したプロセスの環境変数を見る) | `rate_limits.plan_type` があれば `subscription`、無ければ `unknown` |
-| `credits` | —(null) | `rate_limits.credits` |
+| `credits` | —(null) | `rate_limits.credits.balance`(文字列を数値にする。`has_credits` が true で `unlimited` が false のときだけ。それ以外は null。旧形式の数値の `credits` もそのまま読む、#267) |
 | `fallback.estimated_cost_usd` | statusline `cost.total_cost_usd`(Claude Code 自身が算出した値で、tacho の料金表は使わない。transcripts経路では null) | 料金表 × `total_token_usage`(現在モデル × 全累積の概算) |
 
 Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`

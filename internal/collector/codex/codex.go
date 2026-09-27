@@ -374,7 +374,7 @@ func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) s
 		if rl.PlanType != nil {
 			t.Backend = schema.BackendSubscription
 		}
-		if c, isFloat := rl.Credits.(float64); isFloat {
+		if c, ok := creditsBalance(rl.Credits); ok {
 			t.Credits = &c
 		}
 		var limits []schema.Limit

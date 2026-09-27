@@ -536,6 +536,45 @@ func TestCollectTurnContextBeyondTail(t *testing.T) {
 	}
 }
 
+// Current Codex writes rate_limits.credits as an object; its balance must
+// reach Tool.Credits (it was always null, #267), and an account without
+// limited credits must stay null.
+func TestCollectCreditsFromObject(t *testing.T) {
+	cases := []struct {
+		name     string
+		credits  string
+		want     float64
+		wantNull bool
+	}{
+		{"balance", `{"has_credits":true,"unlimited":false,"balance":"12.75"}`, 12.75, false},
+		{"unlimited", `{"has_credits":true,"unlimited":true,"balance":"0"}`, 0, true},
+		{"no credits", `{"has_credits":false,"unlimited":false,"balance":"0"}`, 0, true},
+	}
+	for _, c := range cases {
+		root := t.TempDir()
+		day := filepath.Join(root, "sessions", "2026", "09", "27")
+		if err := os.MkdirAll(day, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		tc := `{"timestamp":"2026-09-27T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":0,"total_tokens":1},"model_context_window":200000},"rate_limits":{"limit_id":"codex","primary":{"used_percent":5,"window_minutes":10080,"resets_at":1790000000},"secondary":null,"credits":` + c.credits + `,"plan_type":"plus"}}}`
+		writeRollout(t, day, "rollout-2026-09-27T10-00-00-019e5933-2289-7e72-88fd-000000000267.jsonl",
+			ctxLine("2026-09-27T10:00:00.000Z", "gpt-x", "/x")+"\n"+tc,
+			time.Date(2026, 9, 27, 10, 5, 0, 0, time.UTC))
+
+		now, _ := time.Parse(time.RFC3339, "2026-09-27T10:06:00Z")
+		got := Collect(Options{Root: root, Now: now})
+		if got.Error != nil {
+			t.Fatalf("%s: Error = %+v", c.name, got.Error)
+		}
+		switch {
+		case c.wantNull && got.Credits != nil:
+			t.Errorf("%s: Credits = %v, want null", c.name, *got.Credits)
+		case !c.wantNull && (got.Credits == nil || *got.Credits != c.want):
+			t.Errorf("%s: Credits = %v, want %v", c.name, got.Credits, c.want)
+		}
+	}
+}
+
 // toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
 func TestToLimitNullResetsAt(t *testing.T) {
 	l := toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: 5, ResetsAt: 0})
