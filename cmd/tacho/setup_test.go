@@ -224,7 +224,7 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 // else the first GOPATH entry's bin — both with the go toolchain and, when go
 // isn't callable, from the environment (#264).
 func TestGoBin(t *testing.T) {
-	home := os.Getenv("HOME")
+	home, profile := os.Getenv("HOME"), os.Getenv("USERPROFILE")
 	a, b := t.TempDir(), t.TempDir()
 	gobin := filepath.Join(t.TempDir(), "gobin")
 	sep := string(filepath.ListSeparator)
@@ -250,8 +250,9 @@ func TestGoBin(t *testing.T) {
 	}
 
 	// Values only in the go env file must come from `go env` (the
-	// environment alone would give ~/go/bin). With HOME unset GOPATH is
-	// empty, so the output ends in an empty line that must still count.
+	// environment alone would give ~/go/bin). With no home directory
+	// (HOME, or USERPROFILE on Windows) GOPATH is empty, so the output ends
+	// in an empty line that must still count.
 	if _, err := exec.LookPath("go"); err == nil {
 		envFile := filepath.Join(t.TempDir(), "go.env")
 		t.Setenv("GOENV", envFile)
@@ -266,10 +267,12 @@ func TestGoBin(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
 		if got := goBin(); got != gobin {
 			t.Errorf("go env file GOBIN, empty GOPATH: goBin() = %q, want %q", got, gobin)
 		}
 		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", profile)
 		t.Setenv("GOENV", "off")
 		t.Setenv("GOPATH", a+sep+b)
 	}
