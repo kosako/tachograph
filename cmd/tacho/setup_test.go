@@ -383,8 +383,12 @@ func TestSetupSwiftBarWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(fresh); string(b) != want || info.Mode().Perm() != 0o755 {
-		t.Errorf("fresh install: mode %v content %q; want 0755 and the plugin", info.Mode().Perm(), b)
+	if b, _ := os.ReadFile(fresh); string(b) != want {
+		t.Errorf("fresh install: content %q, want the plugin", b)
+	}
+	// Windows has no execute bit (regular files report 0666).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
+		t.Errorf("fresh install: mode %v, want 0755", info.Mode().Perm())
 	}
 
 	// An installed, customized plugin is replaced in place and backed up.
