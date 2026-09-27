@@ -257,8 +257,9 @@ mirrors the status to the workspace sidebar as colored pills —
 default, following `limits.display`; ctx is usage; without rate-limit windows
 the pill shows session tokens instead, e.g. `claude ctx24% 989ktok`, and a
 stale pill shows its age right after the tool name, e.g. `claude ⚠1h …`),
-colored green/yellow/red by the higher of the 5h / wk usage and gray when
-stale — with no extra setup beyond the status line. It detects cmux via
+colored green/yellow/red by the highest usage among the reported windows
+(5h / wk) and gray when stale — with no extra setup beyond the status line.
+It detects cmux via
 `CMUX_WORKSPACE_ID` and talks through the cmux CLI (`TACHO_CMUX_BIN`, else
 `cmux` on PATH, else the one bundled with cmux.app), fire-and-forget, so the
 status line latency is unaffected.
@@ -308,12 +309,16 @@ The dropdown lists every metric per tool (5h / weekly / context / cost /
 tokens); the menu bar shows the one you select. If a tool doesn't report the
 selected 5h / weekly window (e.g. Codex temporarily without a 5h window), the
 menu bar shows a window it does report instead (tagged like `X wk85%` in the
-number style).
+number style). The moon-dial text (`TACHO_SWIFTBAR_TEXT=1`) currently ignores
+the selection and always draws the 5h window (or the first reported one;
+#266).
 
 Below them, the **last 7 days of cost/tokens** appear one row per day
 (`09/17  C $150.76/179M  X $0.13/27k`). The figures are defined exactly like
-`tacho daily`, and today's row equals the cost / tokens rows above. Each
-tool's three costliest days are shown in blue so the heavy days stand out
+`tacho daily`, and today's row normally equals the cost / tokens rows above
+(on a day with no usage yet, the cost row above currently falls back to the
+current session's value without `/d`, so they differ; #261). Each tool's
+three costliest days are shown in blue so the heavy days stand out
 (days with a zero or unknown cost don't compete). Earlier days are computed
 only when the cache lacks them — normally just yesterday, after midnight; the
 6 days up to yesterday at once on the first run or when the cache is rebuilt —
