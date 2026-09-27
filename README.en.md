@@ -315,10 +315,10 @@ the selection and always draws the 5h window (or the first reported one;
 
 Below them, the **last 7 days of cost/tokens** appear one row per day
 (`09/17  C $150.76/179M  X $0.13/27k`). The figures are defined exactly like
-`tacho daily`, and today's row normally equals the cost / tokens rows above
-(on a day with no usage yet, the cost row above currently falls back to the
-current session's value without `/d`, so they differ; #261). Each tool's
-three costliest days are shown in blue so the heavy days stand out
+`tacho daily`, and today's row equals the cost / tokens rows above (both read
+`$0.00` / `0` on a day with no usage yet); they differ only when today's total
+is unknown and the rows above fall back to the current session's value. Each
+tool's three costliest days are shown in blue so the heavy days stand out
 (days with a zero or unknown cost don't compete). Earlier days are computed
 only when the cache lacks them — normally just yesterday, after midnight; the
 6 days up to yesterday at once on the first run or when the cache is rebuilt —
