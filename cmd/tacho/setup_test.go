@@ -105,24 +105,74 @@ func TestDoctorErrorHints(t *testing.T) {
 	}
 }
 
-func TestSwiftBarPluginCandidates(t *testing.T) {
-	swiftDir := t.TempDir()
-	xbarDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("SWIFTBAR_PLUGIN_DIR", swiftDir)
-	t.Setenv("XBAR_PLUGIN_PATH", xbarDir)
-	t.Setenv("HOME", home)
+// doctor must find the plugin where SwiftBar actually loads it: the
+// user-chosen PluginDirectory, SWIFTBAR_PLUGINS_PATH, or the default folder,
+// under any tacho.*.sh name (#265).
+func TestFindSwiftBarPlugin(t *testing.T) {
+	home, setting := isolateSwiftBar(t)
 
-	got := strings.Join(swiftBarPluginCandidates(), "\n")
-	for _, want := range []string{
-		filepath.Join(swiftDir, "tacho.30s.sh"),
-		filepath.Join(xbarDir, "tacho.30s.sh"),
-		filepath.Join(home, "Library", "Application Support", "SwiftBar", "Plugins", "tacho.30s.sh"),
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("swiftBarPluginCandidates() missing %q in:\n%s", want, got)
+	write := func(dir, name string) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
 		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/bash\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
 	}
+
+	// Another plugin and a folder named like ours don't count.
+	defaultDir := filepath.Join(home, "Library", "Application Support", "SwiftBar", "Plugins")
+	write(defaultDir, "other.30s.sh")
+	if err := os.MkdirAll(filepath.Join(defaultDir, "tacho.dir.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := findSwiftBarPlugin(); got != "" {
+		t.Fatalf("no tacho plugin: findSwiftBarPlugin() = %q, want \"\"", got)
+	}
+
+	// Renamed interval in the default folder.
+	renamed := write(defaultDir, "tacho.1m.sh")
+	if got := findSwiftBarPlugin(); got != renamed {
+		t.Errorf("renamed plugin: got %q, want %q", got, renamed)
+	}
+
+	// The PluginDirectory setting is searched before the default folder.
+	custom := write(filepath.Join(t.TempDir(), "plugins"), "tacho.30s.sh")
+	*setting = filepath.Dir(custom)
+	if got := findSwiftBarPlugin(); got != custom {
+		t.Errorf("PluginDirectory: got %q, want %q", got, custom)
+	}
+
+	// SWIFTBAR_PLUGINS_PATH is a folder; SWIFTBAR_PLUGIN_PATH is the file.
+	viaEnv := write(t.TempDir(), "tacho.5m.sh")
+	t.Setenv("SWIFTBAR_PLUGINS_PATH", filepath.Dir(viaEnv))
+	if got := findSwiftBarPlugin(); got != viaEnv {
+		t.Errorf("SWIFTBAR_PLUGINS_PATH: got %q, want %q", got, viaEnv)
+	}
+	self := write(t.TempDir(), "tacho.10s.sh")
+	t.Setenv("SWIFTBAR_PLUGIN_PATH", self)
+	if got := findSwiftBarPlugin(); got != self {
+		t.Errorf("SWIFTBAR_PLUGIN_PATH: got %q, want %q", got, self)
+	}
+}
+
+// isolateSwiftBar keeps doctor's plugin detection off the machine's real
+// SwiftBar setup: a temp HOME, no SwiftBar plugin variables, and a
+// PluginDirectory setting read from *setting (initially empty).
+func isolateSwiftBar(t *testing.T) (home string, setting *string) {
+	t.Helper()
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SWIFTBAR_PLUGINS_PATH", "")
+	t.Setenv("SWIFTBAR_PLUGIN_PATH", "")
+	setting = new(string)
+	orig := swiftBarPluginDirectory
+	swiftBarPluginDirectory = func() string { return *setting }
+	t.Cleanup(func() { swiftBarPluginDirectory = orig })
+	return home, setting
 }
 
 // The bare-command decision must check identity, not mere presence: a
