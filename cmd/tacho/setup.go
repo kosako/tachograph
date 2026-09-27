@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/kosako/tachograph/internal/setup"
@@ -42,11 +43,7 @@ func runSetup(args []string) int {
 		fmt.Println()
 		fmt.Println(snippet)
 		fmt.Println()
-		if strings.HasPrefix(command, "tacho ") {
-			fmt.Println("(the tacho on your PATH is this binary, so the bare command works.)")
-		} else {
-			fmt.Println("(this binary doesn't resolve as `tacho` on your PATH, so the absolute path is baked in.)")
-		}
+		fmt.Println(setupNote(command, exe))
 		fmt.Println("Re-run with --write to merge it in automatically.")
 		return 0
 	}
@@ -124,6 +121,53 @@ func pathTachoIsSelf(exe string) bool {
 		return false
 	}
 	return sameExecutable(p, exe)
+}
+
+// setupNote explains the command setup chose. An npm install keeps the
+// binary's absolute path (a bare `tacho` would go through the Node launcher
+// on every status line refresh), and that path sits under the Node version's
+// directory, so the note says when to re-run setup (#259).
+func setupNote(command, exe string) string {
+	if strings.HasPrefix(command, "tacho ") {
+		return "(the tacho on your PATH is this binary, so the bare command works.)"
+	}
+	if p, err := exec.LookPath("tacho"); err == nil && sameInstall(p, exe) {
+		return "(the tacho on your PATH is the npm launcher for this binary; the binary's absolute path is\n" +
+			" baked in so the status line skips Node's startup. It lives under your Node version's directory:\n" +
+			" re-run `tacho setup claude --write` after switching Node versions or reinstalling.)"
+	}
+	return "(this binary doesn't resolve as `tacho` on your PATH, so the absolute path is baked in.)"
+}
+
+// sameInstall reports whether the `tacho` found on the PATH (p) runs this
+// binary (exe): the same file, or the npm launcher that spawns it (#259).
+func sameInstall(p, exe string) bool {
+	if sameExecutable(p, exe) {
+		return true
+	}
+	t := npmLauncherTarget(p)
+	return t != "" && sameExecutable(t, exe)
+}
+
+// npmLauncherTarget returns the platform binary an npm launcher runs, or ""
+// when p isn't one. npm links `tacho` to the package's bin/tacho.js — a
+// symlink on unix, a tacho.cmd / tacho.ps1 shim in the prefix on Windows —
+// and the launcher spawns the binary postinstall placed next to tacho.js.
+func npmLauncherTarget(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	bin := "tacho"
+	if runtime.GOOS == "windows" {
+		bin = "tacho.exe"
+	}
+	switch strings.ToLower(filepath.Base(p)) {
+	case "tacho.js":
+		return filepath.Join(filepath.Dir(p), bin)
+	case "tacho.cmd", "tacho.ps1":
+		return filepath.Join(filepath.Dir(p), "node_modules", "tachograph", "bin", bin)
+	}
+	return ""
 }
 
 // sameExecutable reports whether two paths refer to the same file after
@@ -217,16 +261,54 @@ func claudeStatusLineCommand(path string) string {
 // statusLineResolves checks that the first token of the command exists as an
 // executable (either an absolute/relative path or a PATH lookup).
 func statusLineResolves(command string) bool {
+	return statusLineBinary(command) != ""
+}
+
+// statusLineBinary resolves the executable a statusLine command runs, or ""
+// when it doesn't resolve.
+func statusLineBinary(command string) string {
 	bin := firstToken(command)
 	if bin == "" {
-		return false
+		return ""
 	}
 	if strings.ContainsAny(bin, "/") {
-		info, err := os.Stat(bin)
-		return err == nil && !info.IsDir()
+		if info, err := os.Stat(bin); err != nil || info.IsDir() {
+			return ""
+		}
+		return bin
 	}
-	_, err := exec.LookPath(bin)
-	return err == nil
+	p, err := exec.LookPath(bin)
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
+// statusLineWarning is doctor's diagnosis of the configured statusLine
+// command ("" when fine). Besides a command that no longer resolves, it flags
+// one that runs a different tacho than this binary — e.g. an npm install's
+// absolute path left pointing into an old Node version's directory, which
+// keeps running that old tacho (#259). Commands that aren't tacho itself (a
+// user's own script) are not second-guessed.
+func statusLineWarning(command, exe string) string {
+	bin := statusLineBinary(command)
+	if bin == "" {
+		return "that command does not resolve — re-run `tacho setup claude --write`"
+	}
+	if exe == "" || !isTachoExecutable(bin) || sameInstall(bin, exe) {
+		return ""
+	}
+	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here"
+}
+
+// isTachoExecutable reports whether path names tacho itself or its npm
+// launcher, as opposed to some other program a statusLine may run.
+func isTachoExecutable(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "tacho", "tacho.exe", "tacho.js", "tacho.cmd", "tacho.ps1":
+		return true
+	}
+	return false
 }
 
 // firstToken returns the first whitespace- or quote-delimited token of a shell
