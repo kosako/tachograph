@@ -124,6 +124,7 @@ tacho setup claude     # print/install the Claude Code statusLine config (--writ
 tacho doctor           # diagnose install path, data sources, cache, integrations (and unknown config values)
 tacho version          # print the installed version (also tacho --version)
 tacho config show|set  # show / change settings (~/.config/tachograph/config.json; show also warns about unknown values; statusline-preset and more below)
+tacho help             # list the commands (also tacho -h / --help)
 ```
 
 ```

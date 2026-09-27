@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -61,23 +62,31 @@ func normalizeVersion(v string) string {
 }
 
 const usage = `usage:
-  tacho                 one-shot compact status
+  tacho                 one-shot compact status (-no-color, -no-cache)
   tacho watch [-n sec]  refresh continuously
   tacho status --json   unified schema JSON (see docs/schema.md)
   tacho daily [-days N] per-day cost / tokens for the last N days (default 30)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
-  tacho version         print the installed version
+  tacho version         print the installed version (also --version)
   tacho cmux push       push status pills to the cmux sidebar once (deprecated)
   tacho cmux clear      remove tacho's pills from the cmux sidebar (deprecated)
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
   tacho config show     print the current configuration
+  tacho config path     print the config file path
   tacho config set K V  set a config value (e.g. menubar.metric cost)
+  tacho config statusline-preset NAME  write a statusline preset (--list lists them)
   tacho setup claude    print/install the Claude Code statusLine config
   tacho doctor          diagnose install path, data sources, cache, and integrations
+  tacho help            show this help (also -h / --help)
 `
 
 func main() {
-	args := os.Args[1:]
+	os.Exit(run(os.Args[1:]))
+}
+
+// run dispatches a command line (without the program name) and returns the
+// exit code.
+func run(args []string) int {
 	cmd := ""
 	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
 		cmd, args = args[0], args[1:]
@@ -85,34 +94,49 @@ func main() {
 	switch cmd {
 	case "version":
 		fmt.Println("tacho " + buildVersion())
+		return 0
 	case "status":
-		os.Exit(runStatus(args))
+		return runStatus(args)
 	case "daily":
-		os.Exit(runDaily(args))
+		return runDaily(args)
 	case "watch":
-		os.Exit(runWatch(args))
+		return runWatch(args)
 	case "statusline":
-		os.Exit(runStatusline(args))
+		return runStatusline(args)
 	case "cmux":
-		os.Exit(runCmux(args))
+		return runCmux(args)
 	case "swiftbar":
-		os.Exit(runSwiftbar(args))
+		return runSwiftbar(args)
 	case "config":
-		os.Exit(runConfig(args))
+		return runConfig(args)
 	case "setup":
-		os.Exit(runSetup(args))
+		return runSetup(args)
 	case "doctor":
-		os.Exit(runDoctor(args))
+		return runDoctor(args)
+	case "help":
+		fmt.Print(usage)
+		return 0
 	case "":
-		if len(args) > 0 && args[0] == "--version" {
+		// The one-shot FlagSet would reject -version (#269).
+		if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
 			fmt.Println("tacho " + buildVersion())
-			return
+			return 0
 		}
-		os.Exit(runOnce(args))
+		return runOnce(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		return 2
 	}
+}
+
+// isHelpFlag reports whether arg asks for help in one of the spellings the
+// flag package treats as help: -h, --h, -help, --help.
+func isHelpFlag(arg string) bool {
+	switch arg {
+	case "-h", "--h", "-help", "--help":
+		return true
+	}
+	return false
 }
 
 func style(noColor bool, cfg config.Config) render.Style {
@@ -397,10 +421,23 @@ func systemDark() bool {
 }
 
 func runOnce(args []string) int {
-	fs := flag.NewFlagSet("tacho", flag.ExitOnError)
+	fs := flag.NewFlagSet("tacho", flag.ContinueOnError)
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	noCache := fs.Bool("no-cache", false, "bypass the TTL cache")
-	fs.Parse(args)
+	// A help flag wherever the flag package sees one (`tacho -no-color -h`)
+	// prints the full usage on stdout; it used to list only these flags on
+	// stderr (#269). Other parse errors keep what flag.ExitOnError did: the
+	// message and the flag list on stderr, exit 2.
+	var parseOut strings.Builder
+	fs.SetOutput(&parseOut)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Print(usage)
+			return 0
+		}
+		fmt.Fprint(os.Stderr, parseOut.String())
+		return 2
+	}
 
 	now := time.Now()
 	cfg := config.Load()
