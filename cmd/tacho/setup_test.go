@@ -224,14 +224,23 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 // else the first GOPATH entry's bin — both with the go toolchain and, when go
 // isn't callable, from the environment (#264).
 func TestGoBin(t *testing.T) {
+	home := os.Getenv("HOME")
 	a, b := t.TempDir(), t.TempDir()
 	gobin := filepath.Join(t.TempDir(), "gobin")
 	sep := string(filepath.ListSeparator)
+	// Ignore the developer's own go env file (`go env -w GOBIN=...`).
+	t.Setenv("GOENV", "off")
 
 	t.Setenv("GOBIN", gobin)
 	t.Setenv("GOPATH", a)
 	if got := goBin(); got != gobin {
 		t.Errorf("GOBIN set: goBin() = %q, want %q", got, gobin)
+	}
+	// Paths are used verbatim: a trailing space is part of a valid path.
+	spaced := gobin + " "
+	t.Setenv("GOBIN", spaced)
+	if got := goBin(); got != spaced {
+		t.Errorf("GOBIN with a trailing space: goBin() = %q, want %q", got, spaced)
 	}
 
 	t.Setenv("GOBIN", "")
@@ -240,19 +249,28 @@ func TestGoBin(t *testing.T) {
 		t.Errorf("GOPATH list: goBin() = %q, want %q (the first entry)", got, want)
 	}
 
-	// GOBIN unset and GOPATH only in the go env file: the value must come
-	// from `go env` (the environment alone would give ~/go/bin).
+	// Values only in the go env file must come from `go env` (the
+	// environment alone would give ~/go/bin). With HOME unset GOPATH is
+	// empty, so the output ends in an empty line that must still count.
 	if _, err := exec.LookPath("go"); err == nil {
 		envFile := filepath.Join(t.TempDir(), "go.env")
+		t.Setenv("GOENV", envFile)
+		t.Setenv("GOPATH", "")
 		if err := os.WriteFile(envFile, []byte("GOPATH="+b+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("GOENV", envFile)
-		t.Setenv("GOPATH", "")
 		if got, want := goBin(), filepath.Join(b, "bin"); got != want {
 			t.Errorf("go env file GOPATH: goBin() = %q, want %q", got, want)
 		}
-		t.Setenv("GOENV", "")
+		if err := os.WriteFile(envFile, []byte("GOBIN="+gobin+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HOME", "")
+		if got := goBin(); got != gobin {
+			t.Errorf("go env file GOBIN, empty GOPATH: goBin() = %q, want %q", got, gobin)
+		}
+		t.Setenv("HOME", home)
+		t.Setenv("GOENV", "off")
 		t.Setenv("GOPATH", a+sep+b)
 	}
 

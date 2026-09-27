@@ -211,9 +211,10 @@ func sameExecutable(a, b string) bool {
 // then falls back to go's default GOPATH, ~/go (#264).
 func goBin() string {
 	if out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output(); err == nil {
-		// One value per line; an empty GOBIN is an empty first line, so trim
-		// only the trailing newline.
-		if lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n"); len(lines) == 2 {
+		// One value per line, and an empty value is an empty line: drop only
+		// the final newline. The values themselves are used verbatim.
+		s := strings.TrimSuffix(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+		if lines := strings.Split(s, "\n"); len(lines) == 2 {
 			if b := goBinFrom(lines[0], lines[1]); b != "" {
 				return b
 			}
@@ -231,10 +232,10 @@ func goBin() string {
 // goBinFrom resolves go install's target directory from GOBIN and GOPATH
 // values; "" when both are empty.
 func goBinFrom(gobin, gopath string) string {
-	if gobin = strings.TrimSpace(gobin); gobin != "" {
+	if gobin != "" {
 		return gobin
 	}
-	if first := filepath.SplitList(strings.TrimSpace(gopath)); len(first) > 0 && first[0] != "" {
+	if first := filepath.SplitList(gopath); len(first) > 0 && first[0] != "" {
 		return filepath.Join(first[0], "bin")
 	}
 	return ""
