@@ -119,7 +119,7 @@ tacho watch -n 5       # refresh continuously
 tacho status --json    # unified schema JSON (see docs/schema.md)
 tacho daily -days 30   # per-day estimated cost / tokens (default 30 days, recomputed from the logs)
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
-tacho cmux push|clear  # manage cmux sidebar pills manually
+tacho cmux push|clear  # manage cmux sidebar pills manually (deprecated)
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
 tacho doctor           # diagnose install path, data sources, cache, integrations (and unknown config values)
 tacho version          # print the installed version (also tacho --version)
@@ -259,6 +259,12 @@ unchanged; `remaining` switches back to the default). `ctx` stays a usage
 figure. Disable colors with `--no-color` or `NO_COLOR`.
 
 ### cmux sidebar
+
+> **Deprecated**: the cmux sidebar integration (the status line's automatic
+> mirror and `tacho cmux push` / `clear`) is deprecated as of v0.6.3 and will
+> be removed in a future minor release
+> ([#273](https://github.com/kosako/tachograph/issues/273)). The other
+> surfaces are unaffected.
 
 Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
 mirrors the status to the workspace sidebar as colored pills —

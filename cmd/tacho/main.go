@@ -67,8 +67,8 @@ const usage = `usage:
   tacho daily [-days N] per-day cost / tokens for the last N days (default 30)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
   tacho version         print the installed version
-  tacho cmux push       push status pills to the cmux sidebar once
-  tacho cmux clear      remove tacho's pills from the cmux sidebar
+  tacho cmux push       push status pills to the cmux sidebar once (deprecated)
+  tacho cmux clear      remove tacho's pills from the cmux sidebar (deprecated)
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
   tacho config show     print the current configuration
   tacho config set K V  set a config value (e.g. menubar.metric cost)
@@ -549,7 +549,12 @@ func preserveSnapshotLimits(t *schema.Tool, now time.Time) time.Time {
 	return observed
 }
 
+// cmuxDeprecation is shown wherever the cmux integration surfaces (#273). The
+// statusline's automatic mirror stays silent: it can't add output.
+const cmuxDeprecation = "the cmux sidebar integration is deprecated and will be removed in a future minor release (#273)"
+
 func runCmux(args []string) int {
+	fmt.Fprintln(os.Stderr, "tacho: "+cmuxDeprecation)
 	if len(args) < 1 || (args[0] != "push" && args[0] != "clear") {
 		fmt.Fprintln(os.Stderr, "usage: tacho cmux <push|clear>")
 		return 2
