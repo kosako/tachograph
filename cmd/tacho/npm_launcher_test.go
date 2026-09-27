@@ -56,21 +56,44 @@ func TestSameInstallRecognizesNpmLauncher(t *testing.T) {
 	}
 }
 
-// On Windows npm writes a tacho.cmd / tacho.ps1 shim in the prefix that runs
-// node_modules/tachograph/bin/tacho.js; the binary sits next to tacho.js.
-func TestNpmLauncherTargetWindowsShim(t *testing.T) {
-	prefix := t.TempDir()
+// On Windows npm writes tacho.cmd / tacho.ps1 shims that run the package's
+// bin/tacho.js; the binary sits next to tacho.js. The shim is in the global
+// prefix (package under node_modules/tachograph) or, for a local install, in
+// node_modules/.bin (package at ../tachograph) — both must be recognized.
+func TestSameInstallWindowsShims(t *testing.T) {
 	name := "tacho"
 	if runtime.GOOS == "windows" {
 		name = "tacho.exe"
 	}
-	want := filepath.Join(prefix, "node_modules", "tachograph", "bin", name)
-	for _, shim := range []string{"tacho.cmd", "tacho.ps1"} {
-		if got := npmLauncherTarget(filepath.Join(prefix, shim)); got != want {
-			t.Errorf("npmLauncherTarget(%s) = %q, want %q", shim, got, want)
+	global := t.TempDir()
+	local := filepath.Join(t.TempDir(), "node_modules")
+	cases := []struct {
+		name, shimDir, binary string
+	}{
+		{"global prefix", global, filepath.Join(global, "node_modules", "tachograph", "bin", name)},
+		{"local node_modules/.bin", filepath.Join(local, ".bin"), filepath.Join(local, "tachograph", "bin", name)},
+	}
+	for _, c := range cases {
+		if err := os.MkdirAll(filepath.Dir(c.binary), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(c.shimDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(c.binary, []byte("bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, shim := range []string{"tacho.cmd", "tacho.ps1"} {
+			sp := filepath.Join(c.shimDir, shim)
+			if err := os.WriteFile(sp, []byte("@echo off\r\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if !sameInstall(sp, c.binary) {
+				t.Errorf("%s: %s should count as the npm launcher for %s", c.name, shim, c.binary)
+			}
 		}
 	}
-	if got := npmLauncherTarget(filepath.Join(prefix, "tacho")); got != "" {
+	if got := npmLauncherTargets(filepath.Join(global, "tacho")); got != nil {
 		t.Errorf("a plain binary is not a launcher, got %q", got)
 	}
 }

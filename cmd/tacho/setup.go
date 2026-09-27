@@ -145,15 +145,22 @@ func sameInstall(p, exe string) bool {
 	if sameExecutable(p, exe) {
 		return true
 	}
-	t := npmLauncherTarget(p)
-	return t != "" && sameExecutable(t, exe)
+	for _, t := range npmLauncherTargets(p) {
+		if sameExecutable(t, exe) {
+			return true
+		}
+	}
+	return false
 }
 
-// npmLauncherTarget returns the platform binary an npm launcher runs, or ""
-// when p isn't one. npm links `tacho` to the package's bin/tacho.js — a
-// symlink on unix, a tacho.cmd / tacho.ps1 shim in the prefix on Windows —
-// and the launcher spawns the binary postinstall placed next to tacho.js.
-func npmLauncherTarget(p string) string {
+// npmLauncherTargets returns where the platform binary an npm launcher runs
+// can be, or nil when p isn't one. npm links `tacho` to the package's
+// bin/tacho.js — a symlink on unix, a tacho.cmd / tacho.ps1 shim on Windows —
+// and the launcher spawns the binary postinstall placed next to tacho.js. A
+// Windows shim sits in the global prefix (the package is under
+// node_modules/tachograph) or, for a local install, in node_modules/.bin (the
+// package is its sibling, ../tachograph).
+func npmLauncherTargets(p string) []string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		p = r
 	}
@@ -161,13 +168,17 @@ func npmLauncherTarget(p string) string {
 	if runtime.GOOS == "windows" {
 		bin = "tacho.exe"
 	}
+	dir := filepath.Dir(p)
 	switch strings.ToLower(filepath.Base(p)) {
 	case "tacho.js":
-		return filepath.Join(filepath.Dir(p), bin)
+		return []string{filepath.Join(dir, bin)}
 	case "tacho.cmd", "tacho.ps1":
-		return filepath.Join(filepath.Dir(p), "node_modules", "tachograph", "bin", bin)
+		return []string{
+			filepath.Join(dir, "node_modules", "tachograph", "bin", bin), // global prefix
+			filepath.Join(dir, "..", "tachograph", "bin", bin),           // local node_modules/.bin
+		}
 	}
-	return ""
+	return nil
 }
 
 // sameExecutable reports whether two paths refer to the same file after
