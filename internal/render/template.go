@@ -188,10 +188,12 @@ func resolveCost(t *schema.Tool, scope []string) string {
 		}
 		return fmt.Sprintf("$%.2f", *t.SessionToday.CostUSD)
 	case "all":
-		if t.Daily == nil || t.Daily.CostUSD == nil {
-			return Missing
+		// Same reading as the daily table: a day with no usage yet is an
+		// exact $0.00/d (matching {tool.tokens.all}'s 0/d), unknown stays --.
+		if d := t.Daily; d != nil && (d.CostUSD != nil || d.Tokens == 0) {
+			return DailyCost(d) + "/d"
 		}
-		return fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD)
+		return Missing
 	}
 	return Missing
 }

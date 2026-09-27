@@ -123,6 +123,24 @@ func TestRenderMeterCostFallsBackToNumber(t *testing.T) {
 	}
 }
 
+// Right after midnight (no usage today), the cost title must read today's
+// $0.00/d — not a session cost carried over from earlier days, which used to
+// show as if it were today's (#261).
+func TestRenderCostZeroDayShowsTodaysZero(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolCodex, true, 7, 2)}}
+	carried := 3.21
+	s.Tools[0].Daily = &schema.Daily{Tokens: 0}
+	s.Tools[0].Fallback = &schema.Fallback{EstimatedCostUSD: &carried}
+	cfg := config.Default()
+	cfg.Menubar.Style = config.StyleNumber
+	cfg.Menubar.Metric = render.MetricCost
+	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	if !strings.Contains(title, "$0.00/d") || strings.Contains(title, "$3.21") {
+		t.Errorf("zero-day cost title = %q, want today's $0.00/d, not the carried-over $3.21", title)
+	}
+}
+
 func TestRenderNumberStyle(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{

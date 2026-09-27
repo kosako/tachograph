@@ -83,9 +83,13 @@ func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text s
 		}
 	case MetricCost:
 		// Today's total across all sessions (pricing-based); the "/d" suffix
-		// marks it as a daily figure. Falls back to the current session's cost.
-		if t.Daily != nil && t.Daily.CostUSD != nil {
-			return nil, fmt.Sprintf("$%.2f/d", *t.Daily.CostUSD), PressureOK
+		// marks it as a daily figure. A known total wins even at zero — a day
+		// with no usage yet is $0.00/d, read the same way as the daily table
+		// (DailyCost) — so a session cost carried over from an earlier day
+		// never shows as today's (#261). Only an unknown total (no daily, or
+		// usage without any priced model) falls back to the session's cost.
+		if d := t.Daily; d != nil && (d.CostUSD != nil || d.Tokens == 0) {
+			return nil, DailyCost(d) + "/d", PressureOK
 		}
 		if t.Fallback != nil && t.Fallback.EstimatedCostUSD != nil {
 			return nil, fmt.Sprintf("$%.2f", *t.Fallback.EstimatedCostUSD), PressureOK
