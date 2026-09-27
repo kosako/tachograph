@@ -38,6 +38,9 @@ func TestTokenCountUsable(t *testing.T) {
 		{"credits object without credits",
 			`{"timestamp":"2026-07-10T13:34:51Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":null,"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":null}}}`,
 			false},
+		{"credits object without unlimited",
+			`{"timestamp":"2026-07-10T13:34:51Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":null,"secondary":null,"credits":{"has_credits":true,"balance":"5"},"plan_type":null}}}`,
+			false},
 	}
 	for _, c := range cases {
 		ev, ok := ParseEvent([]byte(c.line))
@@ -69,7 +72,11 @@ func TestCreditsBalance(t *testing.T) {
 		{"number (older Codex)", `23.5`, 23.5, true},
 		{"no credits on the plan", `{"has_credits":false,"unlimited":false,"balance":"0"}`, 0, false},
 		{"has_credits missing", `{"unlimited":false,"balance":"5"}`, 0, false},
+		{"has_credits not a bool", `{"has_credits":"true","unlimited":false,"balance":"5"}`, 0, false},
 		{"unlimited", `{"has_credits":true,"unlimited":true,"balance":"0"}`, 0, false},
+		{"unlimited missing", `{"has_credits":true,"balance":"5"}`, 0, false},
+		{"unlimited null", `{"has_credits":true,"unlimited":null,"balance":"5"}`, 0, false},
+		{"unlimited not a bool", `{"has_credits":true,"unlimited":"false","balance":"5"}`, 0, false},
 		{"balance null", `{"has_credits":true,"unlimited":false,"balance":null}`, 0, false},
 		{"balance not a number", `{"has_credits":true,"unlimited":false,"balance":"n/a"}`, 0, false},
 		{"balance NaN", `{"has_credits":true,"unlimited":false,"balance":"NaN"}`, 0, false},

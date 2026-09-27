@@ -135,18 +135,21 @@ func (tc *TokenCount) AccountLimits() bool {
 // Current Codex writes an object — {"has_credits", "unlimited", "balance"},
 // with the balance as a decimal string — while older versions wrote a plain
 // number, which is still read. ok is false when there is no finite balance
-// to show: a plan without credits, unlimited credits, or a missing or
-// unparsable balance (#267). The has_credits:false object on the empty
+// to show: a plan without credits, unlimited credits, a missing or
+// non-boolean has_credits / unlimited, or a missing or unparsable balance
+// (#267). The has_credits:false object on the empty
 // token_count of a refused run (#205) therefore keeps it unusable.
 func creditsBalance(v any) (balance float64, ok bool) {
 	switch c := v.(type) {
 	case float64:
 		return c, true
 	case map[string]any:
-		has, _ := c["has_credits"].(bool)
-		unlimited, _ := c["unlimited"].(bool)
+		// Both flags must be explicit booleans: a missing or mistyped
+		// unlimited must not read as "limited" and surface a balance.
+		has, hasOK := c["has_credits"].(bool)
+		unlimited, unlimitedOK := c["unlimited"].(bool)
 		s, isStr := c["balance"].(string)
-		if !has || unlimited || !isStr {
+		if !hasOK || !has || !unlimitedOK || unlimited || !isStr {
 			return 0, false
 		}
 		// ParseFloat accepts "NaN" / "Inf", which encoding/json can't emit.
