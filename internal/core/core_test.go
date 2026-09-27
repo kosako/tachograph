@@ -139,7 +139,9 @@ func TestStatusDropsSessionValuesFromStaleSnapshot(t *testing.T) {
 	if err := cache.WriteSnapshot(snapshotAt(stale), now.Add(-stale)); err != nil {
 		t.Fatal(err)
 	}
-	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	// No transcript fresher than the snapshot (an empty Claude root): a
+	// fresher one would take over the session values instead (#263).
+	got := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
 	if !got.Stale {
 		t.Fatalf("Stale = false, want true for a %v-old snapshot", stale)
 	}
