@@ -69,6 +69,12 @@ type TokenCount struct {
 		ModelContextWindow *int64      `json:"model_context_window"`
 	} `json:"info"`
 	RateLimits *struct {
+		// LimitID names the limit bucket the token_count reports. Codex
+		// writes one token_count per bucket: "codex" is the account's own
+		// windows; others ("premium", model-specific ones like
+		// "codex_bengalfox") can follow it in the same turn. Empty on
+		// token_counts from Codex versions that predate buckets (#258).
+		LimitID   string    `json:"limit_id"`
 		Primary   *rlWindow `json:"primary"`
 		Secondary *rlWindow `json:"secondary"`
 		Credits   any       `json:"credits"`
@@ -102,8 +108,18 @@ func (tc *TokenCount) Usable() bool {
 		(i.TotalTokenUsage != nil || i.LastTokenUsage != nil || i.ModelContextWindow != nil) {
 		return true
 	}
+	return tc.AccountLimits()
+}
+
+// AccountLimits reports whether the token_count carries the account's rate
+// limits: a window, a plan, or a numeric credits balance from the "codex"
+// bucket (or a pre-bucket token_count without limit_id). Other buckets are
+// not the account's windows — taking limits from a "premium" token_count
+// (no windows) blanked them, and a model-specific bucket would stand in for
+// the account's weekly window (#258).
+func (tc *TokenCount) AccountLimits() bool {
 	rl := tc.RateLimits
-	if rl == nil {
+	if rl == nil || (rl.LimitID != "" && rl.LimitID != "codex") {
 		return false
 	}
 	if rl.Primary != nil || rl.Secondary != nil || rl.PlanType != nil {
