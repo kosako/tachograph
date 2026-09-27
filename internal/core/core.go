@@ -101,25 +101,78 @@ func AddSessionToday(t *schema.Tool, now time.Time, prices pricing.Table) {
 	t.SessionToday = daily.ClaudeSessionToday(*t.Session.TranscriptPath, now, prices).Schema()
 }
 
-// claudeTool prefers a recent statusline snapshot (which carries rate
-// limits) over the transcript route (which cannot see them).
+// claudeTool prefers a fresh statusline snapshot (which carries rate limits)
+// over the transcript route (which cannot see them). Once the snapshot is
+// stale, the transcript route is asked too: Claude used outside the
+// statusline (IDE, desktop, `claude -p`) keeps writing transcripts, so when a
+// transcript is fresher its session, model, and collected_at win, and the
+// snapshot's still-running rate-limit windows are carried over (#263).
 //
 // Outside the statusline "session" can only mean the most recently observed
-// session, and that reading holds only while the snapshot is fresh. Once it
-// is stale the session-scoped values (session, fallback, session_today) are
-// dropped as unknown instead of being served next to a daily total that is
-// recomputed on every call (#235). The account-level rate limits, model,
-// plan, and credits keep the snapshot's 30-day retention.
+// session, and that reading holds only while it is fresh. Whichever route
+// serves a stale row, its session-scoped values (session, fallback,
+// session_today) are dropped as unknown instead of being served next to a
+// daily total that is recomputed on every call (#235). The account-level rate
+// limits and model keep the snapshot's 30-day retention.
 func claudeTool(opts Options) schema.Tool {
-	if snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now); ok {
-		if snap.Stale {
-			snap.Session = nil
-			snap.Fallback = nil
-			snap.SessionToday = nil
-		}
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now)
+	if ok && !snap.Stale {
 		return *snap
 	}
-	return claude.Collect(claude.Options{Root: opts.ClaudeRoot, Now: opts.Now})
+	tr := claude.Collect(claude.Options{Root: opts.ClaudeRoot, Now: opts.Now})
+	if ok && !fresher(tr, *snap) {
+		dropSessionScope(snap)
+		return *snap
+	}
+	if ok {
+		carryLimits(&tr, *snap, opts.Now)
+	}
+	if tr.Stale {
+		dropSessionScope(&tr)
+	}
+	return tr
+}
+
+// fresher reports whether the transcript route observed Claude more recently
+// than the snapshot did.
+func fresher(tr, snap schema.Tool) bool {
+	if !tr.Available || tr.Error != nil || tr.CollectedAt == nil || snap.CollectedAt == nil {
+		return false
+	}
+	a, errA := time.Parse(time.RFC3339, *tr.CollectedAt)
+	b, errB := time.Parse(time.RFC3339, *snap.CollectedAt)
+	return errA == nil && errB == nil && a.After(b)
+}
+
+// carryLimits moves the snapshot's rate limits onto the transcript route's
+// tool, which cannot see them. Only between subscription sources (like the
+// statusline's preserveSnapshotLimits), and only windows known to still be
+// running: a window past its reset time says nothing about the current one,
+// and one without a reset time can't be shown to be current, so neither is
+// revived on a row that isn't stale.
+func carryLimits(tr *schema.Tool, snap schema.Tool, now time.Time) {
+	if tr.Backend != schema.BackendSubscription || snap.Backend != schema.BackendSubscription {
+		return
+	}
+	var kept []schema.Limit
+	for _, l := range snap.Limits {
+		if l.ResetsAt == nil {
+			continue
+		}
+		if r, err := time.Parse(time.RFC3339, *l.ResetsAt); err != nil || !r.After(now) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	tr.Limits = kept
+}
+
+// dropSessionScope clears the values that describe "the current session",
+// which a stale row can no longer vouch for (#235).
+func dropSessionScope(t *schema.Tool) {
+	t.Session = nil
+	t.Fallback = nil
+	t.SessionToday = nil
 }
 
 // DailyHistory is each tool's usage per local calendar day over a window,

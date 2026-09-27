@@ -91,7 +91,7 @@
 |---|---|
 | `available` | データソース自体の有無。`false` のときデータ由来の nullable フィールドはすべて null(`tool` / `available` / `stale` などの必須フィールドは除く) |
 | `error` | 取得を試みて失敗したときのみ非null。`available:false`(未インストール等)はエラーではない。非null のときは `available: true`・`backend: "unknown"` で、他のデータ由来フィールド(`daily` / `session_today` を含む)はすべて null。`code` は現状 `home_dir` / `read_error`(両ツール)、`no_usage`(Claude)、`no_token_count`(Codex) |
-| `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路・snapshot経路とも)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う。statusline 以外の経路で Claude が snapshot から出るとき、`session` / `fallback` / `session_today` は「直近に観測したセッション」の値で、stale になると null(不明)に落ちる。`limits` / `model` / `plan` / `credits` は最大 30 日保持(#235) |
+| `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路・snapshot経路とも)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う。statusline 以外の経路の Claude では、`session` / `fallback` / `session_today` は「直近に観測したセッション」の値で、stale になると null(不明)に落ちる(snapshot 経路・transcript 経路とも、#235)。snapshot が stale のときは transcript 経路と比べ、transcript の方が新しければその `session` / `model` / `collected_at` を使い、snapshot の `limits` のうちリセット時刻を過ぎていない枠を持ち越す(どちらもサブスクリプションのときだけ、#263)。snapshot の `limits` / `model` / `plan` / `credits` は最大 30 日保持 |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
 | `limits` | nullable。並び順はツールの報告順(Claude は 5h → weekly、Codex は `rate_limits.primary` → `secondary`)で、`window_minutes` 昇順は保証しない(#268)。枠は配列の位置ではなく `window` / `window_minutes` で引く |
@@ -109,7 +109,7 @@
 | `session.tokens` | 現セッション transcript 本体(`<session>.jsonl` 1 ファイル)の `message.usage` 集計(同名ディレクトリ配下の subagents / workflows transcript は含まないため、`daily` / `session_today` とは集計範囲が異なる。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `session.context_used_pct` | statusline `context_window.used_percentage`(transcripts経路では null) | `last_token_usage.total_tokens` ÷ `model_context_window` × 100(直近リクエストの総量による近似) |
-| `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
+| `limits` | statusline `rate_limits.five_hour/seven_day`(transcript 自体からは取れない。snapshot が stale で transcript の方が新しいときは、条件を満たす snapshot の枠を持ち越す — `stale` の項を参照) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
 | `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |
 | `backend` | 環境変数から判定: `CLAUDE_CODE_USE_BEDROCK` → `bedrock`、`CLAUDE_CODE_USE_VERTEX` → `vertex`、`ANTHROPIC_API_KEY` → `api`、いずれも無ければ `subscription`(上から優先。statusline 経路では `api` と判定してもレートリミット枠があれば `subscription`。transcripts経路では tacho を実行したプロセスの環境変数を見る) | `rate_limits.plan_type` があれば `subscription`、無ければ `unknown` |
 | `credits` | —(null) | `rate_limits.credits` |
