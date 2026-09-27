@@ -146,18 +146,21 @@ func fresher(tr, snap schema.Tool) bool {
 
 // carryLimits moves the snapshot's rate limits onto the transcript route's
 // tool, which cannot see them. Only between subscription sources (like the
-// statusline's preserveSnapshotLimits), and only windows that haven't reset
-// since: a window past its reset time says nothing about the current one.
+// statusline's preserveSnapshotLimits), and only windows known to still be
+// running: a window past its reset time says nothing about the current one,
+// and one without a reset time can't be shown to be current, so neither is
+// revived on a row that isn't stale.
 func carryLimits(tr *schema.Tool, snap schema.Tool, now time.Time) {
 	if tr.Backend != schema.BackendSubscription || snap.Backend != schema.BackendSubscription {
 		return
 	}
 	var kept []schema.Limit
 	for _, l := range snap.Limits {
-		if l.ResetsAt != nil {
-			if r, err := time.Parse(time.RFC3339, *l.ResetsAt); err == nil && !r.After(now) {
-				continue
-			}
+		if l.ResetsAt == nil {
+			continue
+		}
+		if r, err := time.Parse(time.RFC3339, *l.ResetsAt); err != nil || !r.After(now) {
+			continue
 		}
 		kept = append(kept, l)
 	}

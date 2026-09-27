@@ -93,6 +93,37 @@ func TestCarriedSnapshotLimitsDropResetWindows(t *testing.T) {
 	}
 }
 
+// A window without a reset time can't be shown to still be running, so it
+// isn't revived on a fresh row either.
+func TestCarriedSnapshotLimitsDropWindowsWithoutReset(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	collected := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	rw := now.Add(72 * time.Hour).Format(time.RFC3339)
+	p5, pw := 42.0, 17.0
+	snap := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits: []schema.Limit{
+			{Window: schema.WindowFiveHour, UsedPct: &p5}, // no resets_at
+			{Window: schema.WindowWeekly, UsedPct: &pw, ResetsAt: &rw},
+		},
+	}
+	if err := cache.WriteSnapshot(snap, now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Stale {
+		t.Fatal("Stale = true, want the fresher transcript to serve the row")
+	}
+	if len(got.Limits) != 1 || got.Limits[0].Window != schema.WindowWeekly {
+		t.Errorf("Limits = %+v, want only the weekly window (the 5h window has no reset time)", got.Limits)
+	}
+}
+
 // Limits are carried only between subscription sources, like
 // preserveSnapshotLimits: an API-key transcript has no rate limits.
 func TestNoLimitsCarriedToNonSubscriptionTranscript(t *testing.T) {
