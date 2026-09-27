@@ -233,6 +233,20 @@ func TestRenderTextTitleMoonFallback(t *testing.T) {
 	}
 }
 
+// The moon-dial text title follows menubar.metric like the ring and the
+// number style; it was pinned to the 5h window (#266).
+func TestRenderTextTitleFollowsMetric(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 90, 10)}}
+	cfg := config.Default()
+	cfg.Menubar.Metric = render.MetricLimitWeekly
+	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	if want := "C" + render.Moon(90); title != want { // weekly: 10% used → 90% left
+		t.Errorf("weekly text title = %q, want %q (not the 5h %q)", title, want, "C"+render.Moon(10))
+	}
+}
+
 func TestRenderSettingsMenu(t *testing.T) {
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
