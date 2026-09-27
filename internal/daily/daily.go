@@ -70,33 +70,99 @@ func DayKey(t time.Time) string {
 
 // ClaudeSessionToday totals today's tokens and estimated cost for one
 // Claude session transcript plus its nested subagent/workflow transcripts
-// (used for the {tool.*.session.today} scope). It reuses the same per-message
-// accounting as ClaudeTotals with a fresh dedup set for that session tree.
+// (the {tool.*.session.today} scope): today's portion of ClaudeSessionTree.
 func ClaudeSessionToday(transcriptPath string, now time.Time, prices pricing.Table) Totals {
+	_, today, _ := ClaudeSessionTree(transcriptPath, now, prices, nil)
+	return today
+}
+
+// TreeFileCache remembers the cumulative tokens of session-tree transcripts
+// last written before today, so ClaudeSessionTree doesn't re-read a long
+// session's finished subagents on every statusline call (#262). Entries are
+// keyed by path and invalidated by size or mtime.
+type TreeFileCache interface {
+	Get(path string, size int64, mtime time.Time) (schema.Tokens, bool)
+	Put(path string, size int64, mtime time.Time, tokens schema.Tokens)
+}
+
+// ClaudeSessionTree totals one Claude session across its whole tree — the
+// main transcript plus the subagent / workflow transcripts nested under the
+// same-named directory — in a single pass with one dedup set, returning the
+// session's cumulative tokens (session.tokens, #262) and today's portion
+// (session_today) with the same per-message accounting as ClaudeTotals.
+// Reading every file once serves both, so widening session.tokens to the tree
+// doesn't read the tree twice.
+//
+// A nested transcript last written before today holds no line from today, so
+// only its cumulative tokens count; with fc non-nil they come from the cache
+// while the file is unchanged. Such a file is counted with its own dedup set
+// (so a cached and a freshly read figure agree); the main transcript and
+// today's files share one, exactly as session_today always counted them.
+//
+// ok is false when the main transcript can't be read or has no usage: the
+// cumulative figure is then unknown, never a partial zero. Today's portion
+// keeps session_today's contract (no unknown-vs-zero distinction, unlike
+// daily's #187): whatever the readable files hold.
+func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Table, fc TreeFileCache) (cumulative schema.Tokens, today Totals, ok bool) {
 	if transcriptPath == "" {
-		return Totals{}
+		return schema.Tokens{}, Totals{}, false
 	}
 	from := DayStart(now)
 	to := from.AddDate(0, 0, 1)
 	seen := claude.UsageSet{}
-	days := map[string]Totals{}
-	// session_today has no unknown-vs-zero contract (unlike daily, #187): an
-	// unreadable transcript contributes nothing rather than nulling the value.
-	_ = claudeFileDays(transcriptPath, from, to, prices, seen, days)
-
+	var cum Totals
+	visit := func(path string) (hasUsage bool, err error) {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false, err
+		}
+		claude.EachUsageLine(b, func(line claude.TranscriptLine) {
+			hasUsage = true
+			if seen.Dup(line) {
+				return
+			}
+			t := claudeLineTotals(line, prices)
+			cum.add(t)
+			if _, in := dayIn(line.Timestamp, from, to); in {
+				today.add(t)
+			}
+		})
+		return hasUsage, nil
+	}
+	mainUsage, mainErr := visit(transcriptPath)
 	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
 	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
 		if err != nil || f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
 			return nil
 		}
 		info, err := f.Info()
-		if err != nil || info.ModTime().Before(from) {
+		if err != nil {
 			return nil
 		}
-		_ = claudeFileDays(path, from, to, prices, seen, days)
+		if !info.ModTime().Before(from) {
+			_, _ = visit(path)
+			return nil
+		}
+		tok, cached := schema.Tokens{}, false
+		if fc != nil {
+			tok, cached = fc.Get(path, info.Size(), info.ModTime())
+		}
+		if !cached {
+			var err error
+			if tok, err = claudeFileTokens(path, prices); err != nil {
+				return nil
+			}
+			if fc != nil {
+				fc.Put(path, info.Size(), info.ModTime(), tok)
+			}
+		}
+		cum.add(Totals{Tokens: tok.Total, Input: tok.Input, CachedInput: tok.CachedInput, Output: tok.Output})
 		return nil
 	})
-	return days[DayKey(now)]
+	if mainErr != nil || !mainUsage {
+		return schema.Tokens{}, today, false
+	}
+	return schema.Tokens{Input: cum.Input, CachedInput: cum.CachedInput, Output: cum.Output, Total: cum.Tokens}, today, true
 }
 
 // ClaudeTotals sums today's tokens and estimated cost across every Claude
@@ -177,24 +243,47 @@ func claudeFileDays(path string, from, to time.Time, prices pricing.Table, seen 
 		if !ok || seen.Dup(line) {
 			return
 		}
-		u := line.Message.Usage
-		cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := u.CacheWrites()
-		// Same convention as session.tokens: input is everything sent,
-		// cache reads included, so tokens and cost share a denominator.
-		in := u.InputTokens + cacheWriteTotal + u.CacheReadInputTokens
-		var t Totals
-		t.Input = in
-		t.CachedInput = u.CacheReadInputTokens
-		t.Output = u.OutputTokens
-		t.Tokens = in + u.OutputTokens
-		if r, ok := prices.For(line.Message.Model); ok {
-			t.Cost = claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
-		}
 		acc := days[day]
-		acc.add(t)
+		acc.add(claudeLineTotals(line, prices))
 		days[day] = acc
 	})
 	return nil
+}
+
+// claudeFileTokens is one transcript's cumulative tokens, deduplicated within
+// the file.
+func claudeFileTokens(path string, prices pricing.Table) (schema.Tokens, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return schema.Tokens{}, err
+	}
+	seen := claude.UsageSet{}
+	var t Totals
+	claude.EachUsageLine(b, func(line claude.TranscriptLine) {
+		if !seen.Dup(line) {
+			t.add(claudeLineTotals(line, prices))
+		}
+	})
+	return schema.Tokens{Input: t.Input, CachedInput: t.CachedInput, Output: t.Output, Total: t.Tokens}, nil
+}
+
+// claudeLineTotals is one transcript usage line's tokens and estimated cost.
+func claudeLineTotals(line claude.TranscriptLine, prices pricing.Table) Totals {
+	u := line.Message.Usage
+	cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheWriteTotal := u.CacheWrites()
+	// Same convention as session.tokens: input is everything sent,
+	// cache reads included, so tokens and cost share a denominator.
+	in := u.InputTokens + cacheWriteTotal + u.CacheReadInputTokens
+	t := Totals{
+		Input:       in,
+		CachedInput: u.CacheReadInputTokens,
+		Output:      u.OutputTokens,
+		Tokens:      in + u.OutputTokens,
+	}
+	if r, ok := prices.For(line.Message.Model); ok {
+		t.Cost = claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
+	}
+	return t
 }
 
 func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {

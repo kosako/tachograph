@@ -472,9 +472,10 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	input, _ := io.ReadAll(stdin)
 
 	claudeTool := claude.Collect(claude.Options{Now: now, StatuslineInput: input})
-	// The live payload knows only the current session; total today's portion of
-	// it from the transcript so {claude.*.session.today} works.
-	core.AddSessionToday(&claudeTool, now, pricing.Load())
+	// The live payload knows only the current session's main transcript; widen
+	// its tokens to the session's subagent / workflow transcripts and total
+	// today's portion so {claude.*.session.today} works (#262).
+	core.AddSessionTree(&claudeTool, now, pricing.Load())
 	if shouldWriteStatuslineSnapshot(input, claudeTool) {
 		limitsObserved := preserveSnapshotLimits(&claudeTool, now)
 		_ = cache.WriteSnapshot(claudeTool, limitsObserved)

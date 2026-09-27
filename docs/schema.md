@@ -1,4 +1,4 @@
-# 統一JSONスキーマ v2.0
+# 統一JSONスキーマ v3.0
 
 `tacho status --json` が出力する、コレクタ層とレンダラ層の境界となるスキーマ。
 本ファイルが仕様の正本。Goの型定義は `internal/schema/schema.go`。
@@ -16,7 +16,7 @@
 
 ```jsonc
 {
-  "schema_version": "2.0",
+  "schema_version": "3.0",
   "generated_at": "2026-06-12T21:00:00+09:00",  // この JSON を生成した時刻(stale もこの時刻で判定)。--no-cache なしでは最大 30 秒前のキャッシュを返すことがある
   "tools": [ /* ツールごとのエントリ。検出されないツールも available:false で常に載る */ ]
 }
@@ -106,7 +106,7 @@
 |---|---|---|
 | `model` | statusline stdin JSON / transcripts の `message.model` | sessions JSONL `turn_context.payload.model` |
 | `model.effort` | statusline `effort.level`(ライブ値、`/effort` 変更も反映。transcripts経路や非対応モデルでは null) | —(null) |
-| `session.tokens` | 現セッション transcript 本体(`<session>.jsonl` 1 ファイル)の `message.usage` 集計(同名ディレクトリ配下の subagents / workflows transcript は含まないため、`daily` / `session_today` とは集計範囲が異なる。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
+| `session.tokens` | 現セッションの transcript ツリー(本体 `<session>.jsonl` と、同名ディレクトリ配下の subagents / workflows transcript)の `message.usage` 集計。`daily` / `session_today`、Claude Code が渡す cost と同じ範囲(3.0 から。2.0 までは本体 1 ファイルだけ、#262)。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `session.context_used_pct` | statusline `context_window.used_percentage`(transcripts経路では null) | `last_token_usage.total_tokens` ÷ `model_context_window` × 100(直近リクエストの総量による近似) |
 | `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
@@ -117,13 +117,13 @@
 
 Claude Code のトークン集計規約: `input` は `input_tokens + cache_creation + cache_read`
 の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
-この規約は `session.tokens` / `session_today` / `daily` で共通(2.0)。
+この規約は `session.tokens` / `session_today` / `daily` で共通(2.0。集計範囲がそろったのは 3.0)。
 いずれも同一レスポンスは `message.id` + `requestId` で重複を除いて1回だけ数える(content block ごとに usage を繰り返す行や、
 resume / compaction でコピーされた行を二重計上しない)。
 `daily` は `projects` 配下の通常セッションに加え、同セッション配下の subagents / workflows
 transcript も集計する。ログディレクトリの走査自体に失敗したとき(データ未生成の
 「実在する 0」と区別できないとき)は `daily` を null にする(不明は null 原則)。`session_today` も現セッション transcript と、その同名セッション
-ディレクトリ配下の subagents / workflows transcript を集計する。ただし `session_today` は `daily` と違い、
+ディレクトリ配下の subagents / workflows transcript を集計する(Claude の `session.tokens` も同じツリーを数え、`session_today` はその当日分)。ただし `session_today` は `daily` と違い、
 不明と 0 を区別しない(読めない transcript は 0 として扱う)。`session.transcript_path` が無いとき
 (Codex、stale な snapshot など)は null。
 
@@ -136,6 +136,7 @@ transcript も集計する。ログディレクトリの走査自体に失敗し
 
 基準は初版 commit の v0.1(`credits` は初版から存在)。
 
+- `3.0`: Claude の `session.tokens` / `fallback.session_tokens` の意味変更(現セッションの transcript 本体 1 ファイル → 同名ディレクトリ配下の subagents / workflows transcript を含むツリー全体。`session_today` / `daily`、Claude Code が渡す cost と集計範囲をそろえ、「当日分 > 累計」が起きないようにした、#262)
 - `2.0`: `daily.tokens` / `session_today.tokens` の意味変更(cache read を除いた「新規トークン」→ cache read を含む課金対象トークン、#234)。追加(後方互換): `daily.input` / `daily.cached_input` / `daily.output`(`session_today` も同じ)。意味変更: statusline 以外の経路で Claude が stale な snapshot から出るとき、`session` / `fallback` / `session_today` を null にする(従来は直近に観測した値のまま、#235)
 - `1.0`: v0.1 のまま出荷されてきた追加と意味変更を版に反映
   - 追加(後方互換): `tool.daily`、`tool.session_today`、`session.transcript_path`、`model.effort`

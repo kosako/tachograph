@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,55 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	}
 	if len(snap.Limits) != 2 || snap.Limits[0].UsedPct == nil || *snap.Limits[0].UsedPct != 23.5 {
 		t.Fatalf("snapshot limits = %+v", snap.Limits)
+	}
+}
+
+// The statusline's session tokens cover the whole session tree — the main
+// transcript plus the subagent transcripts nested under it — like
+// session_today and the cost Claude Code reports (#262).
+func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	t.Setenv("CMUX_WORKSPACE_ID", "")
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:05:00+09:00")
+
+	fixture := filepath.Join("..", "..", "internal", "collector", "claude", "testdata")
+	b, err := os.ReadFile(filepath.Join(fixture, "clauderoot", "projects", "-Users-example-dev-project", "abc12345-1234-5678-9abc-def012345678.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "s.jsonl")
+	if err := os.WriteFile(mainPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "s", "subagents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := `{"type":"assistant","timestamp":"2026-06-12T12:02:00.000Z","message":{"id":"msg_sub","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}},"requestId":"req_sub"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "s", "subagents", "agent-a.jsonl"), []byte(sub), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(fixture, "statusline_input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["transcript_path"] = mainPath
+	input, _ := json.Marshal(payload)
+
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.tokens} today {claude.tokens.session.today}", "--no-color"},
+		bytes.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	// main 76,107 + subagent 100,000 = 176,107 → "176k"; main alone would read "76k".
+	if got, want := strings.TrimSpace(out.String()), "176k today 176k"; got != want {
+		t.Errorf("statusline output = %q, want %q", got, want)
 	}
 }
 

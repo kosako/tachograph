@@ -224,7 +224,7 @@ Placeholders are `{tool.field}` with `tool` = `claude` | `codex`:
 | `5h.dial` / `wk.dial` | single-character headroom dial, `○◔◑◕●` (● = all left, or used up with `used`; `◌` when no data) |
 | `5h.moon` / `wk.moon` | larger moon-phase headroom dial, `🌑🌒🌓🌔🌕` (🌕 = all left, or used up with `used`; emoji, so not colored; `◌` when no data) |
 | `5h.resets` / `wk.resets` | reset time, `↻02:00` (within the next 24 hours) or `↻06/15` (otherwise) |
-| `tokens` / `tokens.session` | **current session** tokens, `989k` |
+| `tokens` / `tokens.session` | **current session** tokens, `989k` (for Claude, including that session's subagents / workflows) |
 | `tokens.session.today` | **current session, today only** tokens (Claude only), `68k` |
 | `tokens.all` | **today's all-session total** tokens, `12.7M/d` (`/d`=daily total) |
 | `cost` / `cost.session` | **current session** estimated cost, `$0.05` (Claude: the estimate Claude Code passes to the status line; Codex: tacho's price-table estimate, pricing the session's cumulative tokens at the current model's rate) |

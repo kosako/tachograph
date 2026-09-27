@@ -3,7 +3,9 @@
 package cache
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -249,4 +251,87 @@ func ReadDailyHistory(key string) (map[string]map[string]DailyHistoryEntry, bool
 // WriteDailyHistory replaces the cached closed days under key.
 func WriteDailyHistory(key string, days map[string]map[string]DailyHistoryEntry) error {
 	return writeJSON("daily-history.json", dailyHistoryFile{SchemaVersion: schema.Version, Key: key, Days: days})
+}
+
+// SessionTreeCache persists, for one Claude session tree, the cumulative
+// tokens of its transcripts last written before today (daily.TreeFileCache),
+// so the statusline doesn't re-read a long session's finished subagents on
+// every call (#262). One small file per session tree; entries are keyed by
+// path and invalidated by size or mtime, and the whole file by the schema
+// version.
+type SessionTreeCache struct {
+	name    string
+	entries map[string]sessionTreeEntry
+	dirty   bool
+}
+
+type sessionTreeEntry struct {
+	Size   int64         `json:"size"`
+	MTime  int64         `json:"mtime"` // unix nanoseconds
+	Tokens schema.Tokens `json:"tokens"`
+}
+
+type sessionTreeFile struct {
+	SchemaVersion string                      `json:"schema_version"`
+	Entries       map[string]sessionTreeEntry `json:"entries"`
+}
+
+// sessionTreeMaxAge is how long an unused session-tree cache file is kept.
+const sessionTreeMaxAge = 30 * 24 * time.Hour
+
+// OpenSessionTree loads the cache for the session tree rooted at sessionDir
+// (the main transcript's path without ".jsonl"). A missing, unreadable, or
+// older-schema file starts empty.
+func OpenSessionTree(sessionDir string) *SessionTreeCache {
+	sum := sha256.Sum256([]byte(sessionDir))
+	c := &SessionTreeCache{
+		name:    fmt.Sprintf("session-tree-%x.json", sum[:8]),
+		entries: map[string]sessionTreeEntry{},
+	}
+	var f sessionTreeFile
+	if ReadJSON(c.name, &f) && f.SchemaVersion == schema.Version && f.Entries != nil {
+		c.entries = f.Entries
+	}
+	return c
+}
+
+// Get returns the cached tokens for path while its size and mtime match.
+func (c *SessionTreeCache) Get(path string, size int64, mtime time.Time) (schema.Tokens, bool) {
+	e, ok := c.entries[path]
+	if !ok || e.Size != size || e.MTime != mtime.UnixNano() {
+		return schema.Tokens{}, false
+	}
+	return e.Tokens, true
+}
+
+// Put records path's tokens for its current size and mtime.
+func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, tokens schema.Tokens) {
+	c.entries[path] = sessionTreeEntry{Size: size, MTime: mtime.UnixNano(), Tokens: tokens}
+	c.dirty = true
+}
+
+// Save writes the cache when Put changed it, and removes other session-tree
+// cache files unused for sessionTreeMaxAge.
+func (c *SessionTreeCache) Save(now time.Time) error {
+	if !c.dirty {
+		return nil
+	}
+	if err := WriteJSON(c.name, sessionTreeFile{SchemaVersion: schema.Version, Entries: c.entries}); err != nil {
+		return err
+	}
+	c.dirty = false
+	dir, err := Dir()
+	if err != nil {
+		return nil
+	}
+	old, _ := filepath.Glob(filepath.Join(dir, "session-tree-*.json"))
+	for _, p := range old {
+		if filepath.Base(p) == c.name {
+			continue
+		}
+		if info, err := os.Stat(p); err == nil && now.Sub(info.ModTime()) > sessionTreeMaxAge {
+			_ = os.Remove(p)
+		}
+	}
+	return nil
 }

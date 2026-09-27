@@ -170,7 +170,9 @@ func fromStatusline(opts Options) schema.Tool {
 	// the cumulative totals come from the transcript instead, with the same
 	// aggregation as the transcript route. An unreadable or usage-less
 	// transcript leaves tokens null (unknown, never a wrong-semantics
-	// substitute) — see #185.
+	// substitute) — see #185. This covers the main transcript;
+	// core.AddSessionTree widens it to the session's subagent / workflow
+	// transcripts (#262).
 	if in.TranscriptPath != "" {
 		if b, err := os.ReadFile(in.TranscriptPath); err == nil {
 			if totals, last := usageFromTranscript(b); last != nil {

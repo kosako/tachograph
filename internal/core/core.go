@@ -2,6 +2,7 @@
 package core
 
 import (
+	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
@@ -45,7 +46,7 @@ func assemble(opts Options) schema.Status {
 	addDaily(&claudeT, claudeDaily, claudeDailyErr)
 	codexDaily, codexDailyErr := daily.CodexTotals(opts.CodexRoot, opts.Now, prices)
 	addDaily(&codexT, codexDaily, codexDailyErr)
-	AddSessionToday(&claudeT, opts.Now, prices)
+	AddSessionTree(&claudeT, opts.Now, prices)
 	return schema.Status{
 		SchemaVersion: schema.Version,
 		GeneratedAt:   opts.Now.Local().Format(time.RFC3339),
@@ -91,14 +92,31 @@ func addCodexSessionCost(t *schema.Tool, prices pricing.Table) {
 	t.Fallback.EstimatedCostUSD = &cost
 }
 
-// AddSessionToday attaches the current session's today-only totals, computed
-// from its transcript. Claude only — Codex's cumulative token_count can't be
-// sliced to a single day. No-op when there's no transcript path.
-func AddSessionToday(t *schema.Tool, now time.Time, prices pricing.Table) {
+// AddSessionTree widens the current Claude session to its whole transcript
+// tree — the main transcript plus the subagent / workflow transcripts nested
+// under it — and attaches today's portion. session.tokens and
+// fallback.session_tokens then share the scope of session_today, daily, and
+// the cost Claude Code reports (#262); one pass over the tree serves both.
+// Claude only — Codex's cumulative token_count can't be sliced to a single
+// day. No-op when there's no transcript path; when the tree total is unknown
+// (main transcript unreadable or without usage) the collector's value stays.
+func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 	if !t.Available || t.Error != nil || t.Session == nil || t.Session.TranscriptPath == nil {
 		return
 	}
-	t.SessionToday = daily.ClaudeSessionToday(*t.Session.TranscriptPath, now, prices).Schema()
+	path := *t.Session.TranscriptPath
+	fc := cache.OpenSessionTree(strings.TrimSuffix(path, ".jsonl"))
+	cum, today, ok := daily.ClaudeSessionTree(path, now, prices, fc)
+	_ = fc.Save(now)
+	if ok {
+		t.Session.Tokens = &cum
+		if t.Fallback == nil {
+			t.Fallback = &schema.Fallback{}
+		}
+		total := cum.Total
+		t.Fallback.SessionTokens = &total
+	}
+	t.SessionToday = today.Schema()
 }
 
 // claudeTool prefers a recent statusline snapshot (which carries rate
