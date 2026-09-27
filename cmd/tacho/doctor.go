@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
@@ -210,35 +212,80 @@ func reportIntegrations() {
 }
 
 func reportSwiftBarPlugin() {
-	for _, path := range swiftBarPluginCandidates() {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			fmt.Println("  SwiftBar:   plugin found (" + path + ")")
-			return
-		}
+	if path := findSwiftBarPlugin(); path != "" {
+		fmt.Println("  SwiftBar:   plugin found (" + path + ")")
+		return
 	}
-	fmt.Println("  SwiftBar:   plugin not found in common folders — copy contrib/tacho.30s.sh to your SwiftBar plugin folder")
+	fmt.Println("  SwiftBar:   plugin not found in the SwiftBar / xbar plugin folders — copy contrib/tacho.30s.sh there (ignore this if you don't use SwiftBar)")
 }
 
-func swiftBarPluginCandidates() []string {
+// findSwiftBarPlugin returns the tacho plugin file in the first plugin folder
+// that has one, or "" (#265). A plugin is any tacho.*.sh: the README invites
+// renaming the interval (tacho.1m.sh). SWIFTBAR_PLUGIN_PATH is the running
+// plugin file itself, set only when doctor runs from inside a plugin.
+func findSwiftBarPlugin() string {
+	if p := os.Getenv("SWIFTBAR_PLUGIN_PATH"); p != "" && isTachoPluginName(filepath.Base(p)) && isRegularFile(p) {
+		return p
+	}
+	for _, dir := range swiftBarPluginDirs() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if p := filepath.Join(dir, e.Name()); isTachoPluginName(e.Name()) && isRegularFile(p) {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// swiftBarPluginDirs lists the plugin folders to search: SwiftBar's
+// SWIFTBAR_PLUGINS_PATH (set for plugins), its user-chosen PluginDirectory
+// setting, then the SwiftBar and xbar defaults. xbar passes plugins no
+// folder variable of its own.
+func swiftBarPluginDirs() []string {
 	var out []string
 	seen := map[string]bool{}
-	add := func(path string) {
-		if path == "" || seen[path] {
+	add := func(dir string) {
+		if dir == "" || seen[dir] {
 			return
 		}
-		seen[path] = true
-		out = append(out, path)
+		seen[dir] = true
+		out = append(out, dir)
 	}
-	for _, env := range []string{"SWIFTBAR_PLUGIN_DIR", "SWIFTBAR_PLUGIN_PATH", "XBAR_PLUGIN_DIR", "XBAR_PLUGIN_PATH"} {
-		if d := os.Getenv(env); d != "" {
-			add(filepath.Join(d, "tacho.30s.sh"))
-		}
-	}
+	add(os.Getenv("SWIFTBAR_PLUGINS_PATH"))
+	add(swiftBarPluginDirectory())
 	if home, err := os.UserHomeDir(); err == nil {
-		add(filepath.Join(home, "Library", "Application Support", "SwiftBar", "Plugins", "tacho.30s.sh"))
-		add(filepath.Join(home, "Library", "Application Support", "xbar", "plugins", "tacho.30s.sh"))
+		add(filepath.Join(home, "Library", "Application Support", "SwiftBar", "Plugins"))
+		add(filepath.Join(home, "Library", "Application Support", "xbar", "plugins"))
 	}
 	return out
+}
+
+// swiftBarPluginDirectory reads SwiftBar's PluginDirectory setting (the
+// folder picked in its preferences); "" off macOS or when unset. It's a var so
+// tests don't read the machine's real preferences.
+var swiftBarPluginDirectory = func() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	out, err := exec.Command("defaults", "read", "com.ameba.SwiftBar", "PluginDirectory").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func isTachoPluginName(name string) bool {
+	ok, _ := filepath.Match("tacho.*.sh", name)
+	return ok
+}
+
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func reportCurrentStatus(now time.Time) {
