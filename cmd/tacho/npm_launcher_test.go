@@ -121,9 +121,29 @@ func TestSameInstallWindowsShims(t *testing.T) {
 	if sameInstall(shim, stray) {
 		t.Error("a global-prefix shim must not count as the launcher for an unrelated ../tachograph binary")
 	}
-	localShim := filepath.Join(local, ".bin", "tacho.cmd")
-	if sameInstall(localShim, filepath.Join(local, ".bin", "node_modules", "tachograph", "bin", name)) {
-		t.Error("a node_modules/.bin shim must not use the global layout")
+	// The candidates themselves: exactly the one layout per shim location
+	// (compared as files — the paths come back symlink-resolved and cleaned).
+	localWant := filepath.Join(local, "tachograph", "bin", name)
+	if got := npmLauncherTargets(filepath.Join(local, ".bin", "tacho.cmd")); len(got) != 1 || !sameExecutable(got[0], localWant) {
+		t.Errorf("node_modules/.bin shim targets = %q, want only the local layout %q", got, localWant)
+	}
+	globalWant := filepath.Join(prefix, "node_modules", "tachograph", "bin", name)
+	if got := npmLauncherTargets(shim); len(got) != 1 || !sameExecutable(got[0], globalWant) {
+		t.Errorf("global shim targets = %q, want only the global layout %q", got, globalWant)
+	}
+}
+
+// npm on Windows also writes an extensionless `tacho` sh shim (for Git Bash)
+// next to tacho.cmd; there the binary is tacho.exe, so an extensionless tacho
+// is that shim. On unix an extensionless tacho is the binary itself.
+func TestNpmLauncherTargetsExtensionlessShim(t *testing.T) {
+	prefix := t.TempDir()
+	want := filepath.Join(prefix, "node_modules", "tachograph", "bin", "tacho.exe")
+	if got := npmLauncherTargetsFor(filepath.Join(prefix, "tacho"), "windows"); len(got) != 1 || got[0] != want {
+		t.Errorf("windows extensionless shim targets = %q, want %q", got, want)
+	}
+	if got := npmLauncherTargetsFor(filepath.Join(prefix, "tacho"), "darwin"); got != nil {
+		t.Errorf("unix extensionless tacho is the binary, not a launcher; got %q", got)
 	}
 }
 

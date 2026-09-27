@@ -161,19 +161,26 @@ func sameInstall(p, exe string) bool {
 // is its sibling, ../tachograph); anywhere else it is the global prefix (the
 // package is under node_modules/tachograph). Only the one layout the shim's
 // location implies is returned, so an unrelated tacho elsewhere never counts.
+// Besides tacho.cmd / tacho.ps1, npm on Windows also writes an extensionless
+// `tacho` sh shim for Git Bash; on Windows the binary itself is tacho.exe, so
+// an extensionless tacho there can only be that shim.
 func npmLauncherTargets(p string) []string {
+	return npmLauncherTargetsFor(p, runtime.GOOS)
+}
+
+func npmLauncherTargetsFor(p, goos string) []string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		p = r
 	}
 	bin := "tacho"
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		bin = "tacho.exe"
 	}
 	dir := filepath.Dir(p)
-	switch strings.ToLower(filepath.Base(p)) {
-	case "tacho.js":
+	switch name := strings.ToLower(filepath.Base(p)); {
+	case name == "tacho.js":
 		return []string{filepath.Join(dir, bin)}
-	case "tacho.cmd", "tacho.ps1":
+	case name == "tacho.cmd", name == "tacho.ps1", name == "tacho" && goos == "windows":
 		if filepath.Base(dir) == ".bin" && filepath.Base(filepath.Dir(dir)) == "node_modules" {
 			return []string{filepath.Join(dir, "..", "tachograph", "bin", bin)}
 		}
