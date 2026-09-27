@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -216,5 +217,53 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 	}
 	if !statusLineResolves(command) {
 		t.Errorf("statusLineResolves(%q) = false, want true (binary exists)", command)
+	}
+}
+
+// goBin must name where `go install` actually puts binaries: GOBIN when set,
+// else the first GOPATH entry's bin — both with the go toolchain and, when go
+// isn't callable, from the environment (#264).
+func TestGoBin(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	gobin := filepath.Join(t.TempDir(), "gobin")
+	sep := string(filepath.ListSeparator)
+
+	t.Setenv("GOBIN", gobin)
+	t.Setenv("GOPATH", a)
+	if got := goBin(); got != gobin {
+		t.Errorf("GOBIN set: goBin() = %q, want %q", got, gobin)
+	}
+
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", a+sep+b)
+	if got, want := goBin(), filepath.Join(a, "bin"); got != want {
+		t.Errorf("GOPATH list: goBin() = %q, want %q (the first entry)", got, want)
+	}
+
+	// GOBIN unset and GOPATH only in the go env file: the value must come
+	// from `go env` (the environment alone would give ~/go/bin).
+	if _, err := exec.LookPath("go"); err == nil {
+		envFile := filepath.Join(t.TempDir(), "go.env")
+		if err := os.WriteFile(envFile, []byte("GOPATH="+b+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("GOENV", envFile)
+		t.Setenv("GOPATH", "")
+		if got, want := goBin(), filepath.Join(b, "bin"); got != want {
+			t.Errorf("go env file GOPATH: goBin() = %q, want %q", got, want)
+		}
+		t.Setenv("GOENV", "")
+		t.Setenv("GOPATH", a+sep+b)
+	}
+
+	// No go toolchain on PATH: read the same variables from the environment.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("GOBIN", gobin)
+	if got := goBin(); got != gobin {
+		t.Errorf("no go, GOBIN set: goBin() = %q, want %q", got, gobin)
+	}
+	t.Setenv("GOBIN", "")
+	if got, want := goBin(), filepath.Join(a, "bin"); got != want {
+		t.Errorf("no go, GOPATH list: goBin() = %q, want %q", got, want)
 	}
 }

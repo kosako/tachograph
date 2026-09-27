@@ -204,16 +204,38 @@ func sameExecutable(a, b string) bool {
 	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
-// goBin reports where `go install` places binaries: $(go env GOPATH)/bin,
-// falling back to ~/go/bin when the go toolchain isn't callable.
+// goBin reports where `go install` places binaries: GOBIN when set, else
+// the bin directory of the first GOPATH entry (go install uses only the
+// first). It asks the go toolchain (`go env` also honors the go env file);
+// when go isn't callable it reads the same variables from the environment,
+// then falls back to go's default GOPATH, ~/go (#264).
 func goBin() string {
-	if out, err := exec.Command("go", "env", "GOPATH").Output(); err == nil {
-		if p := strings.TrimSpace(string(out)); p != "" {
-			return filepath.Join(p, "bin")
+	if out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output(); err == nil {
+		// One value per line; an empty GOBIN is an empty first line, so trim
+		// only the trailing newline.
+		if lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n"); len(lines) == 2 {
+			if b := goBinFrom(lines[0], lines[1]); b != "" {
+				return b
+			}
 		}
+	}
+	if b := goBinFrom(os.Getenv("GOBIN"), os.Getenv("GOPATH")); b != "" {
+		return b
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, "go", "bin")
+	}
+	return ""
+}
+
+// goBinFrom resolves go install's target directory from GOBIN and GOPATH
+// values; "" when both are empty.
+func goBinFrom(gobin, gopath string) string {
+	if gobin = strings.TrimSpace(gobin); gobin != "" {
+		return gobin
+	}
+	if first := filepath.SplitList(strings.TrimSpace(gopath)); len(first) > 0 && first[0] != "" {
+		return filepath.Join(first[0], "bin")
 	}
 	return ""
 }
