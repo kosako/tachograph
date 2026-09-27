@@ -33,7 +33,7 @@
   "available": true,                  // データソース(セッションファイル等)が見つかったか
   "error": null,                      // 取得失敗時 {"code": "...", "message": "..."}
   "stale": false,                     // 最終観測データが古いとき true(閾値はツール別: Claude transcript / snapshot 経路=60分 StaleAfterMinutes、Codex=5時間)
-  "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(Claude transcript経路は最後の usage 行、Codex は最後の token_count イベントの timestamp で、リミットを別の token_count から取ったときは古い方。statusline 経由は受信時刻)。不明なら null
+  "collected_at": "2026-05-24T22:40:28+09:00",  // データの実観測時刻(Claude transcript経路は最後の usage 行、Codex は最後の利用可能な token_count イベント(制限到達時などに書かれる空の token_count は読み飛ばす)の timestamp で、リミットを別の token_count から取ったときは古い方。statusline 経由は受信時刻)。不明なら null
   "backend": "subscription",          // "subscription" | "api" | "bedrock" | "vertex" | "unknown"
   "plan": "prolite",                  // プラン名。不明なら null
   "model": {
