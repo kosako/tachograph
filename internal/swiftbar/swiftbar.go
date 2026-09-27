@@ -180,7 +180,7 @@ func titleLine(s schema.Status, dark bool, cfg config.Config, limits render.Limi
 			return "| image=" + b64
 		}
 	}
-	return title(s, limits)
+	return title(s, metric, limits)
 }
 
 // numberTitle renders the chosen metric per tool as text, e.g. "C 24% X 7%".
@@ -204,10 +204,11 @@ func numberTitle(s schema.Status, metric string, limits render.LimitDisplay) str
 }
 
 // title is the menu bar text fallback: tool initial + moon dial, "C🌔 X🌑".
-// The moon shows the 5h headroom (full = nothing used yet) or use per
-// limits, or the tool's first reported limit window when no 5h window exists
-// (same fallback as the ring and the number style).
-func title(s schema.Status, limits render.LimitDisplay) string {
+// The moon shows the chosen gauge metric — for a limit window its headroom
+// (full = nothing used yet) or use per limits, or the tool's first reported
+// window when the chosen one is missing (same fallback as the ring and the
+// number style).
+func title(s schema.Status, metric string, limits render.LimitDisplay) string {
 	var parts []string
 	for _, t := range s.Tools {
 		initial := "X"
@@ -217,7 +218,7 @@ func title(s schema.Status, limits render.LimitDisplay) string {
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		if frac, _, _ := render.MenubarMetric(t, render.MetricLimit5h, limits); frac != nil {
+		if frac, _, _ := render.MenubarMetric(t, metric, limits); frac != nil {
 			parts = append(parts, initial+render.Moon(*frac*100))
 		} else {
 			parts = append(parts, initial+render.DialMissing)

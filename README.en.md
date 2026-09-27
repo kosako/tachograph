@@ -324,9 +324,8 @@ The dropdown lists every metric per tool (5h / weekly / context / cost /
 tokens); the menu bar shows the one you select. If a tool doesn't report the
 selected 5h / weekly window (e.g. Codex temporarily without a 5h window), the
 menu bar shows a window it does report instead (tagged like `X wk85%` in the
-number style). The moon-dial text (`TACHO_SWIFTBAR_TEXT=1`) currently ignores
-the selection and always draws the 5h window (or the first reported one;
-#266).
+number style). The moon-dial text (`TACHO_SWIFTBAR_TEXT=1`) also draws the
+selected window and falls back the same way.
 
 Below them, the **last 7 days of cost/tokens** appear one row per day
 (`09/17  C $150.76/179M  X $0.13/27k`). The figures are defined exactly like
