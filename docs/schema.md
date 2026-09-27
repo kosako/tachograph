@@ -106,7 +106,7 @@
 |---|---|---|
 | `model` | statusline stdin JSON / transcripts の `message.model` | sessions JSONL `turn_context.payload.model` |
 | `model.effort` | statusline `effort.level`(ライブ値、`/effort` 変更も反映。transcripts経路や非対応モデルでは null) | —(null) |
-| `session.tokens` | 現セッションの transcript ツリー(本体 `<session>.jsonl` と、同名ディレクトリ配下の subagents / workflows transcript)の `message.usage` 集計。`daily` / `session_today`、Claude Code が渡す cost と同じ範囲(3.0 から。2.0 までは本体 1 ファイルだけ、#262)。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。transcript が読めない/usage が無いときは null) | `token_count.payload.info.total_token_usage` |
+| `session.tokens` | 現セッションの transcript ツリー(本体 `<session>.jsonl` と、同名ディレクトリ配下の subagents / workflows transcript)の `message.usage` 集計。`daily` / `session_today`、Claude Code が渡す cost と同じ範囲(3.0 から。2.0 までは本体 1 ファイルだけ、#262)。statusline 経路も `transcript_path` から集計。v2.1.132 以降の statusline `context_window.total_*` は現在コンテキスト量でありセッション累計ではないため使わない。本体の transcript が読めない / usage が無いとき、または配下の transcript のどれかが読めないときは null(一部だけの合計は出さない)) | `token_count.payload.info.total_token_usage` |
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `session.context_used_pct` | statusline `context_window.used_percentage`(transcripts経路では null) | `last_token_usage.total_tokens` ÷ `model_context_window` × 100(直近リクエストの総量による近似) |
 | `limits` | statusline `rate_limits.five_hour/seven_day`(transcripts経路では null) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |

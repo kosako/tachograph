@@ -89,3 +89,30 @@ func TestSessionTreeCacheTouchedWhenUsed(t *testing.T) {
 		t.Errorf("a used cache file must be touched; mtime %v", info.ModTime())
 	}
 }
+
+// Codex review (#262): entries for paths not asked about in a run — deleted
+// transcripts — are dropped on Save instead of accumulating forever.
+func TestSessionTreeCacheDropsUnseenEntries(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	now := time.Now()
+	c := OpenSessionTree("/p/session-a")
+	c.Put("/p/session-a/kept.jsonl", 1, now, []byte{1})
+	c.Put("/p/session-a/gone.jsonl", 1, now, []byte{2})
+	if err := c.Save(now); err != nil {
+		t.Fatal(err)
+	}
+	c = OpenSessionTree("/p/session-a")
+	if _, ok := c.Get("/p/session-a/kept.jsonl", 1, now); !ok {
+		t.Fatal("expected a hit for kept.jsonl")
+	}
+	if err := c.Save(now); err != nil {
+		t.Fatal(err)
+	}
+	c = OpenSessionTree("/p/session-a")
+	if _, ok := c.entries["/p/session-a/gone.jsonl"]; ok {
+		t.Error("gone.jsonl wasn't asked about and should have been dropped")
+	}
+	if _, ok := c.Get("/p/session-a/kept.jsonl", 1, now); !ok {
+		t.Error("kept.jsonl should remain")
+	}
+}

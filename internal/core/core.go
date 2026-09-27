@@ -98,8 +98,11 @@ func addCodexSessionCost(t *schema.Tool, prices pricing.Table) {
 // fallback.session_tokens then share the scope of session_today, daily, and
 // the cost Claude Code reports (#262); one pass over the tree serves both.
 // Claude only — Codex's cumulative token_count can't be sliced to a single
-// day. No-op when there's no transcript path; when the tree total is unknown
-// (main transcript unreadable or without usage) the collector's value stays.
+// day. No-op when there's no transcript path. When the tree total is unknown
+// (the main transcript or a nested one can't be read, or the main one has no
+// usage yet) session.tokens and fallback.session_tokens become null: the
+// collector's main-transcript figure would be a different measure, and
+// unknown is never served as a wrong-semantics value (#185).
 func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 	if !t.Available || t.Error != nil || t.Session == nil || t.Session.TranscriptPath == nil {
 		return
@@ -115,6 +118,11 @@ func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 		}
 		total := cum.Total
 		t.Fallback.SessionTokens = &total
+	} else {
+		t.Session.Tokens = nil
+		if t.Fallback != nil {
+			t.Fallback.SessionTokens = nil
+		}
 	}
 	t.SessionToday = today.Schema()
 }

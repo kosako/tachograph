@@ -3,7 +3,9 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +80,37 @@ func clearClaudeBackendEnvCore(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY"} {
 		t.Setenv(k, "")
+	}
+}
+
+// Codex review (#262): when the tree total is unknown (here a nested
+// transcript can't be read), session.tokens and fallback.session_tokens are
+// null — not the collector's main-transcript figure, a different measure.
+func TestAddSessionTreeUnknownTreeNullsTokens(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs unix permissions enforced for the current user")
+	}
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	_, mainPath := claudeRootWithSubagent(t, 100000)
+	child := filepath.Join(strings.TrimSuffix(mainPath, ".jsonl"), "subagents", "agent-a.jsonl")
+	if err := os.Chmod(child, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(child, 0o644) })
+
+	mainOnly := int64(76107)
+	tool := schema.Tool{
+		Tool:      schema.ToolClaudeCode,
+		Available: true,
+		Session:   &schema.Session{TranscriptPath: &mainPath, Tokens: &schema.Tokens{Total: mainOnly}},
+		Fallback:  &schema.Fallback{SessionTokens: &mainOnly},
+	}
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	AddSessionTree(&tool, now, nil)
+	if tool.Session.Tokens != nil || tool.Fallback.SessionTokens != nil {
+		t.Errorf("tokens = %+v / %v, want null when the tree total is unknown", tool.Session.Tokens, tool.Fallback.SessionTokens)
+	}
+	if tool.SessionToday == nil {
+		t.Error("session_today should still be attached (its own contract)")
 	}
 }

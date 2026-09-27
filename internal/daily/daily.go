@@ -102,8 +102,9 @@ type TreeFileCache interface {
 // only its responses' keys and tokens are needed; with fc non-nil they come
 // from the cache while the file is unchanged.
 //
-// ok is false when the main transcript can't be read or has no usage: the
-// cumulative figure is then unknown, never a partial zero. Today's portion
+// ok is false when the main transcript can't be read or has no usage, or when
+// any nested transcript or directory under the session can't be read: the
+// cumulative figure is then unknown, never a partial sum. Today's portion
 // keeps session_today's contract (no unknown-vs-zero distinction, unlike
 // daily's #187): whatever the readable files hold.
 func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Table, fc TreeFileCache) (cumulative schema.Tokens, today Totals, ok bool) {
@@ -142,16 +143,27 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 	}
 	mainUsage, mainErr := live(transcriptPath)
 	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
+	treeErr := false // a nested file or directory couldn't be read
 	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
-		if err != nil || f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+		if err != nil {
+			// A session without nested transcripts has no directory at all.
+			if !(path == sessionDir && errors.Is(err, fs.ErrNotExist)) {
+				treeErr = true
+			}
+			return nil
+		}
+		if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
 			return nil
 		}
 		info, err := f.Info()
 		if err != nil {
+			treeErr = true
 			return nil
 		}
 		if !info.ModTime().Before(from) {
-			_, _ = live(path)
+			if _, err := live(path); err != nil {
+				treeErr = true
+			}
 			return nil
 		}
 		var recs fileUsage
@@ -164,6 +176,7 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 		if !cached {
 			var err error
 			if recs, err = readFileUsage(path); err != nil {
+				treeErr = true
 				return nil
 			}
 			if fc != nil {
@@ -176,7 +189,7 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 		cum.add(recs.unkeyed.totals())
 		return nil
 	})
-	if mainErr != nil || !mainUsage {
+	if mainErr != nil || !mainUsage || treeErr {
 		return schema.Tokens{}, today, false
 	}
 	return schema.Tokens{Input: cum.Input, CachedInput: cum.CachedInput, Output: cum.Output, Total: cum.Tokens}, today, true

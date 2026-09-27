@@ -262,8 +262,9 @@ func WriteDailyHistory(key string, days map[string]map[string]DailyHistoryEntry)
 type SessionTreeCache struct {
 	name    string
 	entries map[string]sessionTreeEntry
-	dirty   bool // Put changed entries: write on Save
-	used    bool // Get hit: keep the file from looking unused
+	dirty   bool            // Put changed entries: write on Save
+	used    bool            // Get hit: keep the file from looking unused
+	seen    map[string]bool // paths asked about this run; others are gone
 }
 
 type sessionTreeEntry struct {
@@ -288,6 +289,7 @@ func OpenSessionTree(sessionDir string) *SessionTreeCache {
 	c := &SessionTreeCache{
 		name:    fmt.Sprintf("session-tree-%x.json", sum[:8]),
 		entries: map[string]sessionTreeEntry{},
+		seen:    map[string]bool{},
 	}
 	var f sessionTreeFile
 	if ReadJSON(c.name, &f) && f.SchemaVersion == schema.Version && f.Entries != nil {
@@ -298,6 +300,7 @@ func OpenSessionTree(sessionDir string) *SessionTreeCache {
 
 // Get returns the cached blob for path while its size and mtime match.
 func (c *SessionTreeCache) Get(path string, size int64, mtime time.Time) ([]byte, bool) {
+	c.seen[path] = true
 	e, ok := c.entries[path]
 	if !ok || e.Size != size || e.MTime != mtime.UnixNano() {
 		return nil, false
@@ -308,6 +311,7 @@ func (c *SessionTreeCache) Get(path string, size int64, mtime time.Time) ([]byte
 
 // Put records path's blob for its current size and mtime.
 func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, data []byte) {
+	c.seen[path] = true
 	c.entries[path] = sessionTreeEntry{Size: size, MTime: mtime.UnixNano(), Data: data}
 	c.dirty = true
 }
@@ -315,11 +319,18 @@ func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, data []
 // Save writes the cache when Put changed it — or, when it was only read,
 // refreshes the file's mtime at most daily so an active tree's cache isn't
 // taken for unused — and removes other session-tree cache files unused for
-// sessionTreeMaxAge.
+// sessionTreeMaxAge. Entries for paths not asked about this run (deleted
+// transcripts, or ones now written today and read live) are dropped.
 func (c *SessionTreeCache) Save(now time.Time) error {
 	dir, err := Dir()
 	if err != nil {
 		return nil
+	}
+	for p := range c.entries {
+		if !c.seen[p] {
+			delete(c.entries, p)
+			c.dirty = true
+		}
 	}
 	if !c.dirty {
 		if c.used {

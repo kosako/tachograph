@@ -3,6 +3,7 @@ package daily
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -180,5 +181,32 @@ func TestClaudeSessionTreeTodayAcrossMidnight(t *testing.T) {
 	}
 	if cum.Total != 135 {
 		t.Errorf("cumulative = %d, want 135 (one response)", cum.Total)
+	}
+}
+
+// Codex review (#262): a nested transcript that can't be read makes the
+// cumulative figure unknown rather than a partial sum that would overwrite a
+// complete one; today's portion keeps counting what is readable.
+func TestClaudeSessionTreeUnreadableChildIsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs unix permissions enforced for the current user")
+	}
+	root := t.TempDir()
+	now := time.Now()
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath, claudeMsg(now, 10, 20, 100, 5)+"\n", now) // 135
+	blocked := filepath.Join(root, "projects", "p", "main", "subagents", "blocked.jsonl")
+	writeFile(t, blocked, claudeMsg(now, 1, 2, 50, 3)+"\n", now)
+	if err := os.Chmod(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o644) })
+
+	_, today, ok := ClaudeSessionTree(mainPath, now, noPrices, nil)
+	if ok {
+		t.Error("ok = true with an unreadable nested transcript, want false (cumulative unknown)")
+	}
+	if today.Tokens != 135 {
+		t.Errorf("today = %d, want 135 from the readable main transcript", today.Tokens)
 	}
 }
