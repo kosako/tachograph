@@ -95,6 +95,7 @@ tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--wr
 tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
 tacho version          # インストール済みの版を表示(tacho --version も可)
 tacho config show|set  # 設定の表示 / 変更(~/.config/tachograph/config.json。show は未知の値も警告。statusline-preset などは後述)
+tacho help             # コマンドの一覧(tacho -h / --help も可)
 ```
 
 ```

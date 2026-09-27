@@ -23,6 +23,11 @@ import (
 )
 
 func runDoctor(args []string) int {
+	// doctor takes no flags; -h used to be ignored and ran the diagnosis.
+	if len(args) > 0 && isHelpFlag(args[0]) {
+		fmt.Print(usage)
+		return 0
+	}
 	exe := resolveExe()
 	onPath := tachoOnPath()
 	now := time.Now()

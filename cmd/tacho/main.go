@@ -61,23 +61,31 @@ func normalizeVersion(v string) string {
 }
 
 const usage = `usage:
-  tacho                 one-shot compact status
+  tacho                 one-shot compact status (-no-color, -no-cache)
   tacho watch [-n sec]  refresh continuously
   tacho status --json   unified schema JSON (see docs/schema.md)
   tacho daily [-days N] per-day cost / tokens for the last N days (default 30)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
-  tacho version         print the installed version
+  tacho version         print the installed version (also --version)
   tacho cmux push       push status pills to the cmux sidebar once (deprecated)
   tacho cmux clear      remove tacho's pills from the cmux sidebar (deprecated)
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
   tacho config show     print the current configuration
+  tacho config path     print the config file path
   tacho config set K V  set a config value (e.g. menubar.metric cost)
+  tacho config statusline-preset NAME  write a statusline preset (--list lists them)
   tacho setup claude    print/install the Claude Code statusLine config
   tacho doctor          diagnose install path, data sources, cache, and integrations
+  tacho help            show this help (also -h / --help)
 `
 
 func main() {
-	args := os.Args[1:]
+	os.Exit(run(os.Args[1:]))
+}
+
+// run dispatches a command line (without the program name) and returns the
+// exit code.
+func run(args []string) int {
 	cmd := ""
 	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
 		cmd, args = args[0], args[1:]
@@ -85,34 +93,51 @@ func main() {
 	switch cmd {
 	case "version":
 		fmt.Println("tacho " + buildVersion())
+		return 0
 	case "status":
-		os.Exit(runStatus(args))
+		return runStatus(args)
 	case "daily":
-		os.Exit(runDaily(args))
+		return runDaily(args)
 	case "watch":
-		os.Exit(runWatch(args))
+		return runWatch(args)
 	case "statusline":
-		os.Exit(runStatusline(args))
+		return runStatusline(args)
 	case "cmux":
-		os.Exit(runCmux(args))
+		return runCmux(args)
 	case "swiftbar":
-		os.Exit(runSwiftbar(args))
+		return runSwiftbar(args)
 	case "config":
-		os.Exit(runConfig(args))
+		return runConfig(args)
 	case "setup":
-		os.Exit(runSetup(args))
+		return runSetup(args)
 	case "doctor":
-		os.Exit(runDoctor(args))
+		return runDoctor(args)
+	case "help":
+		fmt.Print(usage)
+		return 0
 	case "":
-		if len(args) > 0 && args[0] == "--version" {
-			fmt.Println("tacho " + buildVersion())
-			return
+		// Answer help and version here: the one-shot FlagSet would print only
+		// its own flags for -h and reject -version (#269).
+		if len(args) > 0 {
+			switch {
+			case isHelpFlag(args[0]):
+				fmt.Print(usage)
+				return 0
+			case args[0] == "--version" || args[0] == "-version":
+				fmt.Println("tacho " + buildVersion())
+				return 0
+			}
 		}
-		os.Exit(runOnce(args))
+		return runOnce(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		return 2
 	}
+}
+
+// isHelpFlag reports whether arg is -h, -help, or --help.
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "-help" || arg == "--help"
 }
 
 func style(noColor bool, cfg config.Config) render.Style {
