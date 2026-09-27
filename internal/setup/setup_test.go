@@ -2,7 +2,9 @@ package setup
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -116,5 +118,47 @@ func TestCommandShellRoundTrip(t *testing.T) {
 		if string(out) != p {
 			t.Errorf("shell round trip: %q became %q (command %q)", p, string(out), cmd)
 		}
+	}
+}
+
+// The generated plugin runs this binary by absolute path (SwiftBar's
+// launchd PATH misses most install locations, #270), quoted when needed, and
+// keeps the bundled plugin's metadata and display-tweak lines.
+func TestSwiftBarPlugin(t *testing.T) {
+	got := SwiftBarPlugin("/Users/me/go/bin/tacho")
+	if !strings.HasSuffix(got, "\nexec /Users/me/go/bin/tacho swiftbar\n") {
+		t.Errorf("exec line missing:\n%s", got)
+	}
+	if q := SwiftBarPlugin("/Users/me/My Tools/tacho"); !strings.HasSuffix(q, "\nexec \"/Users/me/My Tools/tacho\" swiftbar\n") {
+		t.Errorf("path with a space not quoted:\n%s", q)
+	}
+
+	// Apart from the PATH note and the exec line, the plugin is the bundled
+	// one line for line (metadata, PATH, display tweaks).
+	contrib, err := os.ReadFile(filepath.Join("..", "..", "contrib", "tacho.30s.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	strip := func(script, note string) string {
+		var keep []string
+		inNote := false
+		for _, line := range strings.Split(script, "\n") {
+			switch {
+			case strings.HasPrefix(line, note):
+				inNote = true
+				continue
+			case inNote && strings.HasPrefix(line, "# "):
+				continue
+			case strings.HasPrefix(line, "exec "):
+				line = "exec <tacho> swiftbar"
+			}
+			inNote = false
+			keep = append(keep, line)
+		}
+		return strings.Join(keep, "\n")
+	}
+	want := strip(string(contrib), "# SwiftBar may not see your shell's PATH")
+	if rest := strip(got, "# Written by `tacho setup swiftbar`"); rest != want {
+		t.Errorf("plugin differs from contrib/tacho.30s.sh beyond the PATH note and exec line:\n%s\n--- want ---\n%s", rest, want)
 	}
 }

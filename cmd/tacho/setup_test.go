@@ -338,3 +338,127 @@ func TestGoBin(t *testing.T) {
 		t.Errorf("no go, GOPATH list: goBin() = %q, want %q", got, want)
 	}
 }
+
+// `tacho setup swiftbar` prints the plugin alone on stdout (so it can be
+// redirected), with this binary's absolute path on the exec line (#270).
+func TestSetupSwiftBarPrints(t *testing.T) {
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+
+	var code int
+	out := capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar"}) })
+	if code != 0 || out != setup.SwiftBarPlugin("/opt/tools/tacho") {
+		t.Errorf("setup swiftbar = %d, stdout %q; want 0 and the plugin", code, out)
+	}
+}
+
+// --write installs into SwiftBar's PluginDirectory: a new tacho.30s.sh, or an
+// installed tacho plugin replaced in place (keeping its interval name) with
+// the old script backed up outside the plugin folder.
+func TestSetupSwiftBarWrite(t *testing.T) {
+	_, setting := isolateSwiftBar(t)
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+	want := setup.SwiftBarPlugin("/opt/tools/tacho")
+	write := func() int {
+		var code int
+		capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+		return code
+	}
+
+	// No plugin folder configured: nothing to guess.
+	if code := write(); code != 1 {
+		t.Errorf("unset PluginDirectory: exit = %d, want 1", code)
+	}
+
+	*setting = t.TempDir()
+	if code := write(); code != 0 {
+		t.Fatalf("fresh install: exit = %d, want 0", code)
+	}
+	fresh := filepath.Join(*setting, "tacho.30s.sh")
+	info, err := os.Stat(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(fresh); string(b) != want {
+		t.Errorf("fresh install: content %q, want the plugin", b)
+	}
+	// Windows has no execute bit (regular files report 0666).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
+		t.Errorf("fresh install: mode %v, want 0755", info.Mode().Perm())
+	}
+
+	// An installed, customized plugin is replaced in place and backed up.
+	*setting = t.TempDir()
+	old := "#!/bin/bash\nexport TACHO_APPEARANCE=light\nexec tacho swiftbar\n"
+	renamed := filepath.Join(*setting, "tacho.1m.sh")
+	if err := os.WriteFile(renamed, []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code := write(); code != 0 {
+		t.Fatalf("replace: exit = %d, want 0", code)
+	}
+	if b, _ := os.ReadFile(renamed); string(b) != want {
+		t.Errorf("replace: %s = %q, want the plugin", renamed, b)
+	}
+	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
+		t.Error("replace: added tacho.30s.sh next to the installed tacho.1m.sh")
+	}
+	bak := filepath.Join(os.Getenv("TACHO_CONFIG_DIR"), "swiftbar-plugin.bak")
+	if b, _ := os.ReadFile(bak); string(b) != old {
+		t.Errorf("backup %s = %q, want the replaced script", bak, b)
+	}
+}
+
+// --write changes nothing when it can't do so safely: no config directory
+// for the backup, or a plugin folder it can't list (which could hide an
+// installed tacho plugin and leave two of them).
+func TestSetupSwiftBarWriteRefusesUnsafe(t *testing.T) {
+	_, setting := isolateSwiftBar(t)
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+	write := func() int {
+		var code int
+		capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+		return code
+	}
+
+	*setting = t.TempDir()
+	installed := filepath.Join(*setting, "tacho.1m.sh")
+	old := "#!/bin/bash\nexec tacho swiftbar\n"
+	if err := os.WriteFile(installed, []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TACHO_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // os.UserHomeDir's source on Windows
+	if code := write(); code != 1 {
+		t.Errorf("no config dir: exit = %d, want 1", code)
+	}
+	if b, _ := os.ReadFile(installed); string(b) != old {
+		t.Errorf("no config dir: plugin rewritten to %q", b)
+	}
+
+	if runtime.GOOS == "windows" {
+		return // directory permission bits don't block listing there
+	}
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if err := os.Chmod(*setting, 0o300); err != nil { // writable, not listable
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(*setting, 0o755) })
+	if _, err := os.ReadDir(*setting); err == nil {
+		t.Skip("directory stays listable (running as root?)")
+	}
+	if code := write(); code != 1 {
+		t.Errorf("unlistable folder: exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
+		t.Error("unlistable folder: added tacho.30s.sh next to the installed plugin")
+	}
+}

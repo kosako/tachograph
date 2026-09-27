@@ -121,6 +121,7 @@ tacho daily -days 30   # per-day estimated cost / tokens (default 30 days, recom
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
 tacho cmux push|clear  # manage cmux sidebar pills manually (deprecated)
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
+tacho setup swiftbar   # print/install the SwiftBar plugin (--write)
 tacho doctor           # diagnose install path, data sources, cache, integrations (and unknown config values)
 tacho version          # print the installed version (also tacho --version)
 tacho config show|set  # show / change settings (~/.config/tachograph/config.json; show also warns about unknown values; statusline-preset and more below)
@@ -305,19 +306,29 @@ default headroom display a full moon = all left, with the usage display a full
 moon = used up).
 
 ```sh
-brew install swiftbar   # if you don't have it
-cp contrib/tacho.30s.sh <your SwiftBar plugin folder>/
-chmod +x <plugin folder>/tacho.30s.sh
+brew install swiftbar          # if you don't have it (launch it and pick a plugin folder)
+tacho setup swiftbar --write   # put tacho.30s.sh in that plugin folder
 ```
+
+`tacho setup swiftbar` builds a plugin that runs this tacho by absolute path
+(plugins launched by SwiftBar don't see your shell's PATH). With `--write` it
+reads the plugin folder from SwiftBar's settings and writes the plugin there;
+without it, it just prints the plugin. If the folder already has a tacho
+plugin (`tacho.*.sh`), it is replaced under the same name and the old file is
+saved as `~/.config/tachograph/swiftbar-plugin.bak`. Run it again after moving
+or reinstalling tacho (for an npm install, also after switching Node
+versions). To install by hand, copy `contrib/tacho.30s.sh` into the plugin
+folder and `chmod +x` it — but that script adds only `/opt/homebrew/bin` and
+`~/go/bin` to PATH, so it won't find a tacho installed elsewhere (`GOBIN`, an
+npm global under nvm / mise, …).
 
 The `30s` in the filename is the refresh interval (rename to change). The
 script just execs `tacho swiftbar`, so display changes belong in the tacho
 renderer. Plugins launched by SwiftBar may not see your shell config (e.g.
 `~/.zshrc`), so set `TACHO_APPEARANCE` / `TACHO_SWIFTBAR_TEXT` in this file,
-before the `exec` line (e.g. `export TACHO_APPEARANCE=light`). The script also
-adds only `/opt/homebrew/bin` and `~/go/bin` to PATH; if `tacho` lives
-elsewhere (e.g. an npm global under nvm / mise), replace `tacho` on the `exec`
-line with the absolute path `tacho doctor` prints as `running:`.
+before the `exec` line (e.g. `export TACHO_APPEARANCE=light`; re-running
+`tacho setup swiftbar --write` drops them, so copy them back from the saved
+file).
 
 #### Configuring what's shown
 

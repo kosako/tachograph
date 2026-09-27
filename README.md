@@ -92,6 +92,7 @@ tacho daily -days 30   # 日ごとの推定コスト / トークン(既定 30 �
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
 tacho cmux push|clear  # cmuxサイドバーのピルを手動操作(非推奨)
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
+tacho setup swiftbar   # SwiftBarプラグインを出力/設置(--write)
 tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
 tacho version          # インストール済みの版を表示(tacho --version も可)
 tacho config show|set  # 設定の表示 / 変更(~/.config/tachograph/config.json。show は未知の値も警告。statusline-preset などは後述)
@@ -202,12 +203,13 @@ tacho cmux clear   # tachoのピルを削除
 どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが既定では 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる。後述の「指標」で weekly 枠にも切り替え可)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。stale の印が出るのはリングだけで、数字や月齢テキストの表示では古い値がそのまま並ぶため、データの古さはドロップダウンの各ツールの見出し(`⚠` + 経過時間)で確認します。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、既定の残量表示では満月 = 全部残っている。使用率表示では満月 = 使い切り)にフォールバックできます。
 
 ```sh
-brew install swiftbar   # 未導入なら
-cp contrib/tacho.30s.sh <SwiftBarのプラグインフォルダ>/
-chmod +x <プラグインフォルダ>/tacho.30s.sh
+brew install swiftbar          # 未導入なら(起動してプラグインフォルダを選んでおく)
+tacho setup swiftbar --write   # プラグインフォルダに tacho.30s.sh を置く
 ```
 
-ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけなので、出力を変えたければ tacho 側のレンダラを直します。SwiftBar から起動されるプラグインにはシェルの設定(`~/.zshrc` など)が効かないことがあるため、`TACHO_APPEARANCE` / `TACHO_SWIFTBAR_TEXT` はこのファイルの `exec` の行の前に書きます(例: `export TACHO_APPEARANCE=light`)。また、このファイルが PATH に足すのは `/opt/homebrew/bin` と `~/go/bin` だけなので、それ以外の場所(nvm / mise 管理下の npm グローバルなど)に入れた場合は、`exec` の行の `tacho` を `tacho doctor` の `running:` に出る絶対パスに書き換えてください。
+`tacho setup swiftbar` は、この tacho を絶対パスで実行するプラグインを作ります(SwiftBar から起動されるプラグインにはシェルの PATH が効かないため)。`--write` を付けると SwiftBar の設定からプラグインフォルダを読んで書き込み、付けなければ標準出力に出すだけです。フォルダに tacho のプラグイン(`tacho.*.sh`)が既にあれば、名前を保ったまま置き換え、元のファイルは `~/.config/tachograph/swiftbar-plugin.bak` に退避します。tacho を移したり入れ直したりしたら(npm で入れた場合は Node のバージョンを切り替えたときも)、もう一度実行してください。手で置くなら `contrib/tacho.30s.sh` をプラグインフォルダにコピーして `chmod +x` します。ただしこのファイルが PATH に足すのは `/opt/homebrew/bin` と `~/go/bin` だけなので、それ以外の場所(`GOBIN`、nvm / mise 管理下の npm グローバルなど)に入れた tacho は見つかりません。
+
+ファイル名の `30s` が更新間隔です(リネームで変更可)。実体は `tacho swiftbar` を呼ぶだけなので、出力を変えたければ tacho 側のレンダラを直します。SwiftBar から起動されるプラグインにはシェルの設定(`~/.zshrc` など)が効かないことがあるため、`TACHO_APPEARANCE` / `TACHO_SWIFTBAR_TEXT` はこのファイルの `exec` の行の前に書きます(例: `export TACHO_APPEARANCE=light`。`tacho setup swiftbar --write` で置き直すと消えるので、退避したファイルから書き戻します)。
 
 #### 表示内容の設定
 
