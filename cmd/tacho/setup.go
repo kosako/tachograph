@@ -154,12 +154,13 @@ func sameInstall(p, exe string) bool {
 }
 
 // npmLauncherTargets returns where the platform binary an npm launcher runs
-// can be, or nil when p isn't one. npm links `tacho` to the package's
+// is, or nil when p isn't one. npm links `tacho` to the package's
 // bin/tacho.js — a symlink on unix, a tacho.cmd / tacho.ps1 shim on Windows —
 // and the launcher spawns the binary postinstall placed next to tacho.js. A
-// Windows shim sits in the global prefix (the package is under
-// node_modules/tachograph) or, for a local install, in node_modules/.bin (the
-// package is its sibling, ../tachograph).
+// Windows shim in node_modules/.bin belongs to a local install (the package
+// is its sibling, ../tachograph); anywhere else it is the global prefix (the
+// package is under node_modules/tachograph). Only the one layout the shim's
+// location implies is returned, so an unrelated tacho elsewhere never counts.
 func npmLauncherTargets(p string) []string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		p = r
@@ -173,10 +174,10 @@ func npmLauncherTargets(p string) []string {
 	case "tacho.js":
 		return []string{filepath.Join(dir, bin)}
 	case "tacho.cmd", "tacho.ps1":
-		return []string{
-			filepath.Join(dir, "node_modules", "tachograph", "bin", bin), // global prefix
-			filepath.Join(dir, "..", "tachograph", "bin", bin),           // local node_modules/.bin
+		if filepath.Base(dir) == ".bin" && filepath.Base(filepath.Dir(dir)) == "node_modules" {
+			return []string{filepath.Join(dir, "..", "tachograph", "bin", bin)}
 		}
+		return []string{filepath.Join(dir, "node_modules", "tachograph", "bin", bin)}
 	}
 	return nil
 }

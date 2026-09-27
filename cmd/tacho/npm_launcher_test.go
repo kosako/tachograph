@@ -96,6 +96,35 @@ func TestSameInstallWindowsShims(t *testing.T) {
 	if got := npmLauncherTargets(filepath.Join(global, "tacho")); got != nil {
 		t.Errorf("a plain binary is not a launcher, got %q", got)
 	}
+
+	// Only the layout the shim's location implies counts: a global-prefix
+	// shim must not claim an unrelated tacho that happens to sit at the
+	// local layout's spot (<prefix>/../tachograph/bin), and vice versa.
+	root := t.TempDir()
+	prefix := filepath.Join(root, "prefix")
+	stray := filepath.Join(root, "tachograph", "bin", name)
+	for _, d := range []string{filepath.Join(prefix, "node_modules", "tachograph", "bin"), filepath.Dir(stray)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(prefix, "node_modules", "tachograph", "bin", name), []byte("global"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("stray"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(prefix, "tacho.cmd")
+	if err := os.WriteFile(shim, []byte("@echo off\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if sameInstall(shim, stray) {
+		t.Error("a global-prefix shim must not count as the launcher for an unrelated ../tachograph binary")
+	}
+	localShim := filepath.Join(local, ".bin", "tacho.cmd")
+	if sameInstall(localShim, filepath.Join(local, ".bin", "node_modules", "tachograph", "bin", name)) {
+		t.Error("a node_modules/.bin shim must not use the global layout")
+	}
 }
 
 // doctor's statusLine check: a command that doesn't resolve, one that runs a
