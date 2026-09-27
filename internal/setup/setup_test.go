@@ -2,7 +2,9 @@ package setup
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -115,6 +117,31 @@ func TestCommandShellRoundTrip(t *testing.T) {
 		}
 		if string(out) != p {
 			t.Errorf("shell round trip: %q became %q (command %q)", p, string(out), cmd)
+		}
+	}
+}
+
+// The generated plugin runs this binary by absolute path (SwiftBar's
+// launchd PATH misses most install locations, #270), quoted when needed, and
+// keeps the bundled plugin's metadata and display-tweak lines.
+func TestSwiftBarPlugin(t *testing.T) {
+	got := SwiftBarPlugin("/Users/me/go/bin/tacho")
+	if !strings.HasSuffix(got, "\nexec /Users/me/go/bin/tacho swiftbar\n") {
+		t.Errorf("exec line missing:\n%s", got)
+	}
+	if q := SwiftBarPlugin("/Users/me/My Tools/tacho"); !strings.HasSuffix(q, "\nexec \"/Users/me/My Tools/tacho\" swiftbar\n") {
+		t.Errorf("path with a space not quoted:\n%s", q)
+	}
+
+	contrib, err := os.ReadFile(filepath.Join("..", "..", "contrib", "tacho.30s.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(contrib), "\n") {
+		if strings.HasPrefix(line, "#!") || strings.HasPrefix(line, "# <xbar.") || strings.HasPrefix(line, "# export TACHO_") || strings.HasPrefix(line, "# Optional display") {
+			if !strings.Contains(got, line+"\n") {
+				t.Errorf("generated plugin lacks contrib line %q", line)
+			}
 		}
 	}
 }

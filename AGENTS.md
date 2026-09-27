@@ -46,7 +46,7 @@
     both READMEs (name, description, sample output) and in
     `contrib/statusline.tmpl.example` (full templates); update them together.
   - `internal/notify` raises macOS notifications; `internal/setup` generates
-    and applies the Claude Code statusLine config.
+    and applies the Claude Code statusLine config and the SwiftBar plugin.
   - `cmd/tacho` owns CLI wiring, including `tacho doctor`.
 - Do not add tracked local paths, secrets, private URLs, or user-specific
   machine data.

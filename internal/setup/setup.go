@@ -1,7 +1,7 @@
 // Package setup generates and applies the Claude Code statusLine
-// configuration. It exists so first-time users don't have to hand-edit
-// ~/.claude/settings.json or guess the absolute path to the tacho binary
-// when it isn't on their PATH.
+// configuration and the SwiftBar plugin. It exists so first-time users don't
+// have to hand-edit ~/.claude/settings.json or guess the absolute path to the
+// tacho binary when it isn't on their PATH.
 package setup
 
 import (
@@ -24,10 +24,37 @@ func Command(bareIsSelf bool, exe string) string {
 	if bareIsSelf {
 		return "tacho statusline"
 	}
+	return shellWord(exe) + " statusline"
+}
+
+// shellWord serializes exe as one POSIX-shell word: bare when it is made of
+// known-inert characters, double-quoted otherwise.
+func shellWord(exe string) string {
 	if safeExe.MatchString(exe) {
-		return exe + " statusline"
+		return exe
 	}
-	return quoteExe(exe) + " statusline"
+	return quoteExe(exe)
+}
+
+// SwiftBarPlugin renders the SwiftBar / xbar plugin script for the tacho
+// binary at exe (#270). It is contrib/tacho.30s.sh with the binary's
+// absolute path on the exec line in place of a PATH lookup: SwiftBar starts
+// plugins with launchd's minimal PATH, which misses GOBIN, nvm / mise, and
+// most other install locations. Callers must pass a non-empty exe.
+func SwiftBarPlugin(exe string) string {
+	return `#!/bin/bash
+# <xbar.title>tachograph</xbar.title>
+# <xbar.desc>Rate-limit / context gauges for Claude Code and Codex CLI.</xbar.desc>
+# <xbar.dependencies>tacho</xbar.dependencies>
+# <xbar.abouturl>https://github.com/kosako/tachograph</xbar.abouturl>
+# Written by ` + "`tacho setup swiftbar`" + `. SwiftBar doesn't see your shell's
+# PATH, so the exec line runs tacho by absolute path: re-run it after moving
+# or reinstalling tacho (for an npm install, also after switching Node).
+# Optional display tweaks (see the README's SwiftBar section):
+# export TACHO_APPEARANCE=light   # near-black logo/track for a light menu bar
+# export TACHO_SWIFTBAR_TEXT=1    # moon-dial text instead of the gauge image
+exec ` + shellWord(exe) + ` swiftbar
+`
 }
 
 // safeExe matches paths that no shell reinterprets when unquoted: letters,

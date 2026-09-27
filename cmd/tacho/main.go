@@ -76,6 +76,7 @@ const usage = `usage:
   tacho config set K V  set a config value (e.g. menubar.metric cost)
   tacho config statusline-preset NAME  write a statusline preset (--list lists them)
   tacho setup claude    print/install the Claude Code statusLine config
+  tacho setup swiftbar  print/install the SwiftBar plugin (runs this tacho by absolute path)
   tacho doctor          diagnose install path, data sources, cache, and integrations
   tacho help            show this help (also -h / --help)
 `

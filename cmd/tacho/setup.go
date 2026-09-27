@@ -10,15 +10,21 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/setup"
 )
 
 const setupUsage = `usage:
-  tacho setup claude          print the ~/.claude/settings.json statusLine snippet
-  tacho setup claude --write  merge it into ~/.claude/settings.json (backs up first)
+  tacho setup claude            print the ~/.claude/settings.json statusLine snippet
+  tacho setup claude --write    merge it into ~/.claude/settings.json (backs up first)
+  tacho setup swiftbar          print a SwiftBar plugin that runs this tacho by absolute path
+  tacho setup swiftbar --write  write it into SwiftBar's plugin folder (backs up first)
 `
 
 func runSetup(args []string) int {
+	if len(args) > 0 && args[0] == "swiftbar" {
+		return runSetupSwiftBar(args[1:])
+	}
 	if len(args) == 0 || args[0] != "claude" {
 		fmt.Fprint(os.Stderr, setupUsage)
 		return 2
@@ -72,19 +78,83 @@ func runSetup(args []string) int {
 	// lose the user's pre-tacho statusLine. Keep the first .bak.
 	if bak := path + ".bak"; len(existing) > 0 {
 		if _, err := os.Stat(bak); os.IsNotExist(err) {
-			if err := writeFileAtomic(bak, existing); err != nil {
+			if err := writeFileAtomic(bak, existing, 0o600); err != nil {
 				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 				return 1
 			}
 			fmt.Println("Backed up existing settings to " + bak)
 		}
 	}
-	if err := writeFileAtomic(path, merged); err != nil {
+	if err := writeFileAtomic(path, merged, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
 	fmt.Println("Wrote statusLine to " + path + " (command: " + command + ")")
 	fmt.Println("Restart Claude Code to pick it up.")
+	return 0
+}
+
+// runSetupSwiftBar prints or installs the SwiftBar plugin with this binary's
+// absolute path on its exec line: SwiftBar runs plugins with launchd's
+// minimal PATH, which misses most install locations (#270).
+func runSetupSwiftBar(args []string) int {
+	fs := flag.NewFlagSet("setup swiftbar", flag.ExitOnError)
+	write := fs.Bool("write", false, "write it into SwiftBar's plugin folder")
+	fs.Parse(args)
+
+	exe := resolveExe()
+	if exe == "" {
+		fmt.Fprintln(os.Stderr, "tacho: cannot determine the running binary's path; nothing safe to configure")
+		return 1
+	}
+	plugin := setup.SwiftBarPlugin(exe)
+	if !*write {
+		// Only the script goes to stdout, so it can be redirected to a file.
+		fmt.Print(plugin)
+		fmt.Fprintln(os.Stderr, "tacho: save this as tacho.30s.sh in your SwiftBar plugin folder and make it executable, or re-run with --write")
+		return 0
+	}
+
+	dir := swiftBarPluginDirectory()
+	if dir == "" {
+		fmt.Fprintln(os.Stderr, "tacho: SwiftBar's plugin folder isn't set; choose one in SwiftBar first, or save the output of `tacho setup swiftbar` there yourself")
+		return 1
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		fmt.Fprintln(os.Stderr, "tacho: SwiftBar's plugin folder "+dir+" is not a directory")
+		return 1
+	}
+	// Replace an installed tacho plugin in place, keeping its name (the name
+	// carries the refresh interval); otherwise add tacho.30s.sh.
+	path := tachoPluginIn(dir)
+	if path == "" {
+		path = filepath.Join(dir, "tacho.30s.sh")
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	if len(existing) > 0 && string(existing) != plugin {
+		// The replaced script may carry export lines the user added. Keep it
+		// outside the plugin folder, where SwiftBar won't try to run it.
+		bak := filepath.Join(config.Dir(), "swiftbar-plugin.bak")
+		if err := os.MkdirAll(filepath.Dir(bak), 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
+			return 1
+		}
+		if err := writeFileAtomic(bak, existing, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
+			return 1
+		}
+		fmt.Println("Backed up the previous plugin to " + bak + " (copy back any export lines you added)")
+	}
+	if err := writeFileAtomic(path, []byte(plugin), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 1
+	}
+	fmt.Println("Wrote the SwiftBar plugin to " + path + " (runs " + exe + ")")
+	fmt.Println("SwiftBar picks it up on its next refresh.")
 	return 0
 }
 
@@ -256,14 +326,20 @@ func claudeSettingsPath() string {
 
 // writeFileAtomic writes b via a temp file + rename in the target directory,
 // so an interrupted write can't leave a truncated settings.json behind
-// (#194 L-02, the same contract as the cache writes). CreateTemp's 0600 mode
-// carries over to the renamed file, matching the previous explicit chmod.
-func writeFileAtomic(path string, b []byte) error {
+// (#194 L-02, the same contract as the cache writes). The file gets perm:
+// 0600 for settings and backups (what CreateTemp gave them before), 0755 for
+// the SwiftBar plugin, which must be executable.
+func writeFileAtomic(path string, b []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
 	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return err

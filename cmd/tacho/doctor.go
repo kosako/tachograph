@@ -221,7 +221,7 @@ func reportSwiftBarPlugin() {
 		fmt.Println("  SwiftBar:   plugin found (" + path + ")")
 		return
 	}
-	fmt.Println("  SwiftBar:   plugin not found in the SwiftBar / xbar plugin folders — copy contrib/tacho.30s.sh there (ignore this if you don't use SwiftBar)")
+	fmt.Println("  SwiftBar:   plugin not found in the SwiftBar / xbar plugin folders — run `tacho setup swiftbar --write` (ignore this if you don't use SwiftBar)")
 }
 
 // findSwiftBarPlugin returns the tacho plugin file in the first plugin folder
@@ -233,14 +233,23 @@ func findSwiftBarPlugin() string {
 		return p
 	}
 	for _, dir := range swiftBarPluginDirs() {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
+		if p := tachoPluginIn(dir); p != "" {
+			return p
 		}
-		for _, e := range entries {
-			if p := filepath.Join(dir, e.Name()); isTachoPluginName(e.Name()) && isRegularFile(p) {
-				return p
-			}
+	}
+	return ""
+}
+
+// tachoPluginIn returns the first tacho plugin file (tacho.*.sh) in dir, or
+// "" when there is none or dir can't be read.
+func tachoPluginIn(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if p := filepath.Join(dir, e.Name()); isTachoPluginName(e.Name()) && isRegularFile(p) {
+			return p
 		}
 	}
 	return ""
