@@ -62,6 +62,10 @@ var defaults = map[string]Rate{
 	"gpt-6-astra": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},
 	"gpt-6-sol":   {In: 2, Out: 10, CacheRead: 0.2, CacheWrite: 2.5},
 	"gpt-6-luna":  {In: 0.1, Out: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
+	// GPT-6.1 Sol (2026-09-29, #296) keeps 6 Sol's price except cache hits at
+	// 0.05x input. "gpt-6.1-sol" prefix-matches none of the gpt-6-* keys, so it
+	// needs its own; likewise no bare "gpt-6.1" alias is guessed.
+	"gpt-6.1-sol": {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
 	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.
