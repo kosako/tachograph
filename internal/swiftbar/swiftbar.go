@@ -289,7 +289,9 @@ const (
 // cost/tokens: the same figures as the cost / tokens rows above, for the
 // last HistoryDays days. Tools follow the config order; a tool without a
 // column is skipped, an unknown day reads "--". Each tool's historyTop
-// costliest days are shown in blue so the heavy days stand out.
+// costliest days are shown in blue so the heavy days stand out. A last row
+// totals the window's cost per tool and, with more than one tool, across
+// them (#298).
 func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 	if len(h.Days) == 0 {
 		return
@@ -317,6 +319,33 @@ func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 		}
 		fmt.Fprintf(b, "%s | font=%s color=%s ansi=true %s\n", line, dataFont, ink(), enableParams)
 	}
+	historyTotal(b, h, cfg)
+}
+
+// historyTotal renders the window's cost per shown tool and, when more than
+// one tool is shown, across them ("計"). It follows the `tacho daily` total
+// row: a sum reads "--" when any of its days is unknown or has tokens but no
+// price, rather than silently leaving that day out. Tokens aren't totalled.
+func historyTotal(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
+	line := fmt.Sprintf("%d日計", len(h.Days))
+	var all []*schema.Daily
+	shown := 0
+	for _, name := range cfg.Tools {
+		col, ok := h.Tools[name]
+		if !ok {
+			continue
+		}
+		line += "  " + toolInitial(name) + " " + render.DailyCostSum(col)
+		all = append(all, col...)
+		shown++
+	}
+	if shown == 0 {
+		return
+	}
+	if shown > 1 {
+		line += "  計 " + render.DailyCostSum(all)
+	}
+	fmt.Fprintf(b, "%s | font=%s color=%s %s\n", line, dataFont, ink(), enableParams)
 }
 
 // topCostDays picks the indexes of the n costliest days in col. Only days
