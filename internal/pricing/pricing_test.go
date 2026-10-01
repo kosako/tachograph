@@ -121,6 +121,18 @@ func TestDefaultPricesCurrent(t *testing.T) {
 	}
 }
 
+// GPT-6 / GPT-6.1 have no bare alias: an id that isn't a published tier
+// stays unpriced instead of borrowing a guessed rate (#220, #252, #296).
+func TestNoBareGPT6Alias(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir()) // pure defaults, ignore any local pricing.json
+	tab := Load()
+	for _, model := range []string{"gpt-6", "gpt-6-unknown", "gpt-6.1", "gpt-6.1-unknown"} {
+		if r, ok := tab.For(model); ok {
+			t.Errorf("%s: priced %+v, want unpriced", model, r)
+		}
+	}
+}
+
 // A pricing.json key for the provider-prefixed id must win over the canonical
 // fallback to the bare default — otherwise a user couldn't price a Bedrock
 // model separately from its first-party form.
