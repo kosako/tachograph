@@ -98,6 +98,7 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"gpt-6-astra", Rate{10, 50, 1, 12.5}},                  // GPT-6 Astra, launched 2026-09-03; previously unpriced (#220)
 		{"gpt-6-sol", Rate{2, 10, 0.2, 2.5}},                    // GPT-6 Sol, launched 2026-09-23; previously unpriced (#252)
 		{"gpt-6-luna", Rate{0.1, 0.5, 0.01, 0.125}},             // GPT-6 Luna, launched 2026-09-23; previously unpriced (#252)
+		{"gpt-6.1-sol", Rate{2, 10, 0.1, 2.5}},                  // GPT-6.1 Sol, launched 2026-09-29; previously unpriced (#296)
 		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                        // Sol (default tier), promo price since 2026-08-21 (#216)
 		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},                    // full Sol id → base alias
 		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},                // 2026-07-30 cut
@@ -116,6 +117,18 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		r, ok := tab.For(c.model)
 		if !ok || r != c.want {
 			t.Errorf("%s: got %+v (ok=%v), want %+v", c.model, r, ok, c.want)
+		}
+	}
+}
+
+// GPT-6 / GPT-6.1 have no bare alias: an id that isn't a published tier
+// stays unpriced instead of borrowing a guessed rate (#220, #252, #296).
+func TestNoBareGPT6Alias(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir()) // pure defaults, ignore any local pricing.json
+	tab := Load()
+	for _, model := range []string{"gpt-6", "gpt-6-unknown", "gpt-6.1", "gpt-6.1-unknown"} {
+		if r, ok := tab.For(model); ok {
+			t.Errorf("%s: priced %+v, want unpriced", model, r)
 		}
 	}
 }
