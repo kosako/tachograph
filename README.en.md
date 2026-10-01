@@ -345,7 +345,11 @@ Below them, the **last 7 days of cost/tokens** appear one row per day
 `$0.00` / `0` on a day with no usage yet); they differ only when today's total
 is unknown and the rows above fall back to the current session's value. Each
 tool's three costliest days are shown in blue so the heavy days stand out
-(days with a zero or unknown cost don't compete). Earlier days are computed
+(days with a zero or unknown cost don't compete). The last row
+(`7日計  C $812.40  X $31.07  計 $843.47`) totals each tool's cost over those
+days and, when more than one tool is shown, all of them (`計`). A total reads
+`--` when any of its days is unknown or has tokens but an unknown cost — the
+same rule as the `tacho daily` total row. Tokens are not totalled. Earlier days are computed
 only when the cache lacks them — normally just yesterday, after midnight; the
 6 days up to yesterday at once on the first run or when the cache is rebuilt —
 and kept in `daily-history.json` in the cache directory (`tacho doctor`
@@ -365,8 +369,9 @@ choice is check-marked):
 These submenu labels are shown in Japanese: Display = 表示形式 (meter / number =
 メーター / 数字), Metric = 指標, Limit display = リミット表示 (remaining / used =
 残量 / 使用率), Tools = 表示するツール. The last-7-days heading
-(直近 7 日の cost/tokens) and the `/d` note (当日合計 = today's total across
-all sessions) are in Japanese too.
+(直近 7 日の cost/tokens), its total row (7日計 = 7-day total, 計 = all tools),
+and the `/d` note (当日合計 = today's total across all sessions) are in
+Japanese too.
 
 Or via the CLI (config lives in `~/.config/tachograph/config.json` — or under
 `$XDG_CONFIG_HOME/tachograph/` when `XDG_CONFIG_HOME` is set, along with

@@ -47,7 +47,7 @@ func DailyTable(days []string, tools []string, cols map[string][]*schema.Daily) 
 			for _, tool := range shown {
 				cells = append(cells, cols[tool][i])
 			}
-			row = append(row, dailyCostSum(cells))
+			row = append(row, DailyCostSum(cells))
 		}
 		rows = append(rows, row)
 	}
@@ -60,7 +60,7 @@ func DailyTable(days []string, tools []string, cols map[string][]*schema.Daily) 
 		allDays = append(allDays, col...)
 	}
 	if withTotal {
-		total = append(total, dailyCostSum(allDays))
+		total = append(total, DailyCostSum(allDays))
 	}
 	rows = append(rows, total)
 
@@ -159,9 +159,10 @@ func dailySum(days []*schema.Daily) *schema.Daily {
 	return &sum
 }
 
-// dailyCostSum is the total-cost cell across tools (or across the window),
-// with the same unknown rules as dailySum.
-func dailyCostSum(days []*schema.Daily) string {
+// DailyCostSum is the total-cost cell across tools (or across the window),
+// with the same unknown rules as dailySum. The SwiftBar history's total row
+// uses it too, so both views agree on what an unknown day does (#298).
+func DailyCostSum(days []*schema.Daily) string {
 	sum := dailySum(days)
 	if sum == nil {
 		return "--"

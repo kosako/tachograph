@@ -395,22 +395,55 @@ func TestRenderHistory(t *testing.T) {
 		"07/02  C " + ansiBlue + "  $3.21/12.3M " + ansiReset + "  X --             | font=" + dataFont + " color=" + ink() + " ansi=true ",
 		"07/03  C   $0.00/0       X      --/900k   | font=" + dataFont,
 		"07/04  C " + ansiBlue + " $12.30/59M   " + ansiReset + "  X " + ansiBlue + "  $4.10/20.4M " + ansiReset + " | font=" + dataFont,
+		// Claude's no-usage day adds $0; Codex's unknown day makes its sum,
+		// and so the overall one, unknown (#298).
+		"3日計  C $15.51  X --  計 -- | font=" + dataFont + " color=" + ink() + " " + enableParams + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history row %q missing in:\n%s", want, out)
 		}
 	}
 
-	// Only the configured tools get a column, in config order.
+	// Only the configured tools get a column, in config order; with one tool
+	// the total row has no overall sum.
 	cfg := config.Default()
 	cfg.Tools = []string{schema.ToolCodex}
 	only := Render(s, now, true, cfg, hist)
 	if !strings.Contains(only, "07/04  X "+ansiBlue+"  $4.10/20.4M "+ansiReset+" | font=") || strings.Contains(only, "07/04  C") {
 		t.Errorf("codex-only history rows wrong:\n%s", only)
 	}
+	if !strings.Contains(only, "3日計  X -- | font=") || strings.Contains(only, "  計 ") {
+		t.Errorf("codex-only total row wrong:\n%s", only)
+	}
 
-	if none := Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") {
+	if none := Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") || strings.Contains(none, "日計") {
 		t.Errorf("empty history should add no section:\n%s", none)
+	}
+}
+
+// The total row sums each tool's known costs and, across tools, all of
+// them; a day with tokens but no price makes that tool's sum and the overall
+// one unknown instead of being left out (#298).
+func TestRenderHistoryTotal(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now, _ := time.Parse(time.RFC3339, "2026-07-04T11:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41), tool(schema.ToolCodex, false, 7, 2)}}
+	days := []string{"2026-07-03", "2026-07-04"}
+
+	known := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{
+		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
+		schema.ToolCodex:      {{}, {Tokens: 300_000, CostUSD: usd(0.25)}},
+	}}
+	if out := Render(s, now, true, config.Default(), known); !strings.Contains(out, "2日計  C $3.50  X $0.25  計 $3.75 | font=") {
+		t.Errorf("known total row missing in:\n%s", out)
+	}
+
+	unpriced := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{
+		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
+		schema.ToolCodex:      {{Tokens: 5_000}, {Tokens: 300_000, CostUSD: usd(0.25)}},
+	}}
+	if out := Render(s, now, true, config.Default(), unpriced); !strings.Contains(out, "2日計  C $3.50  X --  計 -- | font=") {
+		t.Errorf("unpriced total row missing in:\n%s", out)
 	}
 }
 
