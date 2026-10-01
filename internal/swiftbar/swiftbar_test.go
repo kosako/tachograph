@@ -445,6 +445,29 @@ func TestRenderHistoryTotal(t *testing.T) {
 	if out := Render(s, now, true, config.Default(), unpriced); !strings.Contains(out, "2日計  C $3.50  X --  計 -- | font=") {
 		t.Errorf("unpriced total row missing in:\n%s", out)
 	}
+
+	// Days with no usage at all total an exact $0.00, not unknown.
+	zero := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{
+		schema.ToolClaudeCode: {{}, {}},
+		schema.ToolCodex:      {{}, {}},
+	}}
+	if out := Render(s, now, true, config.Default(), zero); !strings.Contains(out, "2日計  C $0.00  X $0.00  計 $0.00 | font=") {
+		t.Errorf("all-zero total row missing in:\n%s", out)
+	}
+
+	// Both tools configured but only one has a column: no overall sum.
+	claudeOnly := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{
+		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
+	}}
+	if out := Render(s, now, true, config.Default(), claudeOnly); !strings.Contains(out, "2日計  C $3.50 | font=") || strings.Contains(out, "  計 ") {
+		t.Errorf("single-column total row wrong:\n%s", out)
+	}
+
+	// No shown tool has a column: the day rows stay, the total row doesn't.
+	noColumn := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{}}
+	if out := Render(s, now, true, config.Default(), noColumn); !strings.Contains(out, "07/04 | font=") || strings.Contains(out, "日計") {
+		t.Errorf("total row should be absent without columns:\n%s", out)
+	}
 }
 
 // Only known, non-zero costs compete for the highlight; at most historyTop
