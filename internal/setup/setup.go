@@ -119,6 +119,11 @@ func MergeSettings(existing []byte, command string) ([]byte, error) {
 		if err := json.Unmarshal(existing, &obj); err != nil {
 			return nil, fmt.Errorf("existing settings is not valid JSON: %w", err)
 		}
+		// A JSON null decodes into a nil map without an error; it is no more
+		// an object than an array is, and writing into it would panic (#319).
+		if obj == nil {
+			return nil, fmt.Errorf("existing settings is not a JSON object (null)")
+		}
 	}
 	sl, _ := json.Marshal(statusLine{Type: "command", Command: command, Padding: 0})
 	obj["statusLine"] = sl
