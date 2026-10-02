@@ -468,7 +468,7 @@ func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
 	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(live), &out, t0); code != 0 {
 		t.Fatalf("live exit = %d", code)
 	}
-	observed := t0.Format(time.RFC3339)
+	observed := t0.Local().Format(time.RFC3339) // as the collector stamps it, in the runner's zone
 
 	// 10 minutes later, no limits in the payload: the window is carried with
 	// its original observation and projected from it (still 60 min in).
