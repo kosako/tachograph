@@ -57,8 +57,9 @@ type Config struct {
 // choices, with what tacho does instead (#230). Load keeps such values as
 // written so the read path always renders something — an unknown style is
 // drawn as meter, an unknown metric as "--", an unknown limits display as
-// remaining, an unknown menubar.limits keeps the limits shown, an unknown
-// tool is ignored, an out-of-range threshold is dropped — and this is how
+// remaining, an unknown menubar.limits / menubar.history keeps that section
+// shown, an unknown tool is ignored, an out-of-range threshold is dropped —
+// and this is how
 // `tacho doctor` / `tacho config show` surface the typo. The checks are the
 // ones `tacho config set` rejects up front.
 func (c Config) Warnings() []string {
@@ -94,6 +95,9 @@ func valueWarnings(c Config, thresholds []int) []string {
 	if !ValidVisibility(c.Menubar.Limits) {
 		w = append(w, fmt.Sprintf("menubar.limits: %q is not show or hide — limits shown", c.Menubar.Limits))
 	}
+	if !ValidVisibility(c.Menubar.History) {
+		w = append(w, fmt.Sprintf("menubar.history: %q is not show or hide — history shown", c.Menubar.History))
+	}
 	if !render.ValidLimitDisplay(c.Limits.Display) {
 		w = append(w, fmt.Sprintf("limits.display: %q is not remaining or used — shown as remaining", c.Limits.Display))
 	}
@@ -106,9 +110,18 @@ func valueWarnings(c Config, thresholds []int) []string {
 }
 
 type Menubar struct {
-	Style  string `json:"style"`  // StyleMeter | StyleNumber
-	Metric string `json:"metric"` // see render.MenubarMetrics
-	Limits string `json:"limits"` // VisibilityShow | VisibilityHide: the 5h / weekly rows and controls (#301)
+	Style   string `json:"style"`   // StyleMeter | StyleNumber
+	Metric  string `json:"metric"`  // see render.MenubarMetrics
+	Limits  string `json:"limits"`  // VisibilityShow | VisibilityHide: the 5h / weekly rows and controls (#301)
+	History string `json:"history"` // VisibilityShow | VisibilityHide: the last-7-days rows (#302)
+}
+
+// HistoryHidden reports whether the SwiftBar dropdown leaves out the
+// last-7-days section (menubar.history = hide). The tick then skips the
+// history pass altogether, so the rolling cache is neither read nor
+// written. As with LimitsHidden, only an explicit hide hides it.
+func (c Config) HistoryHidden() bool {
+	return c.Menubar.History == VisibilityHide
 }
 
 // LimitsHidden reports whether the SwiftBar dropdown leaves out the 5h /
@@ -159,7 +172,7 @@ func NormalizeThresholds(in []int) []int {
 func Default() Config {
 	return Config{
 		Tools:   []string{schema.ToolClaudeCode, schema.ToolCodex},
-		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric, Limits: VisibilityShow},
+		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric, Limits: VisibilityShow, History: VisibilityShow},
 		Limits:  Limits{Display: DefaultLimitDisplay},
 		Notify:  Notify{Thresholds: []int{}},
 	}
@@ -257,6 +270,9 @@ func parse(b []byte) (Config, error) {
 	}
 	if c.Menubar.Limits == "" {
 		c.Menubar.Limits = VisibilityShow
+	}
+	if c.Menubar.History == "" {
+		c.Menubar.History = VisibilityShow
 	}
 	if c.Limits.Display == "" {
 		c.Limits.Display = DefaultLimitDisplay

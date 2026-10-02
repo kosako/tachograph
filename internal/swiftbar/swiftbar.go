@@ -70,6 +70,7 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist c
 	shown := cfg.FilterStatus(s)
 	limits := render.LimitDisplay(cfg.Limits.Display)
 	hideLimits := cfg.LimitsHidden()
+	hideHistory := cfg.HistoryHidden()
 	metric := effectiveMetric(cfg, hideLimits)
 
 	var b strings.Builder
@@ -81,10 +82,12 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist c
 		}
 		section(&b, t, now, limits, !hideLimits)
 	}
-	history(&b, hist, cfg)
+	if !hideHistory {
+		history(&b, hist, cfg)
+	}
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
-	settings(&b, cfg, hideLimits, metric)
+	settings(&b, cfg, hideLimits, hideHistory, metric)
 	b.WriteString("Refresh | refresh=true\n")
 	return b.String()
 }
@@ -106,7 +109,7 @@ func effectiveMetric(cfg config.Config, hideLimits bool) string {
 // and refreshes. With the limits hidden, the limit windows and the limit
 // display drop out of the menu, and the metric check follows what the menu
 // bar shows (metric) rather than the stored choice.
-func settings(b *strings.Builder, cfg config.Config, hideLimits bool, metric string) {
+func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory bool, metric string) {
 	b.WriteString("Settings\n")
 
 	// Display style (radio).
@@ -156,15 +159,23 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits bool, metric str
 
 	// Sections (checkbox): the limit rows and controls can be switched off
 	// for backends without subscription windows — Bedrock / Vertex / an API
-	// key — where they would only ever read "--" (#301). The click sets the
+	// key — where they would only ever read "--" (#301), and the last-7-days
+	// rows for anyone who doesn't want them (#302). A click sets the
 	// opposite visibility.
 	b.WriteString("--表示する項目\n")
-	next := config.VisibilityHide
-	if hideLimits {
-		next = config.VisibilityShow
-	}
 	clickOption(b, 2, checkbox(!hideLimits)+"リミット(5h / weekly)",
-		"config", "set", "menubar.limits", next)
+		"config", "set", "menubar.limits", flipped(hideLimits))
+	clickOption(b, 2, checkbox(!hideHistory)+"直近 7 日",
+		"config", "set", "menubar.history", flipped(hideHistory))
+}
+
+// flipped is the visibility a section's checkbox click sets: the opposite
+// of its current state.
+func flipped(hidden bool) string {
+	if hidden {
+		return config.VisibilityShow
+	}
+	return config.VisibilityHide
 }
 
 // mark prefixes the selected radio option with a check.

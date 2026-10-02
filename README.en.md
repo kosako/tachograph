@@ -365,12 +365,12 @@ choice is check-marked):
 - **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure). cost / tokens show today's total (marked `/d`) and fall back to the current session's value (no `/d`) when the daily total is unknown
 - **Limit display**: remaining / used (what the 5h / weekly percentages, gauges, and ring show; the same setting drives the status line and `tacho`; colors still follow usage)
 - **Tools**: Claude / Codex (checkboxes). Besides the menu bar, dropdown, and notifications, this also filters `tacho`, `tacho watch`, `tacho daily`, and the cmux pills (listed in `tools` order). The status line is not filtered: it shows whichever tools its template names (the default template includes Codex), and `tacho status --json` always lists both tools
-- **Sections**: limits (5h / weekly) (checkbox). Unchecked, the dropdown drops each tool's 5h / weekly rows, the limit display submenu, and the 5h / weekly metrics; a menu bar still set to a limit window shows cost instead (the stored choice is kept and comes back when you check it again). Meant for backends without subscription windows — Bedrock / Vertex / an API key. The status line, `tacho`, `tacho status --json`, and the headroom notifications are unaffected
+- **Sections**: limits (5h / weekly) / last 7 days (checkboxes). With limits unchecked, the dropdown drops each tool's 5h / weekly rows, the limit display submenu, and the 5h / weekly metrics; a menu bar still set to a limit window shows cost instead (the stored choice is kept and comes back when you check it again). Meant for backends without subscription windows — Bedrock / Vertex / an API key. The status line, `tacho`, `tacho status --json`, and the headroom notifications are unaffected. With the last 7 days unchecked, that section is gone and the history is neither computed nor read from / written to `daily-history.json` (`tacho daily` is unaffected)
 
 These submenu labels are shown in Japanese: Display = 表示形式 (meter / number =
 メーター / 数字), Metric = 指標, Limit display = リミット表示 (remaining / used =
 残量 / 使用率), Tools = 表示するツール, Sections = 表示する項目 (limits =
-リミット). The last-7-days heading
+リミット, last 7 days = 直近 7 日). The last-7-days heading
 (直近 7 日の cost/tokens), its total row (7日計 = 7-day total, 計 = all tools),
 and the `/d` note (当日合計 = today's total across all sessions) are in
 Japanese too.
@@ -386,6 +386,7 @@ tacho config set menubar.style number   # meter → number (meter | number)
 tacho config set menubar.metric cost    # show spent cost instead of limits (limit_5h | limit_weekly | cost | tokens)
 tacho config set limits.display used    # 5h / weekly as usage instead of headroom (remaining | used)
 tacho config set menubar.limits hide    # drop 5h / weekly from the dropdown (show | hide; for Bedrock etc. without windows)
+tacho config set menubar.history hide   # drop the last 7 days from the dropdown (show | hide; skips the history pass too)
 tacho config set tools codex            # show only Codex (comma-separated claude-code / codex, shown in the order you list them)
 ```
 

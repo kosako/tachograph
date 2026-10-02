@@ -109,6 +109,26 @@ func TestConfigSetMenubarLimits(t *testing.T) {
 	}
 }
 
+// menubar.history accepts show / hide only (#302).
+func TestConfigSetMenubarHistory(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if code := configSet("menubar.history", "never"); code == 0 {
+		t.Error("configSet menubar.history never returned 0, want non-zero")
+	}
+	if code := configSet("menubar.history", "hide"); code != 0 {
+		t.Errorf("configSet menubar.history hide returned %d, want 0", code)
+	}
+	if !config.Load().HistoryHidden() {
+		t.Error("Load().HistoryHidden() = false after set hide, want true")
+	}
+	if code := configSet("menubar.history", "show"); code != 0 {
+		t.Errorf("configSet menubar.history show returned %d, want 0", code)
+	}
+	if config.Load().HistoryHidden() {
+		t.Error("Load().HistoryHidden() = true after set show, want false")
+	}
+}
+
 // A config.json that fails to parse must not be clobbered by write commands:
 // configSet / configToggleTool refuse instead of saving defaults over the
 // user's (fixable) file.
