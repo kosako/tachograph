@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
-	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
@@ -68,8 +67,6 @@ const usage = `usage:
   tacho daily [-days N] per-day cost / tokens for the last N days (default 30)
   tacho statusline      Claude Code statusLine adapter (reads stdin JSON)
   tacho version         print the installed version (also --version)
-  tacho cmux push       push status pills to the cmux sidebar once (deprecated)
-  tacho cmux clear      remove tacho's pills from the cmux sidebar (deprecated)
   tacho swiftbar        SwiftBar/xbar plugin output (see contrib/tacho.30s.sh)
   tacho config show     print the current configuration
   tacho config path     print the config file path
@@ -104,8 +101,6 @@ func run(args []string) int {
 		return runWatch(args)
 	case "statusline":
 		return runStatusline(args)
-	case "cmux":
-		return runCmux(args)
 	case "swiftbar":
 		return runSwiftbar(args)
 	case "config":
@@ -556,14 +551,6 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	}
 	cfg := config.Load()
 	fmt.Fprintln(stdout, render.Template(tmpl, s, now, style(*noColor, cfg)))
-
-	// R3 piggyback: inside a cmux terminal, mirror the status to the
-	// sidebar. Fire-and-forget so the statusline stays fast.
-	if cmuxbar.Detect() {
-		if cli := cmuxbar.FindCLI(); cli != "" {
-			_ = cmuxbar.Push(cli, cfg.FilterStatus(s), now, render.LimitDisplay(cfg.Limits.Display), false)
-		}
-	}
 	return 0
 }
 
@@ -607,37 +594,6 @@ func preserveSnapshotLimits(t *schema.Tool, now time.Time) time.Time {
 	}
 	t.Limits = limits
 	return observed
-}
-
-// cmuxDeprecation is shown wherever the cmux integration surfaces (#273). The
-// statusline's automatic mirror stays silent: it can't add output.
-const cmuxDeprecation = "the cmux sidebar integration is deprecated and will be removed in a future minor release (#273)"
-
-func runCmux(args []string) int {
-	fmt.Fprintln(os.Stderr, "tacho: "+cmuxDeprecation)
-	if len(args) < 1 || (args[0] != "push" && args[0] != "clear") {
-		fmt.Fprintln(os.Stderr, "usage: tacho cmux <push|clear>")
-		return 2
-	}
-	cli := cmuxbar.FindCLI()
-	if cli == "" {
-		fmt.Fprintln(os.Stderr, "tacho: cmux CLI not found (is cmux installed? set TACHO_CMUX_BIN to override)")
-		return 1
-	}
-	var err error
-	if args[0] == "clear" {
-		err = cmuxbar.Clear(cli, true)
-	} else {
-		now := time.Now()
-		cfg := config.Load()
-		s := cfg.FilterStatus(core.Status(core.Options{Now: now}))
-		err = cmuxbar.Push(cli, s, now, render.LimitDisplay(cfg.Limits.Display), true)
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tacho:", err)
-		return 1
-	}
-	return 0
 }
 
 // loadTemplate reads ~/.config/tachograph/statusline.tmpl (XDG and

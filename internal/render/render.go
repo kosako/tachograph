@@ -51,7 +51,7 @@ func PressureFor(pct float64) PressureLevel {
 }
 
 // LimitDisplay selects what a rate-limit percentage shows on every surface
-// (statusline, one-shot, cmux, SwiftBar, menu bar): the headroom left in the
+// (statusline, one-shot, SwiftBar, menu bar): the headroom left in the
 // 5h / weekly window, or the share already used. It is the config key
 // limits.display; any other value (including an unset one) reads as
 // LimitRemaining, the default since #223.
