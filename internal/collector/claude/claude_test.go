@@ -400,3 +400,23 @@ func TestCollectRealHome(t *testing.T) {
 		t.Errorf("Error = %+v", got.Error)
 	}
 }
+
+func TestUsageKey(t *testing.T) {
+	keyed := TranscriptLine{RequestID: "req_a", Message: &TranscriptMessage{ID: "msg_a"}}
+	if id, req, ok := keyed.UsageKey(); !ok || id != "msg_a" || req != "req_a" {
+		t.Errorf("UsageKey() = %q, %q, %v, want msg_a, req_a, true", id, req, ok)
+	}
+	// A line without a message id has no identity to dedup on, even with a
+	// request id; it is counted every time it appears.
+	unkeyed := TranscriptLine{RequestID: "req_b", Message: &TranscriptMessage{}}
+	if _, _, ok := unkeyed.UsageKey(); ok {
+		t.Error("UsageKey() ok = true for a line without a message id, want false")
+	}
+	seen := UsageSet{}
+	if seen.Dup(unkeyed) || seen.Dup(unkeyed) {
+		t.Error("Dup() = true for an unkeyed line, want never deduplicated")
+	}
+	if seen.Dup(keyed) || !seen.Dup(keyed) {
+		t.Error("Dup() should be false on first sight of a keyed line and true after")
+	}
+}

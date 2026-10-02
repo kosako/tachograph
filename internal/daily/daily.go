@@ -195,17 +195,19 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 	return schema.Tokens{Input: cum.Input, CachedInput: cum.CachedInput, Output: cum.Output, Total: cum.Tokens}, today, true
 }
 
-// usageKeyHash is a 64-bit hash of a usage line's dedup key (message id +
-// request id, as claude.UsageSet uses); hasKey is false for lines without a
-// message id, which are never deduplicated.
+// usageKeyHash is a 64-bit hash of a usage line's dedup key
+// (claude.TranscriptLine.UsageKey); hasKey is false for lines without one,
+// which are never deduplicated. The hash is what the session-tree cache
+// stores, so its layout (id, NUL, request id) is part of the cache's key.
 func usageKeyHash(line claude.TranscriptLine) (key uint64, hasKey bool) {
-	if line.Message.ID == "" {
+	id, req, ok := line.UsageKey()
+	if !ok {
 		return 0, false
 	}
 	h := fnv.New64a()
-	h.Write([]byte(line.Message.ID))
+	h.Write([]byte(id))
 	h.Write([]byte{0})
-	h.Write([]byte(line.RequestID))
+	h.Write([]byte(req))
 	return h.Sum64(), true
 }
 
