@@ -287,41 +287,85 @@ func TestRenderSettingsMenu(t *testing.T) {
 
 // menubar.limits=hide leaves the 5h / weekly rows, the limit display and the
 // limit metrics out of the dropdown, and a menu bar set to a limit window
-// shows cost instead (#301).
+// shows cost instead — on every title path (gauge image, moon-dial text,
+// number) and for either window. Showing the limits again restores the
+// stored window (#301).
 func TestRenderLimitsHidden(t *testing.T) {
-	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
 	now := time.Now()
 	c := tool(schema.ToolClaudeCode, false, 24, 41)
 	c.Daily = &schema.Daily{Tokens: 1_000_000, CostUSD: usd(1.5)}
 	s := schema.Status{Tools: []schema.Tool{c}}
-	cfg := config.Default()
-	cfg.Menubar.Limits = config.VisibilityHide
-	out := Render(s, now, true, cfg, core.DailyHistory{})
 
-	if title := strings.SplitN(out, "\n", 2)[0]; title != "C $1.50/d" {
-		t.Errorf("title = %q, want the cost in place of the hidden 5h limit", title)
+	for _, tc := range []struct{ name, metric, style, text string }{
+		{"5h meter image", render.MetricLimit5h, config.StyleMeter, ""},
+		{"5h meter text", render.MetricLimit5h, config.StyleMeter, "1"},
+		{"5h number", render.MetricLimit5h, config.StyleNumber, ""},
+		{"weekly meter image", render.MetricLimitWeekly, config.StyleMeter, ""},
+		{"weekly meter text", render.MetricLimitWeekly, config.StyleMeter, "1"},
+		{"weekly number", render.MetricLimitWeekly, config.StyleNumber, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TACHO_SWIFTBAR_TEXT", tc.text)
+			cfg := config.Default()
+			cfg.Menubar.Metric = tc.metric
+			cfg.Menubar.Style = tc.style
+			cfg.Menubar.Limits = config.VisibilityHide
+			out := Render(s, now, true, cfg, core.DailyHistory{})
+
+			if title := strings.SplitN(out, "\n", 2)[0]; title != "C $1.50/d" {
+				t.Errorf("title = %q, want the cost in place of the hidden limit", title)
+			}
+			for _, want := range []string{
+				fmt.Sprintf("%-*s ", labelW, "context"),
+				"--表示する項目\n",
+				"----☐ リミット(5h / weekly) | bash=",
+				"param3=\"menubar.limits\" param4=\"show\"",
+				"----✓ cost | bash=", // the check follows what the menu bar shows
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("hidden-limits output missing %q:\n%s", want, out)
+				}
+			}
+			for _, absent := range []string{
+				fmt.Sprintf("%-*s ", labelW, "5h"),
+				fmt.Sprintf("%-*s ", labelW, "weekly"),
+				"--リミット表示\n",
+				"param3=\"menubar.metric\" param4=\"limit_5h\"",
+				"param3=\"menubar.metric\" param4=\"limit_weekly\"",
+			} {
+				if strings.Contains(out, absent) {
+					t.Errorf("hidden-limits output still has %q:\n%s", absent, out)
+				}
+			}
+		})
+	}
+
+	// The same config with only the visibility flipped back reads as before:
+	// the stored window was never rewritten.
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "")
+	cfg := config.Default()
+	cfg.Menubar.Style = config.StyleNumber
+	cfg.Menubar.Metric = render.MetricLimitWeekly
+	cfg.Menubar.Limits = config.VisibilityHide
+	hidden := Render(s, now, true, cfg, core.DailyHistory{})
+	cfg.Menubar.Limits = config.VisibilityShow
+	shown := Render(s, now, true, cfg, core.DailyHistory{})
+
+	if title := strings.SplitN(shown, "\n", 2)[0]; title != "C 59%" { // 41% used
+		t.Errorf("title after showing the limits again = %q, want the weekly headroom back", title)
 	}
 	for _, want := range []string{
-		fmt.Sprintf("%-*s ", labelW, "context"),
-		"--表示する項目\n",
-		"----☐ リミット(5h / weekly) | bash=",
-		"param3=\"menubar.limits\" param4=\"show\"",
-		"----✓ cost | bash=", // the check follows what the menu bar shows
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("hidden-limits output missing %q:\n%s", want, out)
-		}
-	}
-	for _, absent := range []string{
-		fmt.Sprintf("%-*s ", labelW, "5h"),
+		"----✓ weekly limit | bash=",
 		fmt.Sprintf("%-*s ", labelW, "weekly"),
 		"--リミット表示\n",
-		"param3=\"menubar.metric\" param4=\"limit_5h\"",
-		"param3=\"menubar.metric\" param4=\"limit_weekly\"",
+		"----☑ リミット(5h / weekly) | bash=",
 	} {
-		if strings.Contains(out, absent) {
-			t.Errorf("hidden-limits output still has %q:\n%s", absent, out)
+		if !strings.Contains(shown, want) {
+			t.Errorf("output after showing the limits again missing %q:\n%s", want, shown)
 		}
+	}
+	if strings.Contains(hidden, "----✓ weekly limit") {
+		t.Errorf("hidden output still checks the stored weekly limit:\n%s", hidden)
 	}
 }
 
