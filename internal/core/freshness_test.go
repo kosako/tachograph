@@ -229,3 +229,43 @@ func TestStatusCacheNotServedToAnotherRoot(t *testing.T) {
 		t.Errorf("an empty root was served the cached document of another root: %+v", second)
 	}
 }
+
+// Limits carried onto a fresher transcript row keep their own observation
+// time, and the projection is computed from it: a 6-hour-old observation is
+// past Claude's threshold, so the figures are withheld as stale even though
+// the row itself is fresh (#295).
+func TestCarriedSnapshotLimitsKeepObservedAtAndProjectStale(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	age := 6 * time.Hour
+	observed := now.Add(-age)
+	collected := observed.Format(time.RFC3339)
+	rw := now.Add(72 * time.Hour).Format(time.RFC3339)
+	mins, pw := 10080, 17.0
+	snap := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowWeekly, WindowMinutes: &mins, UsedPct: &pw, ResetsAt: &rw, ObservedAt: &collected}},
+	}
+	if err := cache.WriteSnapshot(snap, observed, claudeRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Stale || len(got.Limits) != 1 {
+		t.Fatalf("Tool = %+v, want the fresh transcript row carrying the weekly window", got)
+	}
+	l := got.Limits[0]
+	if l.ObservedAt == nil || *l.ObservedAt != collected {
+		t.Errorf("carried ObservedAt = %v, want the snapshot's %s (not the transcript's collected_at)", l.ObservedAt, collected)
+	}
+	if l.Projection.UnavailableReason == nil || *l.Projection.UnavailableReason != schema.ProjectionStale || l.Projection.UsedPctAtReset != nil {
+		t.Errorf("carried projection = %+v, want stale with the figures null", l.Projection)
+	}
+	if l.Projection.ElapsedPctAtObservation == nil {
+		t.Error("carried projection lost its elapsed share")
+	}
+}

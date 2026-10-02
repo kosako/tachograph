@@ -36,49 +36,55 @@ func staleAfter(tool string) time.Duration {
 // per hour, the use at reset U × D / E (not capped: more than 100 means the
 // average would run past the limit), the headroom 100 minus that.
 //
-// Checks run from the structural to the temporal, so the reason names the
-// first thing that rules the figures out. The elapsed share is kept whenever
-// the window itself is sound, even if the use is unknown.
+// The elapsed share is computed first and kept whenever the window itself is
+// sound (its length, reset time, and observation time are present and the
+// observation falls inside it), even if the use is unknown. The reason is
+// then the first rule, in the order docs/schema.md lists them, that denies
+// the figures: missing input, an unsound window, an unsupported window, a
+// reset already passed, an observation gone stale.
 func project(l schema.Limit, now time.Time, staleAfter time.Duration) schema.Projection {
 	p := schema.Projection{Method: schema.ProjectionWindowAverage}
-	unavailable := func(reason string) schema.Projection {
+
+	var resets, observed time.Time
+	var minutes int
+	inputs := l.WindowMinutes != nil && l.ResetsAt != nil && l.ObservedAt != nil
+	if inputs {
+		var errR, errO error
+		resets, errR = time.Parse(time.RFC3339, *l.ResetsAt)
+		observed, errO = time.Parse(time.RFC3339, *l.ObservedAt)
+		minutes = *l.WindowMinutes
+		inputs = errR == nil && errO == nil
+	}
+	var elapsed time.Duration
+	windowOK := false
+	if inputs && minutes > 0 {
+		window := time.Duration(minutes) * time.Minute
+		elapsed = observed.Sub(resets.Add(-window))
+		if elapsed > 0 && elapsed <= window {
+			windowOK = true
+			elapsedPct := 100 * elapsed.Minutes() / float64(minutes)
+			p.ElapsedPctAtObservation = &elapsedPct
+		}
+	}
+
+	var reason string
+	switch {
+	case !inputs || l.UsedPct == nil:
+		reason = schema.ProjectionMissingInput
+	case !windowOK:
+		reason = schema.ProjectionInvalidWindow
+	case l.SavedResets != nil:
+		reason = schema.ProjectionUnsupportedWindow
+	case !resets.After(now):
+		reason = schema.ProjectionResetPassed
+	case now.Sub(observed) > staleAfter:
+		reason = schema.ProjectionStale
+	}
+	if reason != "" {
 		p.UnavailableReason = &reason
 		return p
 	}
-	if l.WindowMinutes == nil || l.ResetsAt == nil || l.ObservedAt == nil {
-		return unavailable(schema.ProjectionMissingInput)
-	}
-	resets, err := time.Parse(time.RFC3339, *l.ResetsAt)
-	if err != nil {
-		return unavailable(schema.ProjectionMissingInput)
-	}
-	observed, err := time.Parse(time.RFC3339, *l.ObservedAt)
-	if err != nil {
-		return unavailable(schema.ProjectionMissingInput)
-	}
-	minutes := *l.WindowMinutes
-	if minutes <= 0 {
-		return unavailable(schema.ProjectionInvalidWindow)
-	}
-	window := time.Duration(minutes) * time.Minute
-	elapsed := observed.Sub(resets.Add(-window))
-	if elapsed <= 0 || elapsed > window {
-		return unavailable(schema.ProjectionInvalidWindow)
-	}
-	elapsedPct := 100 * elapsed.Minutes() / float64(minutes)
-	p.ElapsedPctAtObservation = &elapsedPct
-	if l.SavedResets != nil {
-		return unavailable(schema.ProjectionUnsupportedWindow)
-	}
-	if l.UsedPct == nil {
-		return unavailable(schema.ProjectionMissingInput)
-	}
-	if !resets.After(now) {
-		return unavailable(schema.ProjectionResetPassed)
-	}
-	if now.Sub(observed) > staleAfter {
-		return unavailable(schema.ProjectionStale)
-	}
+
 	used := *l.UsedPct
 	pace := 60 * used / elapsed.Minutes()
 	atReset := used * float64(minutes) / elapsed.Minutes()

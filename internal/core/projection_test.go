@@ -99,6 +99,20 @@ func TestProjectUnavailableReasons(t *testing.T) {
 		{name: "observed before the window began", mutate: func(l *schema.Limit) { l.ObservedAt = rfc(observed.Add(-61 * time.Minute)) }, stale: time.Hour, reason: schema.ProjectionInvalidWindow},
 		{name: "observed after the reset", mutate: func(l *schema.Limit) { l.ResetsAt = rfc(observed.Add(-time.Minute)) }, stale: time.Hour, reason: schema.ProjectionInvalidWindow},
 		{name: "saved resets", mutate: func(l *schema.Limit) { l.SavedResets = map[string]any{"x": 1} }, stale: time.Hour, reason: schema.ProjectionUnsupportedWindow, elapsed: true},
+		// Overlapping faults: missing input outranks the window and support
+		// checks, while a sound window still reports its elapsed share.
+		{name: "no use and zero-length window", mutate: func(l *schema.Limit) { l.UsedPct = nil; l.WindowMinutes = &zeroMins }, stale: time.Hour, reason: schema.ProjectionMissingInput},
+		{name: "no use and saved resets", mutate: func(l *schema.Limit) { l.UsedPct = nil; l.SavedResets = map[string]any{"x": 1} }, stale: time.Hour, reason: schema.ProjectionMissingInput, elapsed: true},
+		{name: "no use and reset passed", mutate: func(l *schema.Limit) {
+			l.UsedPct = nil
+			l.ObservedAt = rfc(now.Add(-200 * time.Minute))
+			l.ResetsAt = rfc(now.Add(-10 * time.Minute))
+		}, stale: 24 * time.Hour, reason: schema.ProjectionMissingInput, elapsed: true},
+		{name: "saved resets on a reset-passed window", mutate: func(l *schema.Limit) {
+			l.SavedResets = map[string]any{"x": 1}
+			l.ObservedAt = rfc(now.Add(-200 * time.Minute))
+			l.ResetsAt = rfc(now.Add(-10 * time.Minute))
+		}, stale: 24 * time.Hour, reason: schema.ProjectionUnsupportedWindow, elapsed: true},
 		{name: "reset passed", mutate: func(l *schema.Limit) {
 			l.ObservedAt = rfc(now.Add(-200 * time.Minute))
 			l.ResetsAt = rfc(now.Add(-10 * time.Minute)) // observed 90 min into a window that has since reset

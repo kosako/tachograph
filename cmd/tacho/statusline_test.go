@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -446,5 +447,66 @@ func TestRunStatuslineSnapshotRecordsRoot(t *testing.T) {
 	}
 	if _, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, t.TempDir()); ok {
 		t.Error("snapshot served to a run against another config root")
+	}
+}
+
+// A live payload's windows keep their observation time through later
+// limit-less payloads: the carried limits still say when they were seen, the
+// projection is recomputed from that time (not from the rewrite), and once
+// the observation is older than the stale threshold the figures go null with
+// reason stale (#295).
+func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
+
+	t0, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	resets := t0.Add(4 * time.Hour) // observed 60 min into the 5h window
+	live := fmt.Sprintf(`{"session_id":"s","model":{"id":"claude-test"},"rate_limits":{"five_hour":{"used_percentage":20,"resets_at":%d}}}`, resets.Unix())
+	later := `{"session_id":"s","model":{"id":"claude-test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(live), &out, t0); code != 0 {
+		t.Fatalf("live exit = %d", code)
+	}
+	observed := t0.Format(time.RFC3339)
+
+	// 10 minutes later, no limits in the payload: the window is carried with
+	// its original observation and projected from it (still 60 min in).
+	t1 := t0.Add(10 * time.Minute)
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(later), &out, t1); code != 0 {
+		t.Fatalf("carry exit = %d", code)
+	}
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, t1, root)
+	if !ok || len(snap.Limits) != 1 {
+		t.Fatalf("snapshot after carry = %+v, %v", snap, ok)
+	}
+	l := snap.Limits[0]
+	if l.ObservedAt == nil || *l.ObservedAt != observed {
+		t.Errorf("carried ObservedAt = %v, want the live observation %s", l.ObservedAt, observed)
+	}
+	if l.Projection.UnavailableReason != nil || l.Projection.UsedPctAtReset == nil || *l.Projection.UsedPctAtReset != 100 {
+		t.Errorf("carried projection = %+v, want 100%% at reset from the original observation", l.Projection)
+	}
+
+	// 61 minutes after the observation it is older than Claude's stale
+	// threshold: the window is still carried, the figures are withheld.
+	t2 := t0.Add(61 * time.Minute)
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(later), &out, t2); code != 0 {
+		t.Fatalf("stale exit = %d", code)
+	}
+	snap, ok = cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, t2, root)
+	if !ok || len(snap.Limits) != 1 {
+		t.Fatalf("snapshot after stale carry = %+v, %v", snap, ok)
+	}
+	l = snap.Limits[0]
+	if l.ObservedAt == nil || *l.ObservedAt != observed {
+		t.Errorf("stale-carried ObservedAt = %v, want %s", l.ObservedAt, observed)
+	}
+	p := l.Projection
+	if p.UnavailableReason == nil || *p.UnavailableReason != schema.ProjectionStale || p.PacePctPerHour != nil || p.UsedPctAtReset != nil || p.HeadroomPctAtReset != nil {
+		t.Errorf("stale-carried projection = %+v, want reason stale with the figures null", p)
+	}
+	if p.ElapsedPctAtObservation == nil || *p.ElapsedPctAtObservation != 20 {
+		t.Errorf("stale-carried elapsed = %v, want 20 (the window itself is sound)", p.ElapsedPctAtObservation)
 	}
 }
