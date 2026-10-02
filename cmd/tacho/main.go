@@ -538,6 +538,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 		// from (#321); the payload names none, so resolve it as Status does.
 		root := core.Roots(core.Options{})[schema.ToolClaudeCode]
 		limitsObserved := preserveSnapshotLimits(&claudeTool, now, root)
+		core.AddProjections(&claudeTool, now) // the statusline row bypasses core.Status for Claude (#295)
 		_ = cache.WriteSnapshot(claudeTool, limitsObserved, root)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache

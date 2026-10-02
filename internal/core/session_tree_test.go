@@ -71,8 +71,10 @@ func TestStatusWidensSessionTokensToTree(t *testing.T) {
 	if got.SessionToday.Tokens > got.Session.Tokens.Total {
 		t.Errorf("session_today (%d) exceeds session.tokens (%d)", got.SessionToday.Tokens, got.Session.Tokens.Total)
 	}
-	if schema.Version != "3.0" {
-		t.Errorf("schema.Version = %q, want 3.0 (session.tokens changed meaning)", schema.Version)
+	// The meaning change above shipped as major version 3; minor bumps
+	// (additions such as 3.1's projection, #295) keep it.
+	if !strings.HasPrefix(schema.Version, "3.") {
+		t.Errorf("schema.Version = %q, want 3.x (session.tokens changed meaning in 3.0)", schema.Version)
 	}
 }
 

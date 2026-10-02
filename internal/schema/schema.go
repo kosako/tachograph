@@ -2,7 +2,7 @@
 // docs/schema.md is the authoritative specification.
 package schema
 
-const Version = "3.0"
+const Version = "3.1"
 
 // Tool name values.
 const (
@@ -101,7 +101,45 @@ type Limit struct {
 	UsedPct       *float64 `json:"used_pct"`
 	ResetsAt      *string  `json:"resets_at"` // RFC 3339
 	SavedResets   any      `json:"saved_resets"`
+	// ObservedAt is when this window's used_pct and resets_at were observed
+	// (RFC 3339): a limit carried over from an older snapshot keeps its own
+	// observation time, which can be older than the tool's collected_at
+	// (#295).
+	ObservedAt *string `json:"observed_at"`
+	// Projection extrapolates this observation to the reset (#295). Always
+	// present with fixed keys; see Projection.
+	Projection Projection `json:"projection"`
 }
+
+// Projection is the window-average extrapolation of a limit from its latest
+// observation alone: the window is taken to have begun at resets_at minus
+// window_minutes with nothing used, so the pace is the use observed divided
+// by the time elapsed, and the use at reset that pace held for the whole
+// window. No history is kept or read (#295). It is a reference for "if the
+// average so far holds", not a guarantee of what can still be spent. When the
+// figures can't be computed, the three of them are null together and
+// UnavailableReason says why; the elapsed share stays whenever the window
+// itself is sound.
+type Projection struct {
+	Method                  string   `json:"method"` // always ProjectionWindowAverage
+	ElapsedPctAtObservation *float64 `json:"elapsed_pct_at_observation"`
+	PacePctPerHour          *float64 `json:"pace_pct_per_hour"` // percentage points per hour
+	UsedPctAtReset          *float64 `json:"used_pct_at_reset"` // not capped: above 100 means the pace would overrun the window
+	HeadroomPctAtReset      *float64 `json:"headroom_pct_at_reset"`
+	UnavailableReason       *string  `json:"unavailable_reason"`
+}
+
+// ProjectionWindowAverage is the only projection method so far.
+const ProjectionWindowAverage = "window_average"
+
+// Reasons a projection is unavailable, in the order they are checked.
+const (
+	ProjectionMissingInput      = "missing_input"      // used_pct, resets_at, window_minutes, or observed_at is missing
+	ProjectionInvalidWindow     = "invalid_window"     // the window length is not positive, or the observation falls outside the window
+	ProjectionUnsupportedWindow = "unsupported_window" // the window has saved_resets, so it doesn't begin empty at resets_at − window_minutes
+	ProjectionResetPassed       = "reset_passed"       // resets_at is not after now
+	ProjectionStale             = "stale"              // the observation is older than the tool's stale threshold
+)
 
 // Fallback is the primary display when limits is null (e.g. Bedrock).
 type Fallback struct {

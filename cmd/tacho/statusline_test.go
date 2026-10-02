@@ -194,6 +194,10 @@ func TestRunStatuslinePreservesSnapshotLimitsWhenLivePayloadOmitsThem(t *testing
 	if len(snap.Limits) != 1 || snap.Limits[0].UsedPct == nil || *snap.Limits[0].UsedPct != 42 {
 		t.Fatalf("snapshot limits = %+v", snap.Limits)
 	}
+	// The statusline row is projected too, not only the core.Status one (#295).
+	if snap.Limits[0].Projection.Method != schema.ProjectionWindowAverage {
+		t.Errorf("preserved limit projection = %+v, want window_average", snap.Limits[0].Projection)
+	}
 }
 
 func writeClaudeSnapshotWithLimit(t *testing.T, now time.Time, usedPct float64) {
