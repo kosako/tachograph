@@ -293,14 +293,17 @@ func lastEvents(lines [][]byte) (tc, lim *TokenCount, turn *TurnContext) {
 			}
 		}
 		if c := ev.TokenCount(); c != nil {
-			if tc == nil && c.Usable() {
-				tc = c
-				if ts, err := time.Parse(time.RFC3339Nano, c.timestamp); err == nil {
-					floor = limitsFloor(ts)
+			// Only a token_count whose timestamp parses can serve as the
+			// snapshot or the limits: pickSession orders candidates by that
+			// timestamp and drops one it can't parse, so settling on such an
+			// event here would hide the file's earlier, well-formed ones (#320).
+			if ts, err := time.Parse(time.RFC3339Nano, c.timestamp); err == nil {
+				if tc == nil && c.Usable() {
+					tc, floor = c, limitsFloor(ts)
 				}
-			}
-			if lim == nil && c.AccountLimits() {
-				lim = c
+				if lim == nil && c.AccountLimits() {
+					lim = c
+				}
 			}
 		}
 		if turn == nil {
