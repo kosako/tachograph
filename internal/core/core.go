@@ -21,21 +21,39 @@ type Options struct {
 	NoCache    bool
 }
 
-// Status returns the unified document, served from the TTL cache when fresh.
+// Status returns the unified document, served from the TTL cache when fresh
+// and assembled from the same config roots (#321).
 func Status(opts Options) schema.Status {
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
+	roots := Roots(opts)
 	if !opts.NoCache {
-		if s, ok := cache.ReadStatus(cache.StatusTTL, opts.Now); ok {
+		if s, ok := cache.ReadStatus(cache.StatusTTL, opts.Now, roots); ok {
 			return *s
 		}
 	}
 	s := assemble(opts)
 	if !opts.NoCache {
-		_ = cache.WriteStatus(&s) // serving the live result matters more than caching it
+		_ = cache.WriteStatus(&s, roots) // serving the live result matters more than caching it
 	}
 	return s
+}
+
+// Roots are the config roots a Status for opts reads, by tool — the same
+// resolution the collectors use (CLAUDE_CONFIG_DIR / CODEX_HOME, else the
+// defaults under the home directory). The TTL cache and the Claude snapshot
+// are keyed by them, so another profile's data is never served as this
+// one's (#321). A root that can't be resolved is left out.
+func Roots(opts Options) map[string]string {
+	roots := map[string]string{}
+	if r, ok := agentpath.ClaudeRoot(opts.ClaudeRoot); ok {
+		roots[schema.ToolClaudeCode] = r
+	}
+	if r, ok := agentpath.CodexRoot(opts.CodexRoot); ok {
+		roots[schema.ToolCodex] = r
+	}
+	return roots
 }
 
 func assemble(opts Options) schema.Status {
@@ -146,7 +164,7 @@ func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 // another root is another profile, whose session and limits are not this
 // one's (#321).
 func claudeTool(opts Options) schema.Tool {
-	root, _ := agentpath.ClaudeRoot(opts.ClaudeRoot)
+	root := Roots(opts)[schema.ToolClaudeCode]
 	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now, root)
 	if ok && !snap.Stale {
 		return *snap

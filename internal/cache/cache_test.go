@@ -13,8 +13,11 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// snapRoot stands in for the config root snapshots are observed from (#321).
+// snapRoot stands in for the config root snapshots are observed from, and
+// testRoots for the roots a status document is assembled from (#321).
 const snapRoot = "/profiles/a"
+
+var testRoots = map[string]string{schema.ToolClaudeCode: snapRoot, schema.ToolCodex: "/profiles/codex"}
 
 func setCacheDir(t *testing.T) string {
 	t.Helper()
@@ -27,14 +30,14 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	dir := setCacheDir(t)
 	now := time.Now()
 
-	if _, ok := ReadStatus(StatusTTL, now); ok {
+	if _, ok := ReadStatus(StatusTTL, now, testRoots); ok {
 		t.Fatal("ReadStatus hit on empty cache")
 	}
 	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
-	if err := WriteStatus(s); err != nil {
+	if err := WriteStatus(s, testRoots); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := ReadStatus(StatusTTL, now)
+	got, ok := ReadStatus(StatusTTL, now, testRoots)
 	if !ok || got.GeneratedAt != s.GeneratedAt {
 		t.Fatalf("ReadStatus = %+v, %v", got, ok)
 	}
@@ -45,7 +48,7 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadStatus(StatusTTL, now); ok {
+	if _, ok := ReadStatus(StatusTTL, now, testRoots); ok {
 		t.Error("ReadStatus hit on expired cache")
 	}
 }
@@ -96,7 +99,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: strconv.Itoa(i)}
-			if err := WriteStatus(s); err != nil {
+			if err := WriteStatus(s, testRoots); err != nil {
 				t.Errorf("WriteStatus: %v", err)
 			}
 		}(i)
@@ -105,7 +108,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 	close(stop)
 	readerWG.Wait()
 
-	got, ok := ReadStatus(StatusTTL, now)
+	got, ok := ReadStatus(StatusTTL, now, testRoots)
 	if !ok {
 		t.Fatal("ReadStatus miss after concurrent writes")
 	}
@@ -124,7 +127,7 @@ func TestStatusRejectsOtherSchemaVersion(t *testing.T) {
 		[]byte(`{"schema_version":"9.9","generated_at":"x","tools":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadStatus(StatusTTL, time.Now()); ok {
+	if _, ok := ReadStatus(StatusTTL, time.Now(), testRoots); ok {
 		t.Error("ReadStatus accepted a different schema_version")
 	}
 }
@@ -279,7 +282,7 @@ func TestSnapshotRejectsOtherSchemaVersion(t *testing.T) {
 	now := time.Now()
 	collected := now.Format(time.RFC3339)
 	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
-		[]byte(`{"schema_version":"9.9","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"9.9","root":"`+snapRoot+`","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
@@ -313,6 +316,75 @@ func TestSnapshotRootMismatch(t *testing.T) {
 	}
 	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, "/profiles/b"); ok {
 		t.Error("ReadSnapshotLimits offered limits observed from another root")
+	}
+}
+
+// Roots are stored absolute: a relative CLAUDE_CONFIG_DIR is resolved against
+// the writer's directory, so a reader naming the same directory any other way
+// matches, and one in another directory using the same relative spelling does
+// not (#321).
+func TestSnapshotRootIsStoredAbsolute(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, CollectedAt: &collected}
+	if err := WriteSnapshot(tool, time.Time{}, "profiles/rel"); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd()
+	for _, same := range []string{"profiles/rel", "./profiles/rel/", filepath.Join(cwd, "profiles", "rel")} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, same); !ok {
+			t.Errorf("ReadSnapshot = not ok for %q, which names the writer's directory", same)
+		}
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, filepath.Join(cwd, "elsewhere", "profiles", "rel")); ok {
+		t.Error("ReadSnapshot matched the same relative spelling under another directory")
+	}
+}
+
+// A snapshot without a recorded root (written before #321) and a reader
+// whose root couldn't be resolved never match — not even each other, and not
+// a root spelled ".", which Clean would otherwise equate with "".
+func TestSnapshotWithoutRootNeverMatches(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
+		[]byte(`{"schema_version":"`+schema.Version+`","tool":"claude-code","available":true,"backend":"subscription","collected_at":"`+collected+`","limits":[{"window":"5h","used_pct":42}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{snapRoot, ".", ""} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshot served a root-less snapshot to root %q", root)
+		}
+		if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshotLimits offered a root-less snapshot's limits to root %q", root)
+		}
+	}
+}
+
+// The TTL cache is keyed by the roots the document was assembled from: a run
+// against other roots (another profile) misses and assembles its own (#321).
+func TestStatusCacheNotSharedAcrossRoots(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now()
+	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
+	if err := WriteStatus(s, testRoots); err != nil {
+		t.Fatal(err)
+	}
+	same := map[string]string{schema.ToolClaudeCode: snapRoot + "/", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadStatus(StatusTTL, now, same); !ok {
+		t.Error("ReadStatus missed for the same roots")
+	}
+	other := map[string]string{schema.ToolClaudeCode: "/profiles/b", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadStatus(StatusTTL, now, other); ok {
+		t.Error("ReadStatus served a document assembled from another Claude root")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, map[string]string{schema.ToolClaudeCode: snapRoot}); ok {
+		t.Error("ReadStatus served a document to a run that resolved fewer roots")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, nil); ok {
+		t.Error("ReadStatus served a document to a run with no resolved roots")
 	}
 }
 

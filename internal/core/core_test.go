@@ -42,8 +42,10 @@ func TestStatusServesFromCache(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now})
 
-	// Same call with unusable roots must still succeed via the cache.
-	cached := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: t.TempDir(), Now: now.Add(5 * time.Second)})
+	// The same roots within the TTL are served from the cache (the cache is
+	// keyed by the roots, #321 — another root's miss is covered in
+	// freshness_test.go).
+	cached := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now.Add(5 * time.Second)})
 	if cached.GeneratedAt != first.GeneratedAt {
 		t.Errorf("expected cache hit: %q vs %q", cached.GeneratedAt, first.GeneratedAt)
 	}

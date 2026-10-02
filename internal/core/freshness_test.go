@@ -212,3 +212,20 @@ func TestSnapshotFromAnotherRootIsIgnored(t *testing.T) {
 		t.Errorf("Limits = %+v, want none (another profile's limits are not carried)", got.Limits)
 	}
 }
+
+// The TTL cache doesn't bridge roots either: a document assembled for one
+// Claude root is not served, within its TTL, to a run against another (#321).
+func TestStatusCacheNotServedToAnotherRoot(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+
+	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now}).Tools[0]
+	if !first.Available || first.Model == nil {
+		t.Fatalf("fixture root should yield an available Claude tool: %+v", first)
+	}
+	second := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: codexRoot, Now: now}).Tools[0]
+	if second.Available {
+		t.Errorf("an empty root was served the cached document of another root: %+v", second)
+	}
+}

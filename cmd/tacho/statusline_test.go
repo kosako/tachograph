@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -34,7 +34,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 			schema.Unavailable(schema.ToolCodex),
 		},
 	}
-	if err := cache.WriteStatus(cached); err != nil {
+	if err := cache.WriteStatus(cached, core.Roots(core.Options{})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,7 +223,7 @@ func writeClaudeSnapshotWithLimits(t *testing.T, now, observed time.Time, limits
 		CollectedAt: &collected,
 		Limits:      limits,
 	}
-	root, _ := agentpath.ClaudeRoot("") // the root runStatuslineWithIO resolves (#321)
+	root := core.Roots(core.Options{})[schema.ToolClaudeCode] // the root runStatuslineWithIO resolves (#321)
 	if err := cache.WriteSnapshot(tool, observed, root); err != nil {
 		t.Fatal(err)
 	}

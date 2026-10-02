@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/config"
@@ -536,9 +535,8 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	core.AddSessionTree(&claudeTool, now, pricing.Load())
 	if shouldWriteStatuslineSnapshot(input, claudeTool) {
 		// The snapshot belongs to the config root this payload was observed
-		// from (#321); the payload names none, so resolve it as the
-		// collectors do.
-		root, _ := agentpath.ClaudeRoot("")
+		// from (#321); the payload names none, so resolve it as Status does.
+		root := core.Roots(core.Options{})[schema.ToolClaudeCode]
 		limitsObserved := preserveSnapshotLimits(&claudeTool, now, root)
 		_ = cache.WriteSnapshot(claudeTool, limitsObserved, root)
 	}

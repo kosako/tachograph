@@ -50,8 +50,17 @@ func Dir() (string, error) {
 	return filepath.Join(base, "tachograph"), nil
 }
 
-// ReadStatus returns the cached status if its file is younger than ttl.
-func ReadStatus(ttl time.Duration, now time.Time) (*schema.Status, bool) {
+// statusFile is the TTL cache's on-disk form: the status document plus the
+// config roots (by tool) it was assembled from, so a run against other roots
+// — another profile on the same machine — doesn't take it for its own (#321).
+type statusFile struct {
+	Roots map[string]string `json:"roots,omitempty"`
+	schema.Status
+}
+
+// ReadStatus returns the cached status if its file is younger than ttl and
+// it was assembled from the same config roots.
+func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*schema.Status, bool) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, false
@@ -65,15 +74,20 @@ func ReadStatus(ttl time.Duration, now time.Time) (*schema.Status, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var s schema.Status
-	if json.Unmarshal(b, &s) != nil || s.SchemaVersion != schema.Version {
+	var f statusFile
+	if json.Unmarshal(b, &f) != nil || f.SchemaVersion != schema.Version || !sameRoots(f.Roots, roots) {
 		return nil, false
 	}
-	return &s, true
+	return &f.Status, true
 }
 
-func WriteStatus(s *schema.Status) error {
-	return writeJSON("status.json", s)
+// WriteStatus caches s as assembled from roots (by tool, see ReadStatus).
+func WriteStatus(s *schema.Status, roots map[string]string) error {
+	f := statusFile{Roots: map[string]string{}, Status: *s}
+	for tool, root := range roots {
+		f.Roots[tool] = normalizeRoot(root)
+	}
+	return writeJSON("status.json", f)
 }
 
 // WriteSnapshot persists a single tool's collected state outside the TTL
@@ -84,7 +98,7 @@ func WriteStatus(s *schema.Status) error {
 // from a previous snapshot. With no limits (or a zero time) the field stays
 // unset. root is the config root the payload was observed from (#321).
 func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
-	f := snapshotFile{SchemaVersion: schema.Version, Root: root, Tool: t}
+	f := snapshotFile{SchemaVersion: schema.Version, Root: normalizeRoot(root), Tool: t}
 	if len(t.Limits) > 0 && !limitsObserved.IsZero() {
 		s := limitsObserved.Local().Format(time.RFC3339)
 		f.LimitsCollectedAt = &s
@@ -136,11 +150,43 @@ func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root s
 	return snap.Limits, snap.Backend, observed, true
 }
 
-// sameRoot compares two config roots as paths. A snapshot written before the
-// root was recorded carries none and so matches no reader; the next
-// statusline tick replaces it.
+// normalizeRoot is the form config roots are stored and compared in: the
+// absolute, cleaned path, resolved against the current directory at the time
+// (a relative CLAUDE_CONFIG_DIR names a different directory from a different
+// cwd). An empty root — none could be resolved — stays empty.
+func normalizeRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		return abs
+	}
+	return filepath.Clean(root)
+}
+
+// sameRoot reports whether two config roots name the same directory. An
+// empty root never matches: a snapshot written before the root was recorded
+// carries none, as does a run whose root couldn't be resolved, and neither
+// may be taken for a given profile's (#321).
 func sameRoot(a, b string) bool {
-	return filepath.Clean(a) == filepath.Clean(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return normalizeRoot(a) == normalizeRoot(b)
+}
+
+// sameRoots reports whether two root sets (by tool) name the same
+// directories for the same tools; an empty set matches nothing.
+func sameRoots(a, b map[string]string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for tool, root := range a {
+		if other, ok := b[tool]; !ok || !sameRoot(root, other) {
+			return false
+		}
+	}
+	return true
 }
 
 // limitsObservedAt resolves when the snapshot's limits were originally
