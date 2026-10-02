@@ -277,10 +277,43 @@ func TestRenderSettingsMenu(t *testing.T) {
 		"--表示する項目\n",
 		"----☑ リミット(5h / weekly) | bash=",
 		"param3=\"menubar.limits\" param4=\"hide\"",
+		"----☑ 直近 7 日 | bash=",
+		"param3=\"menubar.history\" param4=\"hide\"",
 		"refresh=true",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("settings menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// menubar.history=hide leaves the last-7-days section out even when rows
+// are supplied, and unchecks its entry in the sections menu; the limit rows
+// are unaffected (#302).
+func TestRenderHistoryHidden(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now, _ := time.Parse(time.RFC3339, "2026-07-04T11:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	hist := core.DailyHistory{
+		Days:  []string{"2026-07-03", "2026-07-04"},
+		Tools: map[string][]*schema.Daily{schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}}},
+	}
+	cfg := config.Default()
+	cfg.Menubar.History = config.VisibilityHide
+	out := Render(s, now, true, cfg, hist)
+
+	for _, absent := range []string{"日の cost/tokens", "07/03", "日計"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("hidden-history output still has %q:\n%s", absent, out)
+		}
+	}
+	for _, want := range []string{
+		fmt.Sprintf("%-*s ", labelW, "5h"), // the limits toggle is separate
+		"----☐ 直近 7 日 | bash=",
+		"param3=\"menubar.history\" param4=\"show\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hidden-history output missing %q:\n%s", want, out)
 		}
 	}
 }

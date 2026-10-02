@@ -182,7 +182,13 @@ func runSwiftbar(args []string) int {
 		}
 		return 0
 	}
-	hist := core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, build)
+	// With the history hidden the pass is skipped entirely — no transcript
+	// scan for closed days, no daily-history.json read or write — and the
+	// empty history renders as no section (#302).
+	var hist core.DailyHistory
+	if !cfg.HistoryHidden() {
+		hist = core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, build)
+	}
 	fmt.Print(swiftbar.Render(s, now, dark, cfg, hist))
 	notifyLimits(shown, cfg, now)
 	return 0
@@ -223,6 +229,8 @@ keys:
   menubar.metric  ` + "limit_5h | limit_weekly | cost | tokens" + `
   menubar.limits  show | hide  (SwiftBar: the 5h / weekly rows and controls; hide
                   them for Bedrock / Vertex / API-key backends without windows)
+  menubar.history show | hide  (SwiftBar: the last-7-days rows; hide also skips
+                  computing them)
   limits.display  remaining | used  (what 5h / weekly percentages show)
   notify.thresholds  comma-separated "% left" values, e.g. 50,30,10 (SwiftBar
                   notifies when a 5h / weekly window drops to one; empty = off)
@@ -378,6 +386,12 @@ func configSet(key, val string) int {
 			return 2
 		}
 		c.Menubar.Limits = val
+	case "menubar.history":
+		if !config.ValidVisibility(val) {
+			fmt.Fprintf(os.Stderr, "tacho: invalid menubar.history %q (want show or hide)\n", val)
+			return 2
+		}
+		c.Menubar.History = val
 	case "limits.display":
 		if !render.ValidLimitDisplay(val) {
 			fmt.Fprintf(os.Stderr, "tacho: invalid limits display %q (want remaining or used)\n", val)
