@@ -197,28 +197,123 @@ func writeClaudeSnapshotWithLimit(t *testing.T, now time.Time, usedPct float64) 
 }
 
 // writeClaudeSnapshotWithLimitObserved seeds a fresh snapshot (CollectedAt 2
-// minutes ago) whose limits were originally observed at observed, so tests
-// can separate snapshot freshness from limits freshness.
+// minutes ago) whose 5h window is still running (it resets in 2h) and whose
+// limits were originally observed at observed, so tests can separate
+// snapshot freshness from limits freshness.
 func writeClaudeSnapshotWithLimitObserved(t *testing.T, now time.Time, usedPct float64, observed time.Time) {
 	t.Helper()
+	writeClaudeSnapshotWithLimits(t, now, observed,
+		window(schema.WindowFiveHour, 300, usedPct, now.Add(2*time.Hour)))
+}
 
+// writeClaudeSnapshotWithLimits seeds a fresh subscription snapshot
+// (CollectedAt 2 minutes ago) carrying limits observed at observed.
+func writeClaudeSnapshotWithLimits(t *testing.T, now, observed time.Time, limits ...schema.Limit) {
+	t.Helper()
 	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
-	minutes := 300
 	tool := schema.Tool{
 		Tool:        schema.ToolClaudeCode,
 		Available:   true,
 		Backend:     schema.BackendSubscription,
 		CollectedAt: &collected,
-		Limits: []schema.Limit{
-			{
-				Window:        schema.WindowFiveHour,
-				WindowMinutes: &minutes,
-				UsedPct:       &usedPct,
-			},
-		},
+		Limits:      limits,
 	}
 	if err := cache.WriteSnapshot(tool, observed); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// window builds a limit; a zero resetsAt leaves the reset time unset.
+func window(name string, minutes int, usedPct float64, resetsAt time.Time) schema.Limit {
+	l := schema.Limit{Window: name, WindowMinutes: &minutes, UsedPct: &usedPct}
+	if !resetsAt.IsZero() {
+		r := resetsAt.Format(time.RFC3339)
+		l.ResetsAt = &r
+	}
+	return l
+}
+
+// A preserved window must still be running: one whose reset time has passed
+// is dropped rather than re-saved under a fresh collected_at, where it would
+// read (and notify) as the current window (#318).
+func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
+		window(schema.WindowFiveHour, 300, 95, now.Add(-time.Hour)))
+
+	input := `{"session_id":"session-1","model":{"id":"claude-test","display_name":"Claude Test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "--" {
+		t.Errorf("statusline output = %q, want -- (the window already reset)", got)
+	}
+
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	if !ok {
+		t.Fatal("snapshot was not written")
+	}
+	if snap.Limits != nil {
+		t.Fatalf("a window that reset an hour ago was preserved: %+v", snap.Limits)
+	}
+}
+
+// Mixed windows: the one that reset is dropped and the one still running is
+// kept, with the limits' original observation time (#186) intact.
+func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	observed := now.Add(-3 * time.Hour)
+	writeClaudeSnapshotWithLimits(t, now, observed,
+		window(schema.WindowFiveHour, 300, 95, now.Add(-time.Hour)),
+		window(schema.WindowWeekly, 10080, 17, now.Add(72*time.Hour)))
+
+	input := `{"session_id":"session-1","model":{"id":"claude-test","display_name":"Claude Test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	if !ok {
+		t.Fatal("snapshot was not written")
+	}
+	if len(snap.Limits) != 1 || snap.Limits[0].Window != schema.WindowWeekly {
+		t.Fatalf("snapshot limits = %+v, want only the weekly window", snap.Limits)
+	}
+	if _, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now); !ok || !got.Equal(observed) {
+		t.Errorf("limits observation = %v, %v, want original %v", got, ok, observed)
+	}
+}
+
+// A window without a reset time can't be shown to be running and isn't
+// preserved either, as on the transcript route (#263).
+func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
+		window(schema.WindowFiveHour, 300, 42, time.Time{}))
+
+	input := `{"session_id":"session-1","model":{"id":"claude-test","display_name":"Claude Test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	if !ok {
+		t.Fatal("snapshot was not written")
+	}
+	if snap.Limits != nil {
+		t.Fatalf("a window without a reset time was preserved: %+v", snap.Limits)
 	}
 }
 
