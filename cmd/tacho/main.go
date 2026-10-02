@@ -594,6 +594,12 @@ func preserveSnapshotLimits(t *schema.Tool, now time.Time) time.Time {
 	if !ok || backend != schema.BackendSubscription {
 		return time.Time{}
 	}
+	// Only the windows still running are worth carrying: a window past its
+	// reset would otherwise be re-saved under a fresh collected_at and read
+	// (and notify) as the current one (#318).
+	if limits = core.RunningLimits(limits, now); len(limits) == 0 {
+		return time.Time{}
+	}
 	t.Limits = limits
 	return observed
 }

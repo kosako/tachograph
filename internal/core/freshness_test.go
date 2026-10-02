@@ -160,3 +160,24 @@ func TestStaleTranscriptDropsSessionScope(t *testing.T) {
 		t.Errorf("Model = %+v, want claude-fable-5 kept", got.Model)
 	}
 }
+
+func TestRunningLimits(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	past := now.Add(-time.Minute).Format(time.RFC3339)
+	future := now.Add(time.Minute).Format(time.RFC3339)
+	bad := "not-a-time"
+	pct := 1.0
+	in := []schema.Limit{
+		{Window: "a", UsedPct: &pct, ResetsAt: &past},
+		{Window: "b", UsedPct: &pct, ResetsAt: &future},
+		{Window: "c", UsedPct: &pct},
+		{Window: "d", UsedPct: &pct, ResetsAt: &bad},
+	}
+	got := RunningLimits(in, now)
+	if len(got) != 1 || got[0].Window != "b" {
+		t.Errorf("RunningLimits = %+v, want only the window resetting in the future", got)
+	}
+	if RunningLimits(nil, now) != nil {
+		t.Error("RunningLimits(nil) should be nil")
+	}
+}
