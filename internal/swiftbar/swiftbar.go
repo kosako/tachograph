@@ -22,15 +22,15 @@ import (
 // is unreadable on the light menu, so light mode uses a darker amber/red.
 const colorGray = "#8E8E93"
 
-func attnYellow() string {
-	if MenuDark {
+func (r Renderer) attnYellow() string {
+	if r.MenuDark {
 		return "#FFD60A"
 	}
 	return "#B45309" // dark amber, readable on white
 }
 
-func attnRed() string {
-	if MenuDark {
+func (r Renderer) attnRed() string {
+	if r.MenuDark {
 		return "#FF453A"
 	}
 	return "#D11507"
@@ -44,20 +44,26 @@ const (
 	inkDark  = "#F0F0F0"
 )
 
-// MenuDark is true when macOS is in dark mode (set by cmd from
-// AppleInterfaceStyle), so dropdown text uses a light ink.
-var MenuDark = false
+// Renderer is the dropdown's environment, which the status document and the
+// config don't carry: the appearance its inks follow and the executable its
+// clickable settings run. cmd fills it from the system appearance and the
+// running binary; tests use the zero value unless they are about either.
+type Renderer struct {
+	// MenuDark is true when macOS is in dark mode (AppleInterfaceStyle), so
+	// dropdown text uses a light ink. The menu bar title is drawn by SwiftBar
+	// separately and takes its own appearance (Render's dark).
+	MenuDark bool
+	// BinPath is the tacho executable invoked by the clickable dropdown
+	// settings.
+	BinPath string
+}
 
-func ink() string {
-	if MenuDark {
+func (r Renderer) ink() string {
+	if r.MenuDark {
 		return inkDark
 	}
 	return inkLight
 }
-
-// BinPath is the tacho executable invoked by the clickable dropdown settings.
-// cmd sets it to the running binary; tests keep the default.
-var BinPath = "tacho"
 
 // HistoryDays is how many days the dropdown history covers, today included
 // (#243). The closed days come from core.RecentHistory's rolling cache.
@@ -66,7 +72,7 @@ const HistoryDays = 7
 // Render produces the full plugin output for one status document. dark
 // selects the menu bar appearance; cfg selects which tools, metric, and
 // display style to show; hist supplies the per-day rows (none when empty).
-func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist core.DailyHistory) string {
+func (r Renderer) Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist core.DailyHistory) string {
 	shown := cfg.FilterStatus(s)
 	limits := render.LimitDisplay(cfg.Limits.Display)
 	hideLimits := cfg.LimitsHidden()
@@ -80,14 +86,14 @@ func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist c
 		if i > 0 {
 			b.WriteString("---\n")
 		}
-		section(&b, t, now, limits, !hideLimits)
+		r.section(&b, t, now, limits, !hideLimits)
 	}
 	if !hideHistory {
-		history(&b, hist, cfg)
+		r.history(&b, hist, cfg)
 	}
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
-	settings(&b, cfg, hideLimits, hideHistory, metric)
+	r.settings(&b, cfg, hideLimits, hideHistory, metric)
 	b.WriteString("Refresh | refresh=true\n")
 	return b.String()
 }
@@ -109,7 +115,7 @@ func effectiveMetric(cfg config.Config, hideLimits bool) string {
 // and refreshes. With the limits hidden, the limit windows and the limit
 // display drop out of the menu, and the metric check follows what the menu
 // bar shows (metric) rather than the stored choice.
-func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory bool, metric string) {
+func (r Renderer) settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory bool, metric string) {
 	b.WriteString("Settings\n")
 
 	// Display style (radio).
@@ -118,7 +124,7 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory boo
 		{config.StyleMeter, "メーター"},
 		{config.StyleNumber, "数字"},
 	} {
-		clickOption(b, 2, mark(cfg.Menubar.Style == o.value)+o.label,
+		r.clickOption(b, 2, mark(cfg.Menubar.Style == o.value)+o.label,
 			"config", "set", "menubar.style", o.value)
 	}
 
@@ -128,7 +134,7 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory boo
 		if hideLimits && render.IsLimitMetric(m) {
 			continue
 		}
-		clickOption(b, 2, mark(metric == m)+render.MetricLabel(m),
+		r.clickOption(b, 2, mark(metric == m)+render.MetricLabel(m),
 			"config", "set", "menubar.metric", m)
 	}
 
@@ -142,7 +148,7 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory boo
 			{render.LimitRemaining, "残量"},
 			{render.LimitUsed, "使用率"},
 		} {
-			clickOption(b, 2, mark(cfg.Limits.Display == string(o.value))+o.label,
+			r.clickOption(b, 2, mark(cfg.Limits.Display == string(o.value))+o.label,
 				"config", "set", "limits.display", string(o.value))
 		}
 	}
@@ -153,7 +159,7 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory boo
 		{schema.ToolClaudeCode, "Claude"},
 		{schema.ToolCodex, "Codex"},
 	} {
-		clickOption(b, 2, checkbox(cfg.ToolEnabled(tl.name))+tl.label,
+		r.clickOption(b, 2, checkbox(cfg.ToolEnabled(tl.name))+tl.label,
 			"config", "toggle-tool", tl.name)
 	}
 
@@ -163,9 +169,9 @@ func settings(b *strings.Builder, cfg config.Config, hideLimits, hideHistory boo
 	// rows for anyone who doesn't want them (#302). A click sets the
 	// opposite visibility.
 	b.WriteString("--表示する項目\n")
-	clickOption(b, 2, checkbox(!hideLimits)+"リミット(5h / weekly)",
+	r.clickOption(b, 2, checkbox(!hideLimits)+"リミット(5h / weekly)",
 		"config", "set", "menubar.limits", flipped(hideLimits))
-	clickOption(b, 2, checkbox(!hideHistory)+"直近 7 日",
+	r.clickOption(b, 2, checkbox(!hideHistory)+"直近 7 日",
 		"config", "set", "menubar.history", flipped(hideHistory))
 }
 
@@ -196,9 +202,9 @@ func checkbox(on bool) string {
 
 // clickOption writes a SwiftBar submenu item at the given nesting depth that
 // runs `BinPath params...` on click and refreshes.
-func clickOption(b *strings.Builder, depth int, label string, params ...string) {
+func (r Renderer) clickOption(b *strings.Builder, depth int, label string, params ...string) {
 	b.WriteString(strings.Repeat("--", depth))
-	fmt.Fprintf(b, "%s | bash=%q terminal=false refresh=true", label, BinPath)
+	fmt.Fprintf(b, "%s | bash=%q terminal=false refresh=true", label, r.BinPath)
 	for i, p := range params {
 		fmt.Fprintf(b, " param%d=%q", i+1, p)
 	}
@@ -281,7 +287,7 @@ const enableParams = "bash=/usr/bin/true terminal=false refresh=false"
 
 // section renders one tool's dropdown block. showLimits adds the 5h / weekly
 // rows; they're left out for backends without subscription windows (#301).
-func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay, showLimits bool) {
+func (r Renderer) section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay, showLimits bool) {
 	name := "Codex"
 	if t.Tool == schema.ToolClaudeCode {
 		name = "Claude"
@@ -302,7 +308,7 @@ func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.Lim
 	if t.Plan != nil {
 		header += " (" + render.DisplayText(*t.Plan) + ")"
 	}
-	headerColor := ink()
+	headerColor := r.ink()
 	if t.Stale && t.CollectedAt != nil {
 		header += " ⚠" + render.Age(*t.CollectedAt, now)
 		headerColor = colorGray
@@ -312,12 +318,12 @@ func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.Lim
 	// Show every metric in the dropdown — the menu bar shows one, the
 	// dropdown is the full readout. Limits carry a moon + reset time.
 	if showLimits {
-		limitRow(b, t, schema.WindowFiveHour, "5h", now, limits)
-		limitRow(b, t, schema.WindowWeekly, "weekly", now, limits)
+		r.limitRow(b, t, schema.WindowFiveHour, "5h", now, limits)
+		r.limitRow(b, t, schema.WindowWeekly, "weekly", now, limits)
 	}
-	metricRow(b, t, render.MetricContext, "context", limits)
-	metricRow(b, t, render.MetricCost, "cost", limits)
-	metricRow(b, t, render.MetricTokens, "tokens", limits)
+	r.metricRow(b, t, render.MetricContext, "context", limits)
+	r.metricRow(b, t, render.MetricCost, "cost", limits)
+	r.metricRow(b, t, render.MetricTokens, "tokens", limits)
 }
 
 // historyTop is how many of a tool's costliest days the history rows
@@ -340,7 +346,7 @@ const (
 // costliest days are shown in blue so the heavy days stand out. A last row
 // totals the window's cost per tool and, with more than one tool, across
 // them (#298).
-func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
+func (r Renderer) history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 	if len(h.Days) == 0 {
 		return
 	}
@@ -365,16 +371,16 @@ func history(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 			}
 			line += "  " + toolInitial(name) + " " + cell
 		}
-		fmt.Fprintf(b, "%s | font=%s color=%s ansi=true %s\n", line, dataFont, ink(), enableParams)
+		fmt.Fprintf(b, "%s | font=%s color=%s ansi=true %s\n", line, dataFont, r.ink(), enableParams)
 	}
-	historyTotal(b, h, cfg)
+	r.historyTotal(b, h, cfg)
 }
 
 // historyTotal renders the window's cost per shown tool and, when more than
 // one tool is shown, across them ("計"). It follows the `tacho daily` total
 // row: a sum reads "--" when any of its days is unknown or has tokens but no
 // price, rather than silently leaving that day out. Tokens aren't totalled.
-func historyTotal(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
+func (r Renderer) historyTotal(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 	line := fmt.Sprintf("%d日計", len(h.Days))
 	var all []*schema.Daily
 	shown := 0
@@ -393,7 +399,7 @@ func historyTotal(b *strings.Builder, h core.DailyHistory, cfg config.Config) {
 	if shown > 1 {
 		line += "  計 " + render.DailyCostSum(all)
 	}
-	fmt.Fprintf(b, "%s | font=%s color=%s %s\n", line, dataFont, ink(), enableParams)
+	fmt.Fprintf(b, "%s | font=%s color=%s %s\n", line, dataFont, r.ink(), enableParams)
 }
 
 // topCostDays picks the indexes of the n costliest days in col. Only days
@@ -466,7 +472,7 @@ const labelW = 7
 // limitRow renders a rate-limit window with a bar and figure showing what
 // is left or what is used per limits, reset time, and pressure color by use
 // (or "--" when the window is absent).
-func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time, limits render.LimitDisplay) {
+func (r Renderer) limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time, limits render.LimitDisplay) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
 			used := *l.UsedPct
@@ -475,55 +481,55 @@ func limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
-			dataRow(b, line, lineColor(t, render.PressureFor(used)))
+			r.dataRow(b, line, r.lineColor(t, render.PressureFor(used)))
 			return
 		}
 	}
-	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, render.Missing), staleOnly(t))
+	r.dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, render.Missing), r.staleOnly(t))
 }
 
 // metricRow renders context/cost/tokens. Percentage metrics get a usage bar;
 // non-percentage ones (cost/tokens) are shown as plain text.
-func metricRow(b *strings.Builder, t schema.Tool, metric, label string, limits render.LimitDisplay) {
+func (r Renderer) metricRow(b *strings.Builder, t schema.Tool, metric, label string, limits render.LimitDisplay) {
 	frac, text, pressure := render.Metric(t, metric, limits)
 	if frac != nil { // percentage metric: bar + color by pressure
 		line := fmt.Sprintf("%-*s %s %s", labelW, label, lineBar(*frac*100, barWidth), text)
-		dataRow(b, line, lineColor(t, pressure))
+		r.dataRow(b, line, r.lineColor(t, pressure))
 		return
 	}
-	dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, text), staleOnly(t))
+	r.dataRow(b, fmt.Sprintf("%-*s %s", labelW, label, text), r.staleOnly(t))
 }
 
 // dataRow writes a per-tool metric row in the monospace data font. An
 // explicit color is always set: non-clickable rows are otherwise rendered
 // gray (disabled) by macOS.
-func dataRow(b *strings.Builder, text, color string) {
+func (r Renderer) dataRow(b *strings.Builder, text, color string) {
 	if color == "" {
-		color = ink()
+		color = r.ink()
 	}
 	fmt.Fprintf(b, "%s | font=%s color=%s %s\n", text, dataFont, color, enableParams)
 }
 
 // staleOnly returns gray for stale tools, else the normal ink.
-func staleOnly(t schema.Tool) string {
+func (r Renderer) staleOnly(t schema.Tool) string {
 	if t.Stale {
 		return colorGray
 	}
-	return ink()
+	return r.ink()
 }
 
 // lineColor colors rows that need attention (yellow/red by pressure), gray
 // when stale, otherwise the normal ink.
-func lineColor(t schema.Tool, pressure render.PressureLevel) string {
+func (r Renderer) lineColor(t schema.Tool, pressure render.PressureLevel) string {
 	if t.Stale {
 		return colorGray
 	}
 	switch pressure {
 	case render.PressureDanger:
-		return attnRed()
+		return r.attnRed()
 	case render.PressureWarn:
-		return attnYellow()
+		return r.attnYellow()
 	default:
-		return ink()
+		return r.ink()
 	}
 }
