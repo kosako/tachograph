@@ -85,7 +85,7 @@ func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*sch
 func WriteStatus(s *schema.Status, roots map[string]string) error {
 	f := statusFile{Roots: map[string]string{}, Status: *s}
 	for tool, root := range roots {
-		f.Roots[tool] = normalizeRoot(root)
+		f.Roots[tool], _ = normalizeRoot(root) // unresolvable roots are stored as none
 	}
 	return writeJSON("status.json", f)
 }
@@ -98,7 +98,8 @@ func WriteStatus(s *schema.Status, roots map[string]string) error {
 // from a previous snapshot. With no limits (or a zero time) the field stays
 // unset. root is the config root the payload was observed from (#321).
 func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
-	f := snapshotFile{SchemaVersion: schema.Version, Root: normalizeRoot(root), Tool: t}
+	f := snapshotFile{SchemaVersion: schema.Version, Tool: t}
+	f.Root, _ = normalizeRoot(root) // unresolvable roots are stored as none
 	if len(t.Limits) > 0 && !limitsObserved.IsZero() {
 		s := limitsObserved.Local().Format(time.RFC3339)
 		f.LimitsCollectedAt = &s
@@ -153,26 +154,28 @@ func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root s
 // normalizeRoot is the form config roots are stored and compared in: the
 // absolute, cleaned path, resolved against the current directory at the time
 // (a relative CLAUDE_CONFIG_DIR names a different directory from a different
-// cwd). An empty root — none could be resolved — stays empty.
-func normalizeRoot(root string) string {
+// cwd). ok is false for an empty root and for one that can't be made
+// absolute (the current directory is gone): such a root is neither stored
+// nor matched, so it can't be mistaken for another reader's.
+func normalizeRoot(root string) (string, bool) {
 	if root == "" {
-		return ""
+		return "", false
 	}
-	if abs, err := filepath.Abs(root); err == nil {
-		return abs
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
 	}
-	return filepath.Clean(root)
+	return abs, true
 }
 
-// sameRoot reports whether two config roots name the same directory. An
-// empty root never matches: a snapshot written before the root was recorded
-// carries none, as does a run whose root couldn't be resolved, and neither
-// may be taken for a given profile's (#321).
+// sameRoot reports whether two config roots name the same directory. A root
+// that doesn't normalize never matches: a snapshot written before the root
+// was recorded carries none, as does a run whose root couldn't be resolved,
+// and neither may be taken for a given profile's (#321).
 func sameRoot(a, b string) bool {
-	if a == "" || b == "" {
-		return false
-	}
-	return normalizeRoot(a) == normalizeRoot(b)
+	na, okA := normalizeRoot(a)
+	nb, okB := normalizeRoot(b)
+	return okA && okB && na == nb
 }
 
 // sameRoots reports whether two root sets (by tool) name the same

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,7 +125,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 func TestStatusRejectsOtherSchemaVersion(t *testing.T) {
 	dir := setCacheDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "status.json"),
-		[]byte(`{"schema_version":"9.9","generated_at":"x","tools":[]}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"9.9","roots":{"claude-code":"`+snapRoot+`","codex":"/profiles/codex"},"generated_at":"x","tools":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := ReadStatus(StatusTTL, time.Now(), testRoots); ok {
@@ -319,26 +320,69 @@ func TestSnapshotRootMismatch(t *testing.T) {
 	}
 }
 
-// Roots are stored absolute: a relative CLAUDE_CONFIG_DIR is resolved against
-// the writer's directory, so a reader naming the same directory any other way
-// matches, and one in another directory using the same relative spelling does
-// not (#321).
+// Roots are stored absolute, resolved against the writer's directory: a
+// reader in that directory matches under any spelling, a reader elsewhere
+// matches only the writer's absolute path, never the same relative spelling
+// (#321).
 func TestSnapshotRootIsStoredAbsolute(t *testing.T) {
 	setCacheDir(t)
 	now := time.Now().Truncate(time.Second)
 	collected := now.Add(-time.Minute).Format(time.RFC3339)
 	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, CollectedAt: &collected}
+
+	writerDir, otherDir := t.TempDir(), t.TempDir()
+	t.Chdir(writerDir)
 	if err := WriteSnapshot(tool, time.Time{}, "profiles/rel"); err != nil {
 		t.Fatal(err)
 	}
-	cwd, _ := os.Getwd()
-	for _, same := range []string{"profiles/rel", "./profiles/rel/", filepath.Join(cwd, "profiles", "rel")} {
+	cwd, _ := os.Getwd() // as the writer resolved it (symlinks included)
+	absRoot := filepath.Join(cwd, "profiles", "rel")
+	for _, same := range []string{"profiles/rel", "./profiles/rel/", absRoot} {
 		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, same); !ok {
-			t.Errorf("ReadSnapshot = not ok for %q, which names the writer's directory", same)
+			t.Errorf("ReadSnapshot = not ok for %q from the writer's directory", same)
 		}
 	}
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, filepath.Join(cwd, "elsewhere", "profiles", "rel")); ok {
-		t.Error("ReadSnapshot matched the same relative spelling under another directory")
+
+	t.Chdir(otherDir)
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, "profiles/rel"); ok {
+		t.Error("ReadSnapshot matched the same relative spelling from another directory")
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, absRoot); !ok {
+		t.Error("ReadSnapshot = not ok for the writer's absolute root from another directory")
+	}
+}
+
+// A root that can't be made absolute (the current directory is gone) is
+// stored as none and matches nothing — not even the same spelling from the
+// same broken directory — rather than falling back to a relative path that
+// another reader would resolve against its own directory.
+func TestSnapshotUnresolvableRootNeverMatches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the current directory can't be removed on Windows")
+	}
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, CollectedAt: &collected}
+
+	gone := filepath.Join(t.TempDir(), "gone")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filepath.Abs("profiles/rel"); err == nil {
+		t.Skip("filepath.Abs still resolves a relative path from a removed directory here")
+	}
+	if err := WriteSnapshot(tool, time.Time{}, "profiles/rel"); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{"profiles/rel", "/profiles/rel", ""} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshot served a snapshot whose root couldn't be resolved to root %q", root)
+		}
 	}
 }
 
@@ -385,6 +429,38 @@ func TestStatusCacheNotSharedAcrossRoots(t *testing.T) {
 	}
 	if _, ok := ReadStatus(StatusTTL, now, nil); ok {
 		t.Error("ReadStatus served a document to a run with no resolved roots")
+	}
+}
+
+// The TTL cache's roots are stored absolute too: the same relative roots hit
+// from the writer's directory, miss from another, and the writer's absolute
+// roots hit from anywhere (#321).
+func TestStatusCacheRootsStoredAbsolute(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now()
+	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
+	rel := map[string]string{schema.ToolClaudeCode: "profiles/claude", schema.ToolCodex: "profiles/codex"}
+
+	writerDir, otherDir := t.TempDir(), t.TempDir()
+	t.Chdir(writerDir)
+	if err := WriteStatus(s, rel); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd()
+	abs := map[string]string{
+		schema.ToolClaudeCode: filepath.Join(cwd, "profiles", "claude"),
+		schema.ToolCodex:      filepath.Join(cwd, "profiles", "codex"),
+	}
+	if _, ok := ReadStatus(StatusTTL, now, rel); !ok {
+		t.Error("ReadStatus missed for the same relative roots from the writer's directory")
+	}
+
+	t.Chdir(otherDir)
+	if _, ok := ReadStatus(StatusTTL, now, rel); ok {
+		t.Error("ReadStatus hit for the same relative spelling from another directory")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, abs); !ok {
+		t.Error("ReadStatus missed for the writer's absolute roots from another directory")
 	}
 }
 
