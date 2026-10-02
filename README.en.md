@@ -187,9 +187,9 @@ As a side effect each invocation snapshots the Claude rate limits, so bare
 last-known value for up to 30 days, shown as stale after 60 minutes; ctx and
 the session's tokens / cost describe the most recently observed session, so
 they turn into `--` once stale). While you use Claude outside the status line
-(IDE, desktop, `claude -p`), a fresher transcript supplies the model and
-session instead, and only the limit windows that haven't reset yet are carried
-over.
+(IDE, desktop, `claude -p`), the snapshot is still shown until it goes stale;
+after that a fresher transcript supplies the model and session instead, and
+only the limit windows that haven't reset yet are carried over.
 
 ### Customizing the status line
 
