@@ -95,7 +95,7 @@
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
 | `limits` | nullable。`window_minutes` の昇順(Claude は 5h → weekly。Codex は `rate_limits.primary` / `secondary` をサーバーの割り当て順ではなく長さで並べる、#268)。枠は配列の位置ではなく `window` / `window_minutes` で引く |
-| `used_pct` | 「使った割合」(%)。ツールが報告した値をそのまま入れる(通常は 0–100 だが範囲外の補正はせず、0–100 に丸めるのは表示のときだけ)。JSON はこの意味のまま。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
+| `used_pct` | 「使った割合」(%)。ツールが報告した値をそのまま入れる(通常は 0–100 だが範囲外の補正はせず、0–100 に丸めるのは表示のときだけ)。ツールが値を報告しない枠(キー欠落 / null)は null のまま(0 とはみなさない、#322)。JSON はこの意味のまま。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト)。値自体は `limits` の有無に関わらず取れる限り入る(`session_tokens` は `session.tokens.total` と同じ値) |
 | `daily.tokens` / `session_today.tokens` | 課金対象トークン(`input` + `output`。`input` は cache write / cache read 込み)で、`session.tokens.total` および `cost_usd` と分母が同じ(#234)。`input` / `cached_input` / `output` の内訳を併せて持つ。Codex は `total_token_usage` の増分をそのまま使う |
 | `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算。Codex の daily は `token_count` イベント単位の増分をその時点の `turn_context.model` 単価で積算(セッション内のモデル切替に追随)。Codex の `fallback.estimated_cost_usd`(session cost)は累積値しか持たないため「現在モデル × 全累積」の概算 |

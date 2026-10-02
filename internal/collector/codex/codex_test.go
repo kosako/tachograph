@@ -615,14 +615,52 @@ func TestCollectCreditsFromObject(t *testing.T) {
 }
 
 // toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
+func pctOf(v float64) *float64 { return &v }
+
 func TestToLimitNullResetsAt(t *testing.T) {
-	l := toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: 5, ResetsAt: 0})
+	l := toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: pctOf(5), ResetsAt: 0})
 	if l.ResetsAt != nil {
 		t.Errorf("ResetsAt = %v, want nil for zero epoch", *l.ResetsAt)
 	}
-	l = toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: 5, ResetsAt: 1779646858})
+	l = toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: pctOf(5), ResetsAt: 1779646858})
 	if l.ResetsAt == nil {
 		t.Error("ResetsAt = nil, want set for a real epoch")
+	}
+}
+
+// A window without used_percent reports an unknown use, not 0% (#322); a
+// real 0 is still 0.
+func TestToLimitMissingUsedPercent(t *testing.T) {
+	if l := toLimit(&rlWindow{WindowMinutes: 300, ResetsAt: 1779646858}); l.UsedPct != nil {
+		t.Errorf("UsedPct = %v, want nil without used_percent", *l.UsedPct)
+	}
+	if l := toLimit(&rlWindow{WindowMinutes: 300, UsedPercent: pctOf(0)}); l.UsedPct == nil || *l.UsedPct != 0 {
+		t.Errorf("UsedPct = %v, want 0 for an explicit 0", l.UsedPct)
+	}
+}
+
+// End to end: a token_count whose window carries used_percent null keeps the
+// window with used_pct null instead of 0% (#322).
+func TestCollectMissingUsedPercentStaysNull(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tc := `{"timestamp":"2026-05-24T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":0,"total_tokens":1},"model_context_window":200000},"rate_limits":{"limit_id":"codex","primary":{"used_percent":null,"window_minutes":300,"resets_at":1779646858},"secondary":{"window_minutes":10080,"resets_at":1779646858},"plan_type":"plus"}}}`
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-eeeeeeeeeeee.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-x", "/x")+"\n"+tc,
+		time.Date(2026, 5, 24, 10, 5, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil || len(got.Limits) != 2 {
+		t.Fatalf("Error = %+v, Limits = %+v, want two windows", got.Error, got.Limits)
+	}
+	for _, l := range got.Limits {
+		if l.UsedPct != nil {
+			t.Errorf("%s UsedPct = %v, want nil when used_percent is null or absent", l.Window, *l.UsedPct)
+		}
 	}
 }
 

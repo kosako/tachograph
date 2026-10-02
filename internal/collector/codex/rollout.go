@@ -94,9 +94,9 @@ type TokenUsage struct {
 }
 
 type rlWindow struct {
-	UsedPercent   float64 `json:"used_percent"`
-	WindowMinutes int     `json:"window_minutes"`
-	ResetsAt      int64   `json:"resets_at"` // epoch seconds
+	UsedPercent   *float64 `json:"used_percent"` // nullable: absent means unknown, not 0 (#322)
+	WindowMinutes int      `json:"window_minutes"`
+	ResetsAt      int64    `json:"resets_at"` // epoch seconds
 }
 
 // Usable reports whether the token_count carries anything a renderer can
