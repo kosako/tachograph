@@ -85,15 +85,26 @@ type usageKey struct{ id, req string }
 // still counted once.
 type UsageSet map[usageKey]bool
 
+// UsageKey is the identity of line's response: its message id and request
+// id. ok is false for lines without a message id (rare, e.g. synthetic),
+// which can't be deduped. This is the one place the dedup rule lives; the
+// dedup over whole files here and the hashed keys internal/daily stores for
+// its session-tree cache both derive from it (#309).
+func (l TranscriptLine) UsageKey() (id, requestID string, ok bool) {
+	if l.Message.ID == "" {
+		return "", "", false
+	}
+	return l.Message.ID, l.RequestID, true
+}
+
 // Dup reports whether line's response was already counted, recording it
-// otherwise. Lines without a message id (rare, e.g. synthetic) can't be
-// deduped and are never treated as duplicates.
+// otherwise. Lines without a UsageKey are never treated as duplicates.
 func (s UsageSet) Dup(line TranscriptLine) bool {
-	id := line.Message.ID
-	if id == "" {
+	id, req, ok := line.UsageKey()
+	if !ok {
 		return false
 	}
-	k := usageKey{id, line.RequestID}
+	k := usageKey{id, req}
 	if s[k] {
 		return true
 	}
