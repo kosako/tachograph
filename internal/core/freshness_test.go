@@ -42,7 +42,7 @@ func writeClaudeSnapshot(t *testing.T, now time.Time, age, reset5h, resetWeekly 
 			{Window: schema.WindowWeekly, UsedPct: &pw, ResetsAt: &rw},
 		},
 	}
-	if err := cache.WriteSnapshot(snap, now.Add(-age)); err != nil {
+	if err := cache.WriteSnapshot(snap, now.Add(-age), claudeRoot); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -112,7 +112,7 @@ func TestCarriedSnapshotLimitsDropWindowsWithoutReset(t *testing.T) {
 			{Window: schema.WindowWeekly, UsedPct: &pw, ResetsAt: &rw},
 		},
 	}
-	if err := cache.WriteSnapshot(snap, now.Add(-2*time.Hour)); err != nil {
+	if err := cache.WriteSnapshot(snap, now.Add(-2*time.Hour), claudeRoot); err != nil {
 		t.Fatal(err)
 	}
 	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
@@ -179,5 +179,36 @@ func TestRunningLimits(t *testing.T) {
 	}
 	if RunningLimits(nil, now) != nil {
 		t.Error("RunningLimits(nil) should be nil")
+	}
+}
+
+// A snapshot observed from another config root — a second Claude profile on
+// the same machine — is not this root's: the transcript route serves the row
+// instead of the other profile's session and limits (#321).
+func TestSnapshotFromAnotherRootIsIgnored(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	r5 := now.Add(2 * time.Hour).Format(time.RFC3339)
+	p5 := 42.0
+	snap := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Model:       &schema.Model{ID: "claude-opus-5"},
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &p5, ResetsAt: &r5}},
+	}
+	if err := cache.WriteSnapshot(snap, now.Add(-time.Minute), "/another/profile"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Model == nil || got.Model.ID != "claude-fable-5" {
+		t.Errorf("Model = %+v, want the transcript's claude-fable-5, not the other profile's snapshot", got.Model)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want none (another profile's limits are not carried)", got.Limits)
 	}
 }

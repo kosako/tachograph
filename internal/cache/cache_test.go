@@ -13,6 +13,9 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
+// snapRoot stands in for the config root snapshots are observed from (#321).
+const snapRoot = "/profiles/a"
+
 func setCacheDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -134,11 +137,11 @@ func TestSnapshot(t *testing.T) {
 	tool := schema.Unavailable(schema.ToolClaudeCode)
 	tool.Available = true
 	tool.CollectedAt = &collected
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || !got.Available {
 		t.Fatalf("ReadSnapshot = %+v, %v", got, ok)
 	}
@@ -146,13 +149,13 @@ func TestSnapshot(t *testing.T) {
 		t.Error("Stale = true for 2-minute-old snapshot")
 	}
 
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(SnapshotMaxAge+time.Minute)); ok {
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(SnapshotMaxAge+time.Minute), snapRoot); ok {
 		t.Error("ReadSnapshot returned a snapshot older than maxAge")
 	}
 
 	// Returned within maxAge but past the stale threshold → Stale recomputed
 	// to true. Age here is ~92min (> 60min threshold) but under the 2h maxAge.
-	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute))
+	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute), snapRoot)
 	if !ok || !got.Stale {
 		t.Errorf("ReadSnapshot stale recompute: got %+v, %v", got, ok)
 	}
@@ -174,11 +177,11 @@ func TestReadSnapshotLimits(t *testing.T) {
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
 	observed := now.Add(-29 * 24 * time.Hour)
-	if err := WriteSnapshot(tool, observed); err != nil {
+	if err := WriteSnapshot(tool, observed, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	limits, backend, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	limits, backend, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || len(limits) != 1 || backend != schema.BackendSubscription {
 		t.Fatalf("ReadSnapshotLimits = %+v, %q, %v", limits, backend, ok)
 	}
@@ -188,7 +191,7 @@ func TestReadSnapshotLimits(t *testing.T) {
 
 	// The snapshot file is 2 minutes old, but the limits observation is 29
 	// days old: 2 more days puts it past SnapshotMaxAge.
-	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(2*24*time.Hour)); ok {
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(2*24*time.Hour), snapRoot); ok {
 		t.Error("limits past maxAge from their observation were returned")
 	}
 }
@@ -209,11 +212,11 @@ func TestReadSnapshotDropsExpiredLimits(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour)); err != nil {
+	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour), snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || !got.Available {
 		t.Fatalf("ReadSnapshot = %+v, %v (a fresh snapshot must still be served)", got, ok)
 	}
@@ -241,11 +244,11 @@ func TestReadSnapshotLimitsFallsBackToCollectedAt(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	_, _, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok {
 		t.Fatal("ReadSnapshotLimits = not ok, want CollectedAt fallback")
 	}
@@ -262,11 +265,11 @@ func TestReadSnapshotLimitsWithoutLimits(t *testing.T) {
 	tool := schema.Unavailable(schema.ToolClaudeCode)
 	tool.Available = true
 	tool.CollectedAt = &collected
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
 		t.Error("ReadSnapshotLimits returned ok for a snapshot without limits")
 	}
 }
@@ -279,8 +282,37 @@ func TestSnapshotRejectsOtherSchemaVersion(t *testing.T) {
 		[]byte(`{"schema_version":"9.9","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
 		t.Error("ReadSnapshot accepted a different schema_version")
+	}
+}
+
+// A snapshot is tied to the config root it was observed from: a reader
+// working against another root (a second Claude profile) gets neither the
+// snapshot nor limits to carry from it (#321). Roots compare as paths.
+func TestSnapshotRootMismatch(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	pct := 42.0
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := WriteSnapshot(tool, now.Add(-time.Minute), snapRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot+"/"); !ok {
+		t.Error("ReadSnapshot = not ok for the same root spelled with a trailing slash")
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, "/profiles/b"); ok {
+		t.Error("ReadSnapshot served a snapshot observed from another root")
+	}
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, "/profiles/b"); ok {
+		t.Error("ReadSnapshotLimits offered limits observed from another root")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/collector/codex"
@@ -140,8 +141,13 @@ func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 // session_today) are dropped as unknown instead of being served next to a
 // daily total that is recomputed on every call (#235). The account-level rate
 // limits and model keep the snapshot's 30-day retention.
+//
+// The snapshot counts only when it was observed from this run's config root:
+// another root is another profile, whose session and limits are not this
+// one's (#321).
 func claudeTool(opts Options) schema.Tool {
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now)
+	root, _ := agentpath.ClaudeRoot(opts.ClaudeRoot)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, opts.Now, root)
 	if ok && !snap.Stale {
 		return *snap
 	}

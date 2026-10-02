@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/config"
@@ -534,8 +535,12 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	// today's portion so {claude.*.session.today} works (#262).
 	core.AddSessionTree(&claudeTool, now, pricing.Load())
 	if shouldWriteStatuslineSnapshot(input, claudeTool) {
-		limitsObserved := preserveSnapshotLimits(&claudeTool, now)
-		_ = cache.WriteSnapshot(claudeTool, limitsObserved)
+		// The snapshot belongs to the config root this payload was observed
+		// from (#321); the payload names none, so resolve it as the
+		// collectors do.
+		root, _ := agentpath.ClaudeRoot("")
+		limitsObserved := preserveSnapshotLimits(&claudeTool, now, root)
+		_ = cache.WriteSnapshot(claudeTool, limitsObserved, root)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
 	for i := range s.Tools {
@@ -583,14 +588,14 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 // snapshot rewrite can't re-stamp old limits as fresh. Limits are carried
 // only between subscription payloads: bedrock/api/vertex keep limits null by
 // the collector contract (#186).
-func preserveSnapshotLimits(t *schema.Tool, now time.Time) time.Time {
+func preserveSnapshotLimits(t *schema.Tool, now time.Time, root string) time.Time {
 	if len(t.Limits) > 0 {
 		return now
 	}
 	if t.Backend != schema.BackendSubscription {
 		return time.Time{}
 	}
-	limits, backend, observed, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now)
+	limits, backend, observed, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now, root)
 	if !ok || backend != schema.BackendSubscription {
 		return time.Time{}
 	}
