@@ -227,8 +227,18 @@ func (t Table) match(model string) (Rate, bool) {
 
 // Cost returns the USD cost of a token breakdown at the given rate.
 func (r Rate) Cost(in, cacheWrite, cacheRead, out int64) float64 {
+	return r.CostByTTL(in, cacheWrite, 0, 0, cacheRead, out)
+}
+
+// CostByTTL prices a breakdown whose cache writes are split by TTL, as
+// claude.Usage.CacheWrites reports them: 5-minute writes at CacheWrite (the
+// table's rate), 1-hour writes at twice the input rate (Anthropic's
+// published multiplier for the longer TTL, which the table has no column
+// for), and writes of unknown TTL at the 5-minute rate (#310).
+func (r Rate) CostByTTL(in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
 	return (float64(in)*r.In +
-		float64(cacheWrite)*r.CacheWrite +
+		float64(cacheWrite5m+cacheWriteUnknown)*r.CacheWrite +
+		float64(cacheWrite1h)*r.In*2 +
 		float64(cacheRead)*r.CacheRead +
 		float64(out)*r.Out) / 1_000_000
 }
