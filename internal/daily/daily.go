@@ -1,9 +1,12 @@
 // Package daily aggregates usage per local calendar day across all of a
 // tool's sessions. It walks the same on-disk logs the collectors read,
 // delegating log-format parsing to the collector packages and keeping only
-// the date filtering and aggregation here. Nothing is stored: every call
-// recomputes from the logs, so a day only ever reflects what is still on
-// disk (#242).
+// the date filtering and aggregation here. The per-day figures store
+// nothing: every call recomputes them from the logs, so a day only ever
+// reflects what is still on disk (#242). The one exception is
+// ClaudeSessionTree, whose caller may hand it a TreeFileCache (#262) holding
+// the parsed usage of nested transcripts last written before today, keyed
+// by path, size, and mtime, so an unchanged file is not read again.
 package daily
 
 import (
@@ -693,8 +696,9 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
 	}
-	// Order across files doesn't matter here: codexEventCost sorts by the
-	// cumulative total, which restores emission order within a session.
+	// Order across files doesn't matter here: codexEventCost sorts by
+	// timestamp (cumulative total as the tie-break for equal times), which
+	// restores emission order within a session.
 	prev.events = append(prev.events, ro.events...)
 }
 
