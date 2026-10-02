@@ -89,6 +89,26 @@ func TestConfigSetLimitsDisplay(t *testing.T) {
 	}
 }
 
+// menubar.limits accepts show / hide only (#301).
+func TestConfigSetMenubarLimits(t *testing.T) {
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	if code := configSet("menubar.limits", "off"); code == 0 {
+		t.Error("configSet menubar.limits off returned 0, want non-zero")
+	}
+	if code := configSet("menubar.limits", "hide"); code != 0 {
+		t.Errorf("configSet menubar.limits hide returned %d, want 0", code)
+	}
+	if !config.Load().LimitsHidden() {
+		t.Error("Load().LimitsHidden() = false after set hide, want true")
+	}
+	if code := configSet("menubar.limits", "show"); code != 0 {
+		t.Errorf("configSet menubar.limits show returned %d, want 0", code)
+	}
+	if config.Load().LimitsHidden() {
+		t.Error("Load().LimitsHidden() = true after set show, want false")
+	}
+}
+
 // A config.json that fails to parse must not be clobbered by write commands:
 // configSet / configToggleTool refuse instead of saving defaults over the
 // user's (fixable) file.

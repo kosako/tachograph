@@ -116,7 +116,7 @@ func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text s
 // reverts once the configured window reappears in the payload.
 func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text string, pressure PressureLevel) {
 	frac, text, pressure = Metric(t, metric, d)
-	if !isLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
+	if !IsLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
 		return frac, text, pressure
 	}
 	for _, l := range t.Limits {
@@ -129,7 +129,8 @@ func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64,
 	return frac, text, pressure
 }
 
-func isLimitMetric(metric string) bool {
+// IsLimitMetric reports whether metric is one of the rate-limit windows.
+func IsLimitMetric(metric string) bool {
 	return metric == MetricLimit5h || metric == MetricLimitWeekly
 }
 

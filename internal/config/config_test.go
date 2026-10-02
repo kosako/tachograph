@@ -39,6 +39,27 @@ func TestLimitsDisplayRoundTripAndDefault(t *testing.T) {
 	}
 }
 
+// menubar.limits round-trips and defaults to show, so a file written before
+// the key existed keeps the limits visible (#301).
+func TestMenubarLimitsRoundTripAndDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	c := Default()
+	c.Menubar.Limits = VisibilityHide
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load(); got.Menubar.Limits != VisibilityHide || !got.LimitsHidden() {
+		t.Errorf("Menubar.Limits = %q (LimitsHidden %v), want hide", got.Menubar.Limits, got.LimitsHidden())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"menubar":{"style":"number"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load(); got.Menubar.Limits != VisibilityShow || got.LimitsHidden() {
+		t.Errorf("Menubar.Limits without the key = %q, want show", got.Menubar.Limits)
+	}
+}
+
 func TestSaveAndLoad(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	want := Config{Tools: []string{schema.ToolCodex}, Menubar: Menubar{Style: StyleNumber, Metric: "cost"}}
@@ -269,13 +290,16 @@ func equalInts(a, b []int) bool {
 func TestLoadWarnsAboutUnknownValues(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
-	raw := `{"tools":["claude-code","cursor"],"menubar":{"style":"big","metric":"ctx"},"limits":{"display":"usage"},"notify":{"thresholds":[50,0,100]}}`
+	raw := `{"tools":["claude-code","cursor"],"menubar":{"style":"big","metric":"ctx","limits":"always"},"limits":{"display":"usage"},"notify":{"thresholds":[50,0,100]}}`
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c := Load()
-	if c.Limits.Display != "usage" || c.Menubar.Style != "big" || c.Menubar.Metric != "ctx" || len(c.Tools) != 2 {
+	if c.Limits.Display != "usage" || c.Menubar.Style != "big" || c.Menubar.Metric != "ctx" || c.Menubar.Limits != "always" || len(c.Tools) != 2 {
 		t.Errorf("Load altered the written values: %+v", c)
+	}
+	if c.LimitsHidden() {
+		t.Error("LimitsHidden() = true for an unknown menubar.limits, want the limits kept visible")
 	}
 	if got := c.Notify.Thresholds; len(got) != 1 || got[0] != 50 {
 		t.Errorf("Notify.Thresholds = %v, want [50] (invalid dropped)", got)
@@ -284,6 +308,7 @@ func TestLoadWarnsAboutUnknownValues(t *testing.T) {
 		`tools: "cursor" is not claude-code or codex — ignored`,
 		`menubar.style: "big" is not meter or number — shown as meter`,
 		`menubar.metric: "ctx" is not one of limit_5h, limit_weekly, cost, tokens — shown as --`,
+		`menubar.limits: "always" is not show or hide — limits shown`,
 		`limits.display: "usage" is not remaining or used — shown as remaining`,
 		`notify.thresholds: 0 is not a whole percentage from 1 to 99 — dropped`,
 		`notify.thresholds: 100 is not a whole percentage from 1 to 99 — dropped`,

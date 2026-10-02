@@ -69,28 +69,44 @@ const HistoryDays = 7
 func Render(s schema.Status, now time.Time, dark bool, cfg config.Config, hist core.DailyHistory) string {
 	shown := cfg.FilterStatus(s)
 	limits := render.LimitDisplay(cfg.Limits.Display)
+	hideLimits := cfg.LimitsHidden()
+	metric := effectiveMetric(cfg, hideLimits)
 
 	var b strings.Builder
-	b.WriteString(titleLine(shown, dark, cfg, limits))
+	b.WriteString(titleLine(shown, dark, cfg, limits, metric))
 	b.WriteString("\n---\n")
 	for i, t := range shown.Tools {
 		if i > 0 {
 			b.WriteString("---\n")
 		}
-		section(&b, t, now, limits)
+		section(&b, t, now, limits, !hideLimits)
 	}
 	history(&b, hist, cfg)
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "/d = 当日合計(全セッション) | color=%s size=11 %s\n", colorGray, enableParams)
-	settings(&b, cfg)
+	settings(&b, cfg, hideLimits, metric)
 	b.WriteString("Refresh | refresh=true\n")
 	return b.String()
 }
 
+// effectiveMetric is the metric the menu bar shows: the configured one,
+// except that with the limits hidden a limit window is replaced by cost (the
+// next metric that still means something there). The configured value is
+// left as is, so showing the limits again restores it (#301).
+func effectiveMetric(cfg config.Config, hideLimits bool) string {
+	if hideLimits && render.IsLimitMetric(cfg.Menubar.Metric) {
+		return render.MetricCost
+	}
+	return cfg.Menubar.Metric
+}
+
 // settings renders the "Settings" menu with nested submenus. Each option is
 // listed with the current selection check-marked; clicking an option sets it
-// directly (radio for style/metric, checkbox toggle for tools) and refreshes.
-func settings(b *strings.Builder, cfg config.Config) {
+// directly (radio for style/metric, checkbox toggle for tools and sections)
+// and refreshes. With the limits hidden, the limit windows and the limit
+// display drop out of the menu, and the metric check follows what the menu
+// bar shows (metric) rather than the stored choice.
+func settings(b *strings.Builder, cfg config.Config, hideLimits bool, metric string) {
 	b.WriteString("Settings\n")
 
 	// Display style (radio).
@@ -106,21 +122,26 @@ func settings(b *strings.Builder, cfg config.Config) {
 	// Metric (radio) — menu-bar-appropriate metrics (context excluded).
 	b.WriteString("--指標\n")
 	for _, m := range render.MenubarMetrics {
-		clickOption(b, 2, mark(cfg.Menubar.Metric == m)+render.MetricLabel(m),
+		if hideLimits && render.IsLimitMetric(m) {
+			continue
+		}
+		clickOption(b, 2, mark(metric == m)+render.MetricLabel(m),
 			"config", "set", "menubar.metric", m)
 	}
 
 	// Limit display (radio): what the 5h / weekly percentages show.
-	b.WriteString("--リミット表示\n")
-	for _, o := range []struct {
-		value render.LimitDisplay
-		label string
-	}{
-		{render.LimitRemaining, "残量"},
-		{render.LimitUsed, "使用率"},
-	} {
-		clickOption(b, 2, mark(cfg.Limits.Display == string(o.value))+o.label,
-			"config", "set", "limits.display", string(o.value))
+	if !hideLimits {
+		b.WriteString("--リミット表示\n")
+		for _, o := range []struct {
+			value render.LimitDisplay
+			label string
+		}{
+			{render.LimitRemaining, "残量"},
+			{render.LimitUsed, "使用率"},
+		} {
+			clickOption(b, 2, mark(cfg.Limits.Display == string(o.value))+o.label,
+				"config", "set", "limits.display", string(o.value))
+		}
 	}
 
 	// Tools (checkbox).
@@ -132,6 +153,18 @@ func settings(b *strings.Builder, cfg config.Config) {
 		clickOption(b, 2, checkbox(cfg.ToolEnabled(tl.name))+tl.label,
 			"config", "toggle-tool", tl.name)
 	}
+
+	// Sections (checkbox): the limit rows and controls can be switched off
+	// for backends without subscription windows — Bedrock / Vertex / an API
+	// key — where they would only ever read "--" (#301). The click sets the
+	// opposite visibility.
+	b.WriteString("--表示する項目\n")
+	next := config.VisibilityHide
+	if hideLimits {
+		next = config.VisibilityShow
+	}
+	clickOption(b, 2, checkbox(!hideLimits)+"リミット(5h / weekly)",
+		"config", "set", "menubar.limits", next)
 }
 
 // mark prefixes the selected radio option with a check.
@@ -163,12 +196,12 @@ func clickOption(b *strings.Builder, depth int, label string, params ...string) 
 
 // titleLine is the menu bar representation. With the meter style it is a
 // tachometer gauge image (colored, so `image=` not the tinted
-// `templateImage=`) driven by cfg.Menubar.Metric; with the number style it
-// is the metric value as text. cost/tokens have no gauge fraction, so the
-// meter style falls back to the number text for them. For gauge metrics,
-// TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the image.
-func titleLine(s schema.Status, dark bool, cfg config.Config, limits render.LimitDisplay) string {
-	metric := cfg.Menubar.Metric
+// `templateImage=`) driven by metric (see effectiveMetric); with the number
+// style it is the metric value as text. cost/tokens have no gauge fraction,
+// so the meter style falls back to the number text for them. For gauge
+// metrics, TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the
+// image.
+func titleLine(s schema.Status, dark bool, cfg config.Config, limits render.LimitDisplay, metric string) string {
 	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
 	// have no fraction, so the ring would always be empty — fall back to the
 	// number style for them.
@@ -235,7 +268,9 @@ func title(s schema.Status, metric string, limits render.LimitDisplay) string {
 // this keeps the info rows at full opacity. Clicking runs /usr/bin/true.
 const enableParams = "bash=/usr/bin/true terminal=false refresh=false"
 
-func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay) {
+// section renders one tool's dropdown block. showLimits adds the 5h / weekly
+// rows; they're left out for backends without subscription windows (#301).
+func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay, showLimits bool) {
 	name := "Codex"
 	if t.Tool == schema.ToolClaudeCode {
 		name = "Claude"
@@ -265,8 +300,10 @@ func section(b *strings.Builder, t schema.Tool, now time.Time, limits render.Lim
 
 	// Show every metric in the dropdown — the menu bar shows one, the
 	// dropdown is the full readout. Limits carry a moon + reset time.
-	limitRow(b, t, schema.WindowFiveHour, "5h", now, limits)
-	limitRow(b, t, schema.WindowWeekly, "weekly", now, limits)
+	if showLimits {
+		limitRow(b, t, schema.WindowFiveHour, "5h", now, limits)
+		limitRow(b, t, schema.WindowWeekly, "weekly", now, limits)
+	}
 	metricRow(b, t, render.MetricContext, "context", limits)
 	metricRow(b, t, render.MetricCost, "cost", limits)
 	metricRow(b, t, render.MetricTokens, "tokens", limits)

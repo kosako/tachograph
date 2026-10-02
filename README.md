@@ -223,6 +223,7 @@ tacho setup swiftbar --write   # プラグインフォルダに tacho.30s.sh を
 - **指標**: 5h limit / weekly limit / cost / tokens(ラジオ選択。contextはセッションごとに変動が大きくメニューバー向きでないため除外)。cost / tokens は当日合計(`/d` 付き)で、当日合計が不明なときは現セッション値(`/d` なし)に切り替わる
 - **リミット表示**: 残量 / 使用率(5h / weekly のパーセント・ゲージ・リングが示す値。ステータスラインや `tacho` にも同じ設定が効く。色分けは使用率基準のまま)
 - **表示するツール**: Claude / Codex(チェックボックス)。メニューバー・ドロップダウン・通知に加え、`tacho` / `tacho watch` / `tacho daily` / cmux のピルもこの設定で絞り込まれ、`tools` に書いた順に並ぶ。ステータスライン(テンプレートに書いたツールがそのまま出る。既定のテンプレートは Codex も含む)と `tacho status --json`(常に両ツール)には効かない
+- **表示する項目**: リミット(5h / weekly)(チェックボックス)。外すと、各ツールの 5h / weekly の行と「リミット表示」、指標の 5h / weekly をドロップダウンから消します。指標が 5h / weekly のままのときはメニューバーに cost を出します(設定値は書き換えないので、戻せば元の指標に戻ります)。Bedrock / Vertex / API キーのようにサブスクリプションの枠が無い環境向けです。ステータスライン・`tacho`・`tacho status --json`・残量通知には効きません
 
 CLI でも設定できます(設定は `~/.config/tachograph/config.json`。`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/tachograph/` の下になり、`statusline.tmpl` / `pricing.json` も同じ場所です。実際のパスは `tacho config path` で確認できます):
 
@@ -231,6 +232,7 @@ tacho config show
 tacho config set menubar.style number      # メーター→数字(meter / number)
 tacho config set menubar.metric cost       # 使った金額を表示(limit_5h / limit_weekly / cost / tokens)
 tacho config set limits.display used       # 5h / weekly を残量→使用率で表示(remaining / used)
+tacho config set menubar.limits hide       # 5h / weekly をドロップダウンから消す(show / hide。Bedrock など枠が無い環境向け)
 tacho config set tools codex               # Codexだけ表示(claude-code / codex をカンマ区切り、書いた順に表示)
 ```
 
