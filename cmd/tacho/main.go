@@ -150,14 +150,16 @@ func runSwiftbar(args []string) int {
 	now := time.Now()
 	dark := appearanceDark()
 	cfg := config.Load()
-	swiftbar.MenuDark = systemDark() // dropdown follows the system appearance
+	// The dropdown follows the system appearance; its settings click the
+	// running binary, or `tacho` on PATH when the executable can't be found.
+	r := swiftbar.Renderer{MenuDark: systemDark(), BinPath: "tacho"}
 	// The history cache is keyed by the binary: its version plus the
 	// executable's own stamp, so a rebuilt dev binary (version "dev" or a
 	// pseudo-version) also starts the cache over rather than serving figures
 	// an older accounting produced.
 	build := buildVersion()
 	if exe, err := os.Executable(); err == nil {
-		swiftbar.BinPath = exe // so dropdown settings click the same binary
+		r.BinPath = exe // so dropdown settings click the same binary
 		if info, err := os.Stat(exe); err == nil {
 			build += "@" + fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 		}
@@ -184,7 +186,7 @@ func runSwiftbar(args []string) int {
 	if !cfg.HistoryHidden() {
 		hist = core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, build)
 	}
-	fmt.Print(swiftbar.Render(s, now, dark, cfg, hist))
+	fmt.Print(r.Render(s, now, dark, cfg, hist))
 	notifyLimits(shown, cfg, now)
 	return 0
 }

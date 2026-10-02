@@ -47,7 +47,7 @@ func TestRenderStructure(t *testing.T) {
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		schema.Unavailable(schema.ToolCodex),
 	}}
-	out := Render(s, now, true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 
 	if lines[0] != "C🌔" { // 24% used → 76% left
@@ -82,11 +82,11 @@ func TestRenderColorsOnlyAttention(t *testing.T) {
 	// 5h at 85% used (red, shows 15% left), weekly at 60% used (yellow, shows
 	// 40% left), ctx normal (uncolored): rows read as headroom, color by use.
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 85, 60)}}
-	out := Render(s, now, true, config.Default(), core.DailyHistory{})
-	if !strings.Contains(out, barRow("5h", 15, "")) || !strings.Contains(out, "| font="+dataFont+" color="+attnRed()) {
+	out := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
+	if !strings.Contains(out, barRow("5h", 15, "")) || !strings.Contains(out, "| font="+dataFont+" color="+(Renderer{}).attnRed()) {
 		t.Errorf("expected red 5h row:\n%s", out)
 	}
-	if !strings.Contains(out, barRow("weekly", 40, "")+" | font="+dataFont+" color="+attnYellow()) {
+	if !strings.Contains(out, barRow("weekly", 40, "")+" | font="+dataFont+" color="+(Renderer{}).attnYellow()) {
 		t.Errorf("expected yellow weekly row:\n%s", out)
 	}
 	// Normal context row uses the ink color, not an attention color.
@@ -99,7 +99,7 @@ func TestRenderTitleImageByDefault(t *testing.T) {
 	t.Setenv("TACHO_SWIFTBAR_TEXT", "")
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
-	out := Render(s, now, true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
 	if !strings.HasPrefix(out, "| image=") {
 		t.Errorf("default title should be a gauge image, got:\n%s", strings.SplitN(out, "\n", 2)[0])
 	}
@@ -114,7 +114,7 @@ func TestRenderMeterCostFallsBackToNumber(t *testing.T) {
 	s.Tools[0].Daily = &schema.Daily{Tokens: 1000, CostUSD: &cost}
 	cfg := config.Default() // meter style
 	cfg.Menubar.Metric = render.MetricCost
-	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
 	if strings.HasPrefix(title, "| image=") {
 		t.Errorf("meter + cost should not render an empty gauge image; got %q", title)
 	}
@@ -135,7 +135,7 @@ func TestRenderCostZeroDayShowsTodaysZero(t *testing.T) {
 	cfg := config.Default()
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricCost
-	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
 	if !strings.Contains(title, "$0.00/d") || strings.Contains(title, "$3.21") {
 		t.Errorf("zero-day cost title = %q, want today's $0.00/d, not the carried-over $3.21", title)
 	}
@@ -150,7 +150,7 @@ func TestRenderNumberStyle(t *testing.T) {
 	cfg := config.Default()
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricLimit5h
-	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
 	if title != "C 76%  X 93%" { // headroom: 24% / 7% used
 		t.Errorf("number title = %q, want \"C 76%%  X 93%%\"", title)
 	}
@@ -167,7 +167,7 @@ func TestRenderUsedDisplay(t *testing.T) {
 	cfg := config.Default()
 	cfg.Limits.Display = string(render.LimitUsed)
 	cfg.Menubar.Style = config.StyleNumber
-	out := Render(s, now, true, cfg, core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 	if title := strings.SplitN(out, "\n", 2)[0]; title != "C 24%  X 7%" {
 		t.Errorf("number title (used) = %q, want \"C 24%%  X 7%%\"", title)
 	}
@@ -191,7 +191,7 @@ func TestRenderUsedDisplay(t *testing.T) {
 
 	cfg.Menubar.Style = config.StyleMeter
 	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
-	if title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]; title != "C🌒 X🌑" { // 24% / 7% used
+	if title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]; title != "C🌒 X🌑" { // 24% / 7% used
 		t.Errorf("moon title (used) = %q, want \"C🌒 X🌑\"", title)
 	}
 }
@@ -215,7 +215,7 @@ func TestRenderNumberStyleLimitFallback(t *testing.T) {
 	cfg := config.Default()
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricLimit5h
-	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
 	if title != "C 76%  X wk85%" { // headroom: 24% / 15% used
 		t.Errorf("number title = %q, want \"C 76%%  X wk85%%\"", title)
 	}
@@ -227,7 +227,7 @@ func TestRenderTextTitleMoonFallback(t *testing.T) {
 	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
 	now := time.Now()
 	s := schema.Status{Tools: []schema.Tool{weeklyOnlyTool(60)}}
-	title := strings.SplitN(Render(s, now, true, config.Default(), core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{}), "\n", 2)[0]
 	if title != "X"+render.Moon(40) { // 60% used → 40% left
 		t.Errorf("text title = %q, want %q", title, "X"+render.Moon(40))
 	}
@@ -241,7 +241,7 @@ func TestRenderTextTitleFollowsMetric(t *testing.T) {
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 90, 10)}}
 	cfg := config.Default()
 	cfg.Menubar.Metric = render.MetricLimitWeekly
-	title := strings.SplitN(Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
 	if want := "C" + render.Moon(90); title != want { // weekly: 10% used → 90% left
 		t.Errorf("weekly text title = %q, want %q (not the 5h %q)", title, want, "C"+render.Moon(10))
 	}
@@ -252,7 +252,7 @@ func TestRenderSettingsMenu(t *testing.T) {
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
 	cfg := config.Default()
 	cfg.Tools = []string{schema.ToolClaudeCode} // codex disabled
-	out := Render(s, now, true, cfg, core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 
 	for _, want := range []string{
 		"Settings\n",
@@ -300,7 +300,7 @@ func TestRenderHistoryHidden(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.Menubar.History = config.VisibilityHide
-	out := Render(s, now, true, cfg, hist)
+	out := (Renderer{}).Render(s, now, true, cfg, hist)
 
 	for _, absent := range []string{"日の cost/tokens", "07/03", "日計"} {
 		if strings.Contains(out, absent) {
@@ -343,7 +343,7 @@ func TestRenderLimitsHidden(t *testing.T) {
 			cfg.Menubar.Metric = tc.metric
 			cfg.Menubar.Style = tc.style
 			cfg.Menubar.Limits = config.VisibilityHide
-			out := Render(s, now, true, cfg, core.DailyHistory{})
+			out := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 
 			if title := strings.SplitN(out, "\n", 2)[0]; title != "C $1.50/d" {
 				t.Errorf("title = %q, want the cost in place of the hidden limit", title)
@@ -380,9 +380,9 @@ func TestRenderLimitsHidden(t *testing.T) {
 	cfg.Menubar.Style = config.StyleNumber
 	cfg.Menubar.Metric = render.MetricLimitWeekly
 	cfg.Menubar.Limits = config.VisibilityHide
-	hidden := Render(s, now, true, cfg, core.DailyHistory{})
+	hidden := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 	cfg.Menubar.Limits = config.VisibilityShow
-	shown := Render(s, now, true, cfg, core.DailyHistory{})
+	shown := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 
 	if title := strings.SplitN(shown, "\n", 2)[0]; title != "C 59%" { // 41% used
 		t.Errorf("title after showing the limits again = %q, want the weekly headroom back", title)
@@ -410,7 +410,7 @@ func TestRenderSanitizesHeaderText(t *testing.T) {
 	tl.Model = &schema.Model{ID: "gpt-safe", DisplayName: &model}
 	tl.Plan = &plan
 
-	out := Render(schema.Status{Tools: []schema.Tool{tl}}, now, true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(schema.Status{Tools: []schema.Tool{tl}}, now, true, config.Default(), core.DailyHistory{})
 	for _, bad := range []string{
 		"Fable | bash=/tmp/pwn",
 		"\nForged",
@@ -436,7 +436,7 @@ func TestRenderToolFilter(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools = []string{schema.ToolCodex} // only codex
 	cfg.Menubar.Style = config.StyleNumber
-	out := Render(s, now, true, cfg, core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
 	if strings.Contains(out, "Claude —") {
 		t.Errorf("Claude should be filtered out:\n%s", out)
 	}
@@ -452,7 +452,7 @@ func TestRenderTitleBothTools(t *testing.T) {
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		tool(schema.ToolCodex, false, 90, 10),
 	}}
-	out := Render(s, now, true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
 	if !strings.HasPrefix(out, "C🌔 X🌑\n") { // 24% used → 76% left; 90% used → 10% left
 		t.Errorf("title = %q, want C🌔 X🌑", strings.SplitN(out, "\n", 2)[0])
 	}
@@ -461,11 +461,11 @@ func TestRenderTitleBothTools(t *testing.T) {
 func TestRenderStaleGray(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00") // 2h after collected
 	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolCodex, true, 70, 10)}}
-	out := Render(s, now, true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
 	if !strings.Contains(out, "⚠2h") {
 		t.Errorf("stale age missing:\n%s", out)
 	}
-	if strings.Contains(out, attnYellow()) || !strings.Contains(out, colorGray) {
+	if strings.Contains(out, (Renderer{}).attnYellow()) || !strings.Contains(out, colorGray) {
 		t.Errorf("stale lines should be gray, not pressure-colored:\n%s", out)
 	}
 }
@@ -478,7 +478,7 @@ func TestRenderFallback(t *testing.T) {
 		Tool: schema.ToolCodex, Available: true, Backend: schema.BackendBedrock,
 		Fallback: &schema.Fallback{SessionTokens: &tokens, EstimatedCostUSD: &cost},
 	}
-	out := Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default(), core.DailyHistory{})
+	out := (Renderer{}).Render(schema.Status{Tools: []schema.Tool{tl}}, time.Now(), true, config.Default(), core.DailyHistory{})
 	costRow := fmt.Sprintf("%-*s $1.50 | font=%s color=%s %s\n", labelW, "cost", dataFont, inkLight, enableParams)
 	tokRow := fmt.Sprintf("%-*s 4M | font=%s color=%s %s\n", labelW, "tokens", dataFont, inkLight, enableParams)
 	missRow := fmt.Sprintf("%-*s -- | font=%s color=%s %s\n", labelW, "5h", dataFont, inkLight, enableParams)
@@ -510,15 +510,15 @@ func TestRenderHistory(t *testing.T) {
 		},
 	}
 
-	out := Render(s, now, true, config.Default(), hist)
+	out := (Renderer{}).Render(s, now, true, config.Default(), hist)
 	for _, want := range []string{
 		"直近 3 日の cost/tokens(青 = cost 上位 3 日) | color=" + colorGray,
-		"07/02  C " + ansiBlue + "  $3.21/12.3M " + ansiReset + "  X --             | font=" + dataFont + " color=" + ink() + " ansi=true ",
+		"07/02  C " + ansiBlue + "  $3.21/12.3M " + ansiReset + "  X --             | font=" + dataFont + " color=" + (Renderer{}).ink() + " ansi=true ",
 		"07/03  C   $0.00/0       X      --/900k   | font=" + dataFont,
 		"07/04  C " + ansiBlue + " $12.30/59M   " + ansiReset + "  X " + ansiBlue + "  $4.10/20.4M " + ansiReset + " | font=" + dataFont,
 		// Claude's no-usage day adds $0; Codex's unknown day makes its sum,
 		// and so the overall one, unknown (#298).
-		"3日計  C $15.51  X --  計 -- | font=" + dataFont + " color=" + ink() + " " + enableParams + "\n",
+		"3日計  C $15.51  X --  計 -- | font=" + dataFont + " color=" + (Renderer{}).ink() + " " + enableParams + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history row %q missing in:\n%s", want, out)
@@ -529,7 +529,7 @@ func TestRenderHistory(t *testing.T) {
 	// the total row has no overall sum.
 	cfg := config.Default()
 	cfg.Tools = []string{schema.ToolCodex}
-	only := Render(s, now, true, cfg, hist)
+	only := (Renderer{}).Render(s, now, true, cfg, hist)
 	if !strings.Contains(only, "07/04  X "+ansiBlue+"  $4.10/20.4M "+ansiReset+" | font=") || strings.Contains(only, "07/04  C") {
 		t.Errorf("codex-only history rows wrong:\n%s", only)
 	}
@@ -537,7 +537,7 @@ func TestRenderHistory(t *testing.T) {
 		t.Errorf("codex-only total row wrong:\n%s", only)
 	}
 
-	if none := Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") || strings.Contains(none, "日計") {
+	if none := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") || strings.Contains(none, "日計") {
 		t.Errorf("empty history should add no section:\n%s", none)
 	}
 }
@@ -555,7 +555,7 @@ func TestRenderHistoryTotal(t *testing.T) {
 		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
 		schema.ToolCodex:      {{}, {Tokens: 300_000, CostUSD: usd(0.25)}},
 	}}
-	if out := Render(s, now, true, config.Default(), known); !strings.Contains(out, "2日計  C $3.50  X $0.25  計 $3.75 | font=") {
+	if out := (Renderer{}).Render(s, now, true, config.Default(), known); !strings.Contains(out, "2日計  C $3.50  X $0.25  計 $3.75 | font=") {
 		t.Errorf("known total row missing in:\n%s", out)
 	}
 
@@ -563,7 +563,7 @@ func TestRenderHistoryTotal(t *testing.T) {
 		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
 		schema.ToolCodex:      {{Tokens: 5_000}, {Tokens: 300_000, CostUSD: usd(0.25)}},
 	}}
-	if out := Render(s, now, true, config.Default(), unpriced); !strings.Contains(out, "2日計  C $3.50  X --  計 -- | font=") {
+	if out := (Renderer{}).Render(s, now, true, config.Default(), unpriced); !strings.Contains(out, "2日計  C $3.50  X --  計 -- | font=") {
 		t.Errorf("unpriced total row missing in:\n%s", out)
 	}
 
@@ -572,7 +572,7 @@ func TestRenderHistoryTotal(t *testing.T) {
 		schema.ToolClaudeCode: {{}, {}},
 		schema.ToolCodex:      {{}, {}},
 	}}
-	if out := Render(s, now, true, config.Default(), zero); !strings.Contains(out, "2日計  C $0.00  X $0.00  計 $0.00 | font=") {
+	if out := (Renderer{}).Render(s, now, true, config.Default(), zero); !strings.Contains(out, "2日計  C $0.00  X $0.00  計 $0.00 | font=") {
 		t.Errorf("all-zero total row missing in:\n%s", out)
 	}
 
@@ -580,13 +580,13 @@ func TestRenderHistoryTotal(t *testing.T) {
 	claudeOnly := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{
 		schema.ToolClaudeCode: {{Tokens: 1_000_000, CostUSD: usd(1)}, {Tokens: 2_000_000, CostUSD: usd(2.5)}},
 	}}
-	if out := Render(s, now, true, config.Default(), claudeOnly); !strings.Contains(out, "2日計  C $3.50 | font=") || strings.Contains(out, "  計 ") {
+	if out := (Renderer{}).Render(s, now, true, config.Default(), claudeOnly); !strings.Contains(out, "2日計  C $3.50 | font=") || strings.Contains(out, "  計 ") {
 		t.Errorf("single-column total row wrong:\n%s", out)
 	}
 
 	// No shown tool has a column: the day rows stay, the total row doesn't.
 	noColumn := core.DailyHistory{Days: days, Tools: map[string][]*schema.Daily{}}
-	if out := Render(s, now, true, config.Default(), noColumn); !strings.Contains(out, "07/04 | font=") || strings.Contains(out, "日計") {
+	if out := (Renderer{}).Render(s, now, true, config.Default(), noColumn); !strings.Contains(out, "07/04 | font=") || strings.Contains(out, "日計") {
 		t.Errorf("total row should be absent without columns:\n%s", out)
 	}
 }
@@ -613,5 +613,27 @@ func TestTopCostDays(t *testing.T) {
 	}
 	if got := topCostDays(nil, 3); len(got) != 0 {
 		t.Errorf("topCostDays(nil) = %v, want empty", got)
+	}
+}
+
+func TestRendererMenuDarkInk(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	light := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{})
+	if !strings.Contains(light, "Claude — Fable 5 | color="+inkLight) {
+		t.Errorf("light menu should use the light ink:\n%s", light)
+	}
+	dark := (Renderer{MenuDark: true}).Render(s, now, true, config.Default(), core.DailyHistory{})
+	if !strings.Contains(dark, "Claude — Fable 5 | color="+inkDark) {
+		t.Errorf("dark menu should use the dark ink:\n%s", dark)
+	}
+}
+
+func TestRendererBinPathClickTarget(t *testing.T) {
+	now := time.Now()
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41)}}
+	out := (Renderer{BinPath: "/opt/tacho/bin/tacho"}).Render(s, now, true, config.Default(), core.DailyHistory{})
+	if !strings.Contains(out, `| bash="/opt/tacho/bin/tacho" terminal=false refresh=true param1="config"`) {
+		t.Errorf("settings should click the renderer's BinPath:\n%s", out)
 	}
 }
