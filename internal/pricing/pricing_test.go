@@ -252,3 +252,20 @@ func TestCost(t *testing.T) {
 		t.Errorf("Cost = %v, want 90", got)
 	}
 }
+
+func TestCostByTTL(t *testing.T) {
+	r := Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}
+	// 5m writes at cache_write, 1h writes at 2x input, reads at cache_read:
+	// (100*10 + 200*12.5 + 300*20 + 1000*1 + 10*50) / 1e6
+	if got, want := r.CostByTTL(100, 200, 300, 0, 1000, 10), 0.011; got != want {
+		t.Errorf("CostByTTL(5m+1h) = %v, want %v", got, want)
+	}
+	// Writes of unknown TTL are priced like 5-minute ones.
+	if got, want := r.CostByTTL(0, 0, 0, 100, 0, 0), r.CostByTTL(0, 100, 0, 0, 0, 0); got != want {
+		t.Errorf("CostByTTL(unknown TTL) = %v, want the 5m price %v", got, want)
+	}
+	// Cost is the no-TTL-split case of the same formula.
+	if got, want := r.Cost(100, 200, 1000, 10), r.CostByTTL(100, 200, 0, 0, 1000, 10); got != want {
+		t.Errorf("Cost = %v, want CostByTTL without 1h/unknown writes %v", got, want)
+	}
+}

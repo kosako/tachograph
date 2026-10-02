@@ -415,17 +415,9 @@ func claudeLineTotals(line claude.TranscriptLine, prices pricing.Table) Totals {
 		Tokens:      in + u.OutputTokens,
 	}
 	if r, ok := prices.For(line.Message.Model); ok {
-		t.Cost = claudeAPICost(r, u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
+		t.Cost = r.CostByTTL(u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 	}
 	return t
-}
-
-func claudeAPICost(r pricing.Rate, in, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, cacheRead, out int64) float64 {
-	return (float64(in)*r.In +
-		float64(cacheWrite5m+cacheWriteUnknown)*r.CacheWrite +
-		float64(cacheWrite1h)*r.In*2 +
-		float64(cacheRead)*r.CacheRead +
-		float64(out)*r.Out) / 1_000_000
 }
 
 // CodexTotals sums today's tokens and estimated cost across Codex sessions:
