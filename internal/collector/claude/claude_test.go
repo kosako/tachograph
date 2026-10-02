@@ -16,11 +16,11 @@ func pctOf(v float64) *float64 { return &v }
 
 // toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
 func TestToLimitNullResetsAt(t *testing.T) {
-	l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 0})
+	l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 0}, "2026-06-13T10:00:00+09:00")
 	if l.ResetsAt != nil {
 		t.Errorf("ResetsAt = %v, want nil for zero epoch", *l.ResetsAt)
 	}
-	l = toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 1779646858})
+	l = toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 1779646858}, "2026-06-13T10:00:00+09:00")
 	if l.ResetsAt == nil {
 		t.Error("ResetsAt = nil, want set for a real epoch")
 	}
@@ -29,10 +29,10 @@ func TestToLimitNullResetsAt(t *testing.T) {
 // A window without used_percentage reports an unknown use, not 0% (#322);
 // a real 0 is still 0.
 func TestToLimitMissingUsedPercentage(t *testing.T) {
-	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{ResetsAt: 1779646858}); l.UsedPct != nil {
+	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{ResetsAt: 1779646858}, "2026-06-13T10:00:00+09:00"); l.UsedPct != nil {
 		t.Errorf("UsedPct = %v, want nil without used_percentage", *l.UsedPct)
 	}
-	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(0)}); l.UsedPct == nil || *l.UsedPct != 0 {
+	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(0)}, "2026-06-13T10:00:00+09:00"); l.UsedPct == nil || *l.UsedPct != 0 {
 		t.Errorf("UsedPct = %v, want 0 for an explicit 0", l.UsedPct)
 	}
 }
@@ -449,5 +449,21 @@ func TestUsageKey(t *testing.T) {
 	}
 	if seen.Dup(keyed) || !seen.Dup(keyed) {
 		t.Error("Dup() should be false on first sight of a keyed line and true after")
+	}
+}
+
+// The statusline payload is the observation: each window's observed_at is
+// the tool's collected_at (#295).
+func TestFromStatuslineLimitsObservedAt(t *testing.T) {
+	input := []byte(`{"model":{"id":"claude-x"},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":1779646858},"seven_day":{"used_percentage":3,"resets_at":1779646858}}}`)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	got := Collect(Options{Root: t.TempDir(), Now: now, StatuslineInput: input, Getenv: noEnv})
+	if got.Error != nil || len(got.Limits) != 2 || got.CollectedAt == nil {
+		t.Fatalf("Error = %+v, Limits = %+v", got.Error, got.Limits)
+	}
+	for _, l := range got.Limits {
+		if l.ObservedAt == nil || *l.ObservedAt != *got.CollectedAt {
+			t.Errorf("%s ObservedAt = %v, want collected_at %s", l.Window, l.ObservedAt, *got.CollectedAt)
+		}
 	}
 }

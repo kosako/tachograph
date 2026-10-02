@@ -61,6 +61,10 @@ func TestCollect(t *testing.T) {
 		t.Fatalf("Limits = %+v, want 2 entries", got.Limits)
 	}
 	five, weekly := got.Limits[0], got.Limits[1]
+	wantObserved := time.Date(2026, 5, 24, 13, 40, 28, 570_000_000, time.UTC).Local().Format(time.RFC3339)
+	if five.ObservedAt == nil || *five.ObservedAt != wantObserved || weekly.ObservedAt == nil || *weekly.ObservedAt != wantObserved {
+		t.Errorf("ObservedAt = %v / %v, want the limits' token_count time %s (#295)", five.ObservedAt, weekly.ObservedAt, wantObserved)
+	}
 	if five.Window != schema.WindowFiveHour || *five.UsedPct != 5.0 || *five.WindowMinutes != 300 {
 		t.Errorf("5h limit = %+v", five)
 	}

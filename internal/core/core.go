@@ -66,6 +66,8 @@ func assemble(opts Options) schema.Status {
 	codexDaily, codexDailyErr := daily.CodexTotals(opts.CodexRoot, opts.Now, prices)
 	addDaily(&codexT, codexDaily, codexDailyErr)
 	AddSessionTree(&claudeT, opts.Now, prices)
+	AddProjections(&claudeT, opts.Now)
+	AddProjections(&codexT, opts.Now)
 	return schema.Status{
 		SchemaVersion: schema.Version,
 		GeneratedAt:   opts.Now.Local().Format(time.RFC3339),

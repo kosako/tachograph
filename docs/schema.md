@@ -1,4 +1,4 @@
-# 統一JSONスキーマ v3.0
+# 統一JSONスキーマ v3.1
 
 `tacho status --json` が出力する、コレクタ層とレンダラ層の境界となるスキーマ。
 本ファイルが仕様の正本。Goの型定義は `internal/schema/schema.go`。
@@ -16,7 +16,7 @@
 
 ```jsonc
 {
-  "schema_version": "3.0",
+  "schema_version": "3.1",
   "generated_at": "2026-06-12T21:00:00+09:00",  // この JSON を生成した時刻(stale もこの時刻で判定)。--no-cache なしでは最大 30 秒前のキャッシュを返すことがある
   "tools": [ /* ツールごとのエントリ。検出されないツールも available:false で常に載る */ ]
 }
@@ -60,7 +60,16 @@
       "window_minutes": 300,
       "used_pct": 5.0,                // 使用率(残量ではない)
       "resets_at": "2026-06-13T02:00:58+09:00",  // 不明なら null
-      "saved_resets": null            // Codex「保存式リセット」用に予約。現状は常に null
+      "saved_resets": null,           // Codex「保存式リセット」用に予約。現状は常に null
+      "observed_at": "2026-06-12T22:00:58+09:00",  // この枠の used_pct / resets_at を観測した時刻。不明なら null
+      "projection": {                 // 最新の観測 1 点からの窓平均の外挿(履歴は持たない、#295)。キーは固定
+        "method": "window_average",
+        "elapsed_pct_at_observation": 20.0,  // 観測時点の窓の経過割合(%)
+        "pace_pct_per_hour": 5.0,     // 窓平均のペース(パーセントポイント / 時間)
+        "used_pct_at_reset": 25.0,    // reset 時点の予測使用率。上限で丸めない(100 超は超過見込み)
+        "headroom_pct_at_reset": 75.0, // 100 − used_pct_at_reset(負なら超過見込み)
+        "unavailable_reason": null    // 算出できなければ理由(下記)。算出できたときは null
+      }
     }
   ],
   "credits": null,                    // クレジット残高。概念がない/無制限/不明なら null
@@ -94,6 +103,8 @@
 | `stale` | `collected_at` が古いとき true。閾値はツール別: Claude(transcript経路・snapshot経路とも)=60分(`StaleAfterMinutes`)、Codex=5時間(ライブ入力が無くリミット枠が数時間有効なため)。レンダラは灰色表示などに使う。statusline 以外の経路の Claude では、`session` / `fallback` / `session_today` は「直近に観測したセッション」の値で、stale になると null(不明)に落ちる(snapshot 経路・transcript 経路とも、#235)。snapshot が stale のときは transcript 経路と比べ、transcript の方が新しければその `session` / `model` / `collected_at` を使い、snapshot の `limits` のうちリセット時刻を過ぎていない枠を持ち越す(どちらもサブスクリプションのときだけ、#263)。rate_limits を持たない statusline の payload が snapshot の枠を引き継ぐときも同じ条件で、リセット時刻が未来の枠だけを引き継ぐ(#318)。snapshot と 30 秒の TTL cache は観測した取得元(`CLAUDE_CONFIG_DIR` / `CODEX_HOME`、既定は `~/.claude` / `~/.codex`。絶対パスに解決して記録)に紐づき、別の取得元に対する実行では使わない(#321)。snapshot の `limits` / `model` / `plan` / `credits` は最大 30 日保持 |
 | `backend` | 必須。リミット概念の有無の判定に使う(`bedrock`/`vertex`/`api` → `limits: null`) |
 | `session.transcript_path` | 例外的に nil 時はキーごと省略(`omitempty`)。「キー集合は常に一定」原則の唯一の例外 |
+| `observed_at` | その枠の `used_pct` / `resets_at` を観測した時刻。statusline の live 値なら `collected_at` と同じ。snapshot から持ち越した枠(`stale` の項)は元の観測時刻のままで、tool の `collected_at` より古いことがある。Codex は limits を含む `token_count` の timestamp(usage の `collected_at` より新しいことがある) |
+| `projection` | 最新の観測 1 点からの窓平均の外挿(#295)。D = `window_minutes`、R = `resets_at`、O = `observed_at`、U = `used_pct`、E = O − (R − D)(分)として、`elapsed_pct_at_observation` = 100 × E / D、`pace_pct_per_hour` = 60 × U / E、`used_pct_at_reset` = U × D / E(上限で丸めない)、`headroom_pct_at_reset` = 100 − `used_pct_at_reset`(負は超過見込み)。**前提**: 窓は R − D に始まり、その時点の使用率は 0(保存式リセット等でこの前提が崩れる枠は `unsupported_window`)。**参考値**: 「これまでの平均が続いた場合」の外挿で、精度は未検証。開始できる量の保証ではなく、別マシンの消費は次の観測まで反映されない。履歴の蓄積や曜日の学習はしない(設計原則 1 のまま)。0 は有効な結果、null は算出不能。算出不能のとき `pace_pct_per_hour` / `used_pct_at_reset` / `headroom_pct_at_reset` は揃って null で、`unavailable_reason` に最初に当たった理由: `missing_input`(U / R / D / O のどれかが無い)、`invalid_window`(D ≤ 0、E ≤ 0、または E > D)、`unsupported_window`(`saved_resets` が非 null)、`reset_passed`(R が `generated_at` 以前)、`stale`(O が tool の stale 閾値 — Claude 60 分 / Codex 5 時間 — より古い)。`elapsed_pct_at_observation` は窓自体が妥当なら残す。窓の経過が浅いときの閾値は持たない(値と経過割合を返し、採用条件は利用側)。`method` は常に `window_average` |
 | `limits` | nullable。`window_minutes` の昇順(Claude は 5h → weekly。Codex は `rate_limits.primary` / `secondary` をサーバーの割り当て順ではなく長さで並べる、#268)。枠は配列の位置ではなく `window` / `window_minutes` で引く |
 | `used_pct` | 「使った割合」(%)。ツールが報告した値をそのまま入れる(通常は 0–100 だが範囲外の補正はせず、0–100 に丸めるのは表示のときだけ)。ツールが値を報告しない枠(キー欠落 / null)は null のまま(0 とはみなさない、#322)。JSON はこの意味のまま。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト)。値自体は `limits` の有無に関わらず取れる限り入る(`session_tokens` は `session.tokens.total` と同じ値) |
@@ -110,6 +121,8 @@
 | `session.context_window` | statusline `context_window.context_window_size`(transcripts経路では null) | `token_count.payload.info.model_context_window` |
 | `session.context_used_pct` | statusline `context_window.used_percentage`(transcripts経路では null) | `last_token_usage.total_tokens` ÷ `model_context_window` × 100(直近リクエストの総量による近似) |
 | `limits` | statusline `rate_limits.five_hour/seven_day`(transcript 自体からは取れない。snapshot が stale で transcript の方が新しいときは、条件を満たす snapshot の枠を持ち越す — `stale` の項を参照) | `token_count.payload.rate_limits.primary/secondary`。`rate_limits.limit_id` が `codex`(または無し)の token_count だけから取る(`premium` やモデル別の枠の token_count はアカウントの枠ではない)。`plan` / `credits` / `backend` も同じ token_count から |
+| `observed_at` | statusline の `collected_at`(snapshot から持ち越した枠は元の観測時刻) | limits を含む `token_count` の timestamp |
+| `projection` | 上の `limits` / `observed_at` から計算(両ツール共通。`projection` の項) | 同左 |
 | `plan` | —(null、statusline JSONに含まれない) | `rate_limits.plan_type` |
 | `backend` | 環境変数から判定: `CLAUDE_CODE_USE_BEDROCK` → `bedrock`、`CLAUDE_CODE_USE_VERTEX` → `vertex`、`ANTHROPIC_API_KEY` → `api`、いずれも無ければ `subscription`(上から優先。statusline 経路では `api` と判定してもレートリミット枠があれば `subscription`。transcripts経路では tacho を実行したプロセスの環境変数を見る) | `rate_limits.plan_type` があれば `subscription`、無ければ `unknown` |
 | `credits` | —(null) | `rate_limits.credits.balance`(文字列を数値にする。`has_credits` が true で `unlimited` が false のときだけ。それ以外は null。旧形式の数値の `credits` もそのまま読む、#267) |
@@ -136,6 +149,7 @@ transcript も集計する。ログディレクトリの走査自体に失敗し
 
 基準は初版 commit の v0.1(`credits` は初版から存在)。
 
+- `3.1`: 追加(後方互換): `limits[].observed_at`、`limits[].projection`(窓平均のペースと reset 時点の予測、#295)
 - `3.0`: Claude の `session.tokens` / `fallback.session_tokens` の意味変更(現セッションの transcript 本体 1 ファイル → 同名ディレクトリ配下の subagents / workflows transcript を含むツリー全体。`session_today` / `daily`、Claude Code が渡す cost と集計範囲をそろえ、「当日分 > 累計」が起きないようにした、#262)
 - `2.0`: `daily.tokens` / `session_today.tokens` の意味変更(cache read を除いた「新規トークン」→ cache read を含む課金対象トークン、#234)。追加(後方互換): `daily.input` / `daily.cached_input` / `daily.output`(`session_today` も同じ)。意味変更: statusline 以外の経路で Claude が stale な snapshot から出るとき、`session` / `fallback` / `session_today` を null にする(従来は直近に観測した値のまま、#235)
 - `1.0`: v0.1 のまま出荷されてきた追加と意味変更を版に反映

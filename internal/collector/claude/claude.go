@@ -191,20 +191,23 @@ func fromStatusline(opts Options) schema.Tool {
 	if rl := in.RateLimits; rl != nil && t.Backend == schema.BackendSubscription {
 		var limits []schema.Limit
 		if rl.FiveHour != nil {
-			limits = append(limits, toLimit(schema.WindowFiveHour, 300, rl.FiveHour))
+			limits = append(limits, toLimit(schema.WindowFiveHour, 300, rl.FiveHour, collected))
 		}
 		if rl.SevenDay != nil {
-			limits = append(limits, toLimit(schema.WindowWeekly, 10080, rl.SevenDay))
+			limits = append(limits, toLimit(schema.WindowWeekly, 10080, rl.SevenDay, collected))
 		}
 		t.Limits = limits
 	}
 	return t
 }
 
-func toLimit(window string, mins int, w *slWindow) schema.Limit {
+// toLimit builds a window observed live at observed (RFC 3339): the payload
+// is the observation, so the window's observed_at is the tool's collected_at.
+func toLimit(window string, mins int, w *slWindow, observed string) schema.Limit {
 	l := schema.Limit{
 		Window:        window,
 		WindowMinutes: &mins,
+		ObservedAt:    &observed,
 	}
 	// A window without used_percentage is one whose use is unknown; it stays
 	// null rather than reading as 0% used / 100% left (#322).
