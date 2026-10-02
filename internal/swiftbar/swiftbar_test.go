@@ -273,10 +273,54 @@ func TestRenderSettingsMenu(t *testing.T) {
 		"----☑ Claude | bash=",
 		"----☐ Codex | bash=",
 		"param2=\"toggle-tool\" param3=\"codex\"",
+		// sections: limits shown by default; the click hides them (#301)
+		"--表示する項目\n",
+		"----☑ リミット(5h / weekly) | bash=",
+		"param3=\"menubar.limits\" param4=\"hide\"",
 		"refresh=true",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("settings menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// menubar.limits=hide leaves the 5h / weekly rows, the limit display and the
+// limit metrics out of the dropdown, and a menu bar set to a limit window
+// shows cost instead (#301).
+func TestRenderLimitsHidden(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now := time.Now()
+	c := tool(schema.ToolClaudeCode, false, 24, 41)
+	c.Daily = &schema.Daily{Tokens: 1_000_000, CostUSD: usd(1.5)}
+	s := schema.Status{Tools: []schema.Tool{c}}
+	cfg := config.Default()
+	cfg.Menubar.Limits = config.VisibilityHide
+	out := Render(s, now, true, cfg, core.DailyHistory{})
+
+	if title := strings.SplitN(out, "\n", 2)[0]; title != "C $1.50/d" {
+		t.Errorf("title = %q, want the cost in place of the hidden 5h limit", title)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("%-*s ", labelW, "context"),
+		"--表示する項目\n",
+		"----☐ リミット(5h / weekly) | bash=",
+		"param3=\"menubar.limits\" param4=\"show\"",
+		"----✓ cost | bash=", // the check follows what the menu bar shows
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hidden-limits output missing %q:\n%s", want, out)
+		}
+	}
+	for _, absent := range []string{
+		fmt.Sprintf("%-*s ", labelW, "5h"),
+		fmt.Sprintf("%-*s ", labelW, "weekly"),
+		"--リミット表示\n",
+		"param3=\"menubar.metric\" param4=\"limit_5h\"",
+		"param3=\"menubar.metric\" param4=\"limit_weekly\"",
+	} {
+		if strings.Contains(out, absent) {
+			t.Errorf("hidden-limits output still has %q:\n%s", absent, out)
 		}
 	}
 }

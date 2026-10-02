@@ -221,6 +221,8 @@ keys:
   tools           comma-separated: claude-code,codex  (which tools to show)
   menubar.style   meter | number
   menubar.metric  ` + "limit_5h | limit_weekly | cost | tokens" + `
+  menubar.limits  show | hide  (SwiftBar: the 5h / weekly rows and controls; hide
+                  them for Bedrock / Vertex / API-key backends without windows)
   limits.display  remaining | used  (what 5h / weekly percentages show)
   notify.thresholds  comma-separated "% left" values, e.g. 50,30,10 (SwiftBar
                   notifies when a 5h / weekly window drops to one; empty = off)
@@ -370,6 +372,12 @@ func configSet(key, val string) int {
 			return 2
 		}
 		c.Menubar.Metric = val
+	case "menubar.limits":
+		if !config.ValidVisibility(val) {
+			fmt.Fprintf(os.Stderr, "tacho: invalid menubar.limits %q (want show or hide)\n", val)
+			return 2
+		}
+		c.Menubar.Limits = val
 	case "limits.display":
 		if !render.ValidLimitDisplay(val) {
 			fmt.Fprintf(os.Stderr, "tacho: invalid limits display %q (want remaining or used)\n", val)

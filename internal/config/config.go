@@ -29,6 +29,17 @@ const DefaultMetric = "limit_5h"
 // configured (render.LimitRemaining, the headroom display since #223).
 const DefaultLimitDisplay = "remaining"
 
+// Visibility values for the SwiftBar dropdown's optional sections (#301).
+const (
+	VisibilityShow = "show"
+	VisibilityHide = "hide"
+)
+
+// ValidVisibility reports whether v is a section visibility.
+func ValidVisibility(v string) bool {
+	return v == VisibilityShow || v == VisibilityHide
+}
+
 // Config is the persisted preference set.
 type Config struct {
 	Tools   []string `json:"tools"` // which tools to show, in order
@@ -46,9 +57,10 @@ type Config struct {
 // choices, with what tacho does instead (#230). Load keeps such values as
 // written so the read path always renders something — an unknown style is
 // drawn as meter, an unknown metric as "--", an unknown limits display as
-// remaining, an unknown tool is ignored, an out-of-range threshold is
-// dropped — and this is how `tacho doctor` / `tacho config show` surface
-// the typo. The checks are the ones `tacho config set` rejects up front.
+// remaining, an unknown menubar.limits keeps the limits shown, an unknown
+// tool is ignored, an out-of-range threshold is dropped — and this is how
+// `tacho doctor` / `tacho config show` surface the typo. The checks are the
+// ones `tacho config set` rejects up front.
 func (c Config) Warnings() []string {
 	return c.warnings
 }
@@ -79,6 +91,9 @@ func valueWarnings(c Config, thresholds []int) []string {
 	if !render.ValidMenubarMetric(c.Menubar.Metric) {
 		w = append(w, fmt.Sprintf("menubar.metric: %q is not one of %s — shown as --", c.Menubar.Metric, strings.Join(render.MenubarMetrics, ", ")))
 	}
+	if !ValidVisibility(c.Menubar.Limits) {
+		w = append(w, fmt.Sprintf("menubar.limits: %q is not show or hide — limits shown", c.Menubar.Limits))
+	}
 	if !render.ValidLimitDisplay(c.Limits.Display) {
 		w = append(w, fmt.Sprintf("limits.display: %q is not remaining or used — shown as remaining", c.Limits.Display))
 	}
@@ -93,6 +108,16 @@ func valueWarnings(c Config, thresholds []int) []string {
 type Menubar struct {
 	Style  string `json:"style"`  // StyleMeter | StyleNumber
 	Metric string `json:"metric"` // see render.MenubarMetrics
+	Limits string `json:"limits"` // VisibilityShow | VisibilityHide: the 5h / weekly rows and controls (#301)
+}
+
+// LimitsHidden reports whether the SwiftBar dropdown leaves out the 5h /
+// weekly rows and their controls (menubar.limits = hide). Only an explicit
+// hide hides them: the setting exists for backends without subscription
+// windows (Bedrock / Vertex / API key), where the rows would only read "--",
+// and on every other value the limits stay visible as before.
+func (c Config) LimitsHidden() bool {
+	return c.Menubar.Limits == VisibilityHide
 }
 
 type Limits struct {
@@ -134,7 +159,7 @@ func NormalizeThresholds(in []int) []int {
 func Default() Config {
 	return Config{
 		Tools:   []string{schema.ToolClaudeCode, schema.ToolCodex},
-		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric},
+		Menubar: Menubar{Style: StyleMeter, Metric: DefaultMetric, Limits: VisibilityShow},
 		Limits:  Limits{Display: DefaultLimitDisplay},
 		Notify:  Notify{Thresholds: []int{}},
 	}
@@ -229,6 +254,9 @@ func parse(b []byte) (Config, error) {
 	}
 	if c.Menubar.Metric == "" {
 		c.Menubar.Metric = DefaultMetric
+	}
+	if c.Menubar.Limits == "" {
+		c.Menubar.Limits = VisibilityShow
 	}
 	if c.Limits.Display == "" {
 		c.Limits.Display = DefaultLimitDisplay
