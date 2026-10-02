@@ -40,8 +40,8 @@
     types (keep `docs/schema.md`, the authoritative spec, in sync).
   - `internal/config` owns `config.json`; `internal/cache` is the short-lived
     file cache.
-  - `internal/render`, `internal/swiftbar`, `internal/menubar` (the menu bar
-    gauge image), and `internal/cmuxbar` render views. The preset catalog in
+  - `internal/render`, `internal/swiftbar`, and `internal/menubar` (the menu
+    bar gauge image) render views. The preset catalog in
     `internal/render/presets.go` is mirrored by hand in the preset tables of
     both READMEs (name, description, sample output) and in
     `contrib/statusline.tmpl.example` (full templates); update them together.

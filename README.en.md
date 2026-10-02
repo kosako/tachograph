@@ -119,7 +119,6 @@ tacho watch -n 5       # refresh continuously
 tacho status --json    # unified schema JSON (see docs/schema.md)
 tacho daily -days 30   # per-day estimated cost / tokens (default 30 days, recomputed from the logs)
 tacho statusline       # Claude Code statusLine adapter (reads stdin JSON)
-tacho cmux push|clear  # manage cmux sidebar pills manually (deprecated)
 tacho setup claude     # print/install the Claude Code statusLine config (--write)
 tacho setup swiftbar   # print/install the SwiftBar plugin (--write)
 tacho doctor           # diagnose install path, data sources, cache, integrations (and unknown config values)
@@ -177,7 +176,7 @@ set it — `--write` targets the same file):
 ```
 
 If something isn't working, `tacho doctor` reports the real binary path, PATH
-status, config files, data-source freshness, cache state, cmux/SwiftBar
+status, config files, data-source freshness, cache state, SwiftBar
 integration, each tool's current collection state (ok / stale / an error with
 a hint), and whether the statusLine is configured.
 
@@ -260,34 +259,6 @@ switches them to **usage** (the gauges then fill as you use them; colors are
 unchanged; `remaining` switches back to the default). `ctx` stays a usage
 figure. Disable colors with `--no-color` or `NO_COLOR`.
 
-### cmux sidebar
-
-> **Deprecated**: the cmux sidebar integration (the status line's automatic
-> mirror and `tacho cmux push` / `clear`) is deprecated as of v0.6.3 and will
-> be removed in a future minor release
-> ([#273](https://github.com/kosako/tachograph/issues/273)). The other
-> surfaces are unaffected.
-
-Inside a [cmux](https://cmux.com) terminal, `tacho statusline` automatically
-mirrors the status to the workspace sidebar as colored pills —
-`claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` (5h / wk are headroom by
-default, following `limits.display`; ctx is usage; without rate-limit windows
-the pill shows session tokens instead, e.g. `claude ctx24% 989ktok`, and a
-stale pill shows its age right after the tool name, e.g. `claude ⚠1h …`),
-colored green/yellow/red by the highest usage among the reported windows
-(5h / wk) and gray when stale — with no extra setup beyond the status line.
-It detects cmux via
-`CMUX_WORKSPACE_ID` and talks through the cmux CLI (`TACHO_CMUX_BIN`, else
-`cmux` on PATH, else the one bundled with cmux.app), fire-and-forget, so the
-status line latency is unaffected.
-
-Manual control:
-
-```sh
-tacho cmux push    # push pills once (run it inside a cmux terminal; by default it can't reach cmux from cron or other outside processes)
-tacho cmux clear   # remove tacho's pills
-```
-
 ### macOS menu bar (SwiftBar)
 
 For an always-visible gauge regardless of which agent is running, a
@@ -364,7 +335,7 @@ choice is check-marked):
 - **Display**: meter (gauge) or number (cost / tokens have no gauge, so they show as a number even with meter)
 - **Metric**: 5h limit / weekly limit / cost / tokens (radio; context is excluded — it churns per session and isn't a useful at-a-glance menu-bar figure). cost / tokens show today's total (marked `/d`) and fall back to the current session's value (no `/d`) when the daily total is unknown
 - **Limit display**: remaining / used (what the 5h / weekly percentages, gauges, and ring show; the same setting drives the status line and `tacho`; colors still follow usage)
-- **Tools**: Claude / Codex (checkboxes). Besides the menu bar, dropdown, and notifications, this also filters `tacho`, `tacho watch`, `tacho daily`, and the cmux pills (listed in `tools` order). The status line is not filtered: it shows whichever tools its template names (the default template includes Codex), and `tacho status --json` always lists both tools
+- **Tools**: Claude / Codex (checkboxes). Besides the menu bar, dropdown, and notifications, this also filters `tacho`, `tacho watch`, and `tacho daily` (listed in `tools` order). The status line is not filtered: it shows whichever tools its template names (the default template includes Codex), and `tacho status --json` always lists both tools
 - **Sections**: limits (5h / weekly) / last 7 days (checkboxes). With limits unchecked, the dropdown drops each tool's 5h / weekly rows, the limit display submenu, and the 5h / weekly metrics; a menu bar still set to a limit window shows cost instead (the stored choice is kept and comes back when you check it again). Meant for backends without subscription windows — Bedrock / Vertex / an API key. The status line, `tacho`, `tacho status --json`, and the headroom notifications are unaffected. With the last 7 days unchecked, that section is gone and the history is neither computed nor read from / written to `daily-history.json` (`tacho daily` is unaffected)
 
 These submenu labels are shown in Japanese: Display = 表示形式 (meter / number =

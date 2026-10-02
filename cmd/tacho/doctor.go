@@ -14,7 +14,6 @@ import (
 
 	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
-	"github.com/kosako/tachograph/internal/cmuxbar"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/pricing"
@@ -202,17 +201,6 @@ func reportCacheFile(label, path string, maxAge, staleAfter time.Duration, now t
 
 func reportIntegrations() {
 	fmt.Println("integrations:")
-	fmt.Println("  cmux:       deprecated — " + cmuxDeprecation)
-	if cli := cmuxbar.FindCLI(); cli != "" {
-		fmt.Println("  cmux CLI:   " + cli)
-	} else {
-		fmt.Println("  cmux CLI:   not found — install cmux or set TACHO_CMUX_BIN")
-	}
-	if cmuxbar.Detect() {
-		fmt.Println("  cmux env:   inside a cmux workspace")
-	} else {
-		fmt.Println("  cmux env:   not inside cmux")
-	}
 	reportSwiftBarPlugin()
 }
 

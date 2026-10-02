@@ -90,7 +90,6 @@ tacho watch -n 5       # 定期再描画
 tacho status --json    # 統一スキーマJSON(docs/schema.md 参照)
 tacho daily -days 30   # 日ごとの推定コスト / トークン(既定 30 日、ログから再計算)
 tacho statusline       # Claude Code statusLineアダプタ(stdinのJSONを読む)
-tacho cmux push|clear  # cmuxサイドバーのピルを手動操作(非推奨)
 tacho setup claude     # Claude Code statusLine設定を出力/書き込み(--write)
 tacho setup swiftbar   # SwiftBarプラグインを出力/設置(--write)
 tacho doctor           # インストール先・データソース・キャッシュ・連携の診断(config.json の未知の値も警告)
@@ -127,7 +126,7 @@ PATH 上の `tacho` が実行中のバイナリ自身であれば `tacho statusl
 }
 ```
 
-うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・cmux/SwiftBar連携・各ツールの現在の取得状態(ok / stale / エラー時の対処ヒント)・statusLineの設定状況を診断します。
+うまく動かないときは `tacho doctor` がバイナリの実パス・PATH疎通・各設定ファイル・データソースの鮮度・キャッシュ・SwiftBar連携・各ツールの現在の取得状態(ok / stale / エラー時の対処ヒント)・statusLineの設定状況を診断します。
 
 Claude CodeはセッションJSON(モデル・コンテキスト・レートリミット)を `tacho statusline` にパイプし、tachoはそれにCodexの残量を合成して1行表示します。副作用として呼び出しのたびにClaudeのリミット情報がスナップショット保存されるため、別ターミナルの `tacho` / `tacho watch` でも直近のリミットが表示できます(last-known値として最大30日保持され、60分を超えると stale 表示になります。ctx / セッションのトークン・コストは「直近に観測したセッション」の値なので、stale になると `--` になります。statusLine を通らない Claude(IDE・デスクトップ版・`claude -p` など)で作業中は、transcript の方が新しければそちらのモデルとセッションを表示し、リミットはまだリセットされていない枠だけを引き継ぎます)。
 
@@ -185,19 +184,6 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 
 欠損値は `--` で表示されます。5h / 週次のパーセントとゲージは既定で**残量**(残り割合)を表示し、色分けは使用率基準(使用 <50% 緑 / ≥50% 黄 / ≥80% 赤)です。`tacho config set limits.display used` で**使用率**表示に切り替えられます(ゲージは使うほど増え、色分けはそのまま。`remaining` で既定の残量表示に戻ります)。`ctx` はコンテキストの使用率のままです。`--no-color` または `NO_COLOR` で無効化できます。
 
-### cmux サイドバー
-
-> **非推奨**: cmux サイドバー連携(ステータスラインからの自動ミラーと `tacho cmux push` / `clear`)は v0.6.3 で非推奨になり、今後の minor リリースで削除する予定です([#273](https://github.com/kosako/tachograph/issues/273))。ほかの表示面は変わりません。
-
-[cmux](https://cmux.com) ターミナル内では、`tacho statusline` がワークスペースのサイドバーへ色付きピルを自動でミラーします — `claude ctx24% 5h76% wk59%` / `codex 5h96% wk89%` の形式(5h / wk は既定で残量、`limits.display` に従う。ctx は使用率。レートリミット枠が無いときは `claude ctx24% 989ktok` のようにセッショントークン数を出し、stale のときはツール名の直後に `⚠1h` のような経過時間が付く)で、報告されたリミット枠(5h / wk など)のうち最も高い使用率により緑/黄/赤、staleはグレー。ステータスライン以外の追加設定は不要です。`CMUX_WORKSPACE_ID` でcmuxを検出し、cmux CLI(`TACHO_CMUX_BIN` → PATH 上の `cmux` → cmux.app 同梱の順に探す)経由で投げっぱなし実行するため、ステータスラインのレイテンシには影響しません。
-
-手動操作:
-
-```sh
-tacho cmux push    # ピルを一回push(cmux のターミナル内で実行。cron など cmux の外からは既定では届かない)
-tacho cmux clear   # tachoのピルを削除
-```
-
 ### macOSメニューバー(SwiftBar)
 
 どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが既定では 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる。後述の「指標」で weekly 枠にも切り替え可)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(staleはグレー)。stale の印が出るのはリングだけで、数字や月齢テキストの表示では古い値がそのまま並ぶため、データの古さはドロップダウンの各ツールの見出し(`⚠` + 経過時間)で確認します。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、既定の残量表示では満月 = 全部残っている。使用率表示では満月 = 使い切り)にフォールバックできます。
@@ -222,7 +208,7 @@ tacho setup swiftbar --write   # プラグインフォルダに tacho.30s.sh を
 - **表示形式**: メーター(ゲージ)/ 数字(cost / tokens はゲージにできないため、メーターでも数字で表示)
 - **指標**: 5h limit / weekly limit / cost / tokens(ラジオ選択。contextはセッションごとに変動が大きくメニューバー向きでないため除外)。cost / tokens は当日合計(`/d` 付き)で、当日合計が不明なときは現セッション値(`/d` なし)に切り替わる
 - **リミット表示**: 残量 / 使用率(5h / weekly のパーセント・ゲージ・リングが示す値。ステータスラインや `tacho` にも同じ設定が効く。色分けは使用率基準のまま)
-- **表示するツール**: Claude / Codex(チェックボックス)。メニューバー・ドロップダウン・通知に加え、`tacho` / `tacho watch` / `tacho daily` / cmux のピルもこの設定で絞り込まれ、`tools` に書いた順に並ぶ。ステータスライン(テンプレートに書いたツールがそのまま出る。既定のテンプレートは Codex も含む)と `tacho status --json`(常に両ツール)には効かない
+- **表示するツール**: Claude / Codex(チェックボックス)。メニューバー・ドロップダウン・通知に加え、`tacho` / `tacho watch` / `tacho daily` もこの設定で絞り込まれ、`tools` に書いた順に並ぶ。ステータスライン(テンプレートに書いたツールがそのまま出る。既定のテンプレートは Codex も含む)と `tacho status --json`(常に両ツール)には効かない
 - **表示する項目**: リミット(5h / weekly)/ 直近 7 日(チェックボックス)。リミットを外すと、各ツールの 5h / weekly の行と「リミット表示」、指標の 5h / weekly をドロップダウンから消します。指標が 5h / weekly のままのときはメニューバーに cost を出します(設定値は書き換えないので、戻せば元の指標に戻ります)。Bedrock / Vertex / API キーのようにサブスクリプションの枠が無い環境向けです。ステータスライン・`tacho`・`tacho status --json`・残量通知には効きません。直近 7 日を外すと、その節が消え、履歴の集計も `daily-history.json` の読み書きもしません(`tacho daily` には効きません)
 
 CLI でも設定できます(設定は `~/.config/tachograph/config.json`。`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/tachograph/` の下になり、`statusline.tmpl` / `pricing.json` も同じ場所です。実際のパスは `tacho config path` で確認できます):

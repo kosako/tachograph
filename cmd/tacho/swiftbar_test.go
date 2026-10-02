@@ -20,7 +20,6 @@ func TestRunSwiftbarHistoryHiddenSkipsCache(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", cfgDir)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("CODEX_HOME", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 	t.Setenv("SWIFTBAR_PLUGIN_PATH", "") // not under SwiftBar: no notifications
 	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
 	histFile := filepath.Join(cacheDir, "daily-history.json")

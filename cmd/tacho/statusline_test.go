@@ -16,7 +16,6 @@ import (
 func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	dailyCost := 1.2
@@ -70,7 +69,6 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:05:00+09:00")
 
 	fixture := filepath.Join("..", "..", "internal", "collector", "claude", "testdata")
@@ -116,7 +114,6 @@ func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 	t.Setenv("HOME", t.TempDir())
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -142,7 +139,6 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -167,7 +163,6 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 func TestRunStatuslinePreservesSnapshotLimitsWhenLivePayloadOmitsThem(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -233,7 +228,6 @@ func writeClaudeSnapshotWithLimitObserved(t *testing.T, now time.Time, usedPct f
 func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -263,7 +257,6 @@ func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-29 * 24 * time.Hour)
@@ -294,7 +287,6 @@ func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 func TestRunStatuslineDropsPreservedLimitsPastMaxAge(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	t.Setenv("CMUX_WORKSPACE_ID", "")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-cache.SnapshotMaxAge - time.Hour)
