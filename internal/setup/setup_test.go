@@ -80,6 +80,16 @@ func TestMergeSettingsRejectsNonObject(t *testing.T) {
 	}
 }
 
+// A file holding just `null` decodes into a nil map rather than failing, so
+// it needs its own check: without one, setting the key panics (#319).
+func TestMergeSettingsRejectsNull(t *testing.T) {
+	for _, in := range []string{"null", " null\n"} {
+		if _, err := MergeSettings([]byte(in), "tacho statusline"); err == nil {
+			t.Errorf("MergeSettings(%q) error = nil, want a non-object error", in)
+		}
+	}
+}
+
 func TestSnippet(t *testing.T) {
 	s := Snippet("tacho statusline")
 	if !strings.Contains(s, `"statusLine"`) || !strings.Contains(s, `"tacho statusline"`) {
