@@ -42,8 +42,10 @@ func TestStatusServesFromCache(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now})
 
-	// Same call with unusable roots must still succeed via the cache.
-	cached := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: t.TempDir(), Now: now.Add(5 * time.Second)})
+	// The same roots within the TTL are served from the cache (the cache is
+	// keyed by the roots, #321 — another root's miss is covered in
+	// freshness_test.go).
+	cached := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now.Add(5 * time.Second)})
 	if cached.GeneratedAt != first.GeneratedAt {
 		t.Errorf("expected cache hit: %q vs %q", cached.GeneratedAt, first.GeneratedAt)
 	}
@@ -68,7 +70,7 @@ func TestStatusPrefersClaudeSnapshot(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := cache.WriteSnapshot(snap, now.Add(-time.Minute)); err != nil {
+	if err := cache.WriteSnapshot(snap, now.Add(-time.Minute), claudeRoot); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,7 +97,7 @@ func TestStatusDropsSnapshotLimitsPastObservationCeiling(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := cache.WriteSnapshot(snap, now.Add(-cache.SnapshotMaxAge-time.Hour)); err != nil {
+	if err := cache.WriteSnapshot(snap, now.Add(-cache.SnapshotMaxAge-time.Hour), claudeRoot); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,13 +137,15 @@ func TestStatusDropsSessionValuesFromStaleSnapshot(t *testing.T) {
 		}
 	}
 
+	// No transcript fresher than the snapshot (an empty Claude root): a
+	// fresher one would take over the session values instead (#263). The
+	// snapshot is written for that same root (#321).
+	emptyRoot := t.TempDir()
 	stale := schema.StaleAfterMinutes*time.Minute + time.Minute
-	if err := cache.WriteSnapshot(snapshotAt(stale), now.Add(-stale)); err != nil {
+	if err := cache.WriteSnapshot(snapshotAt(stale), now.Add(-stale), emptyRoot); err != nil {
 		t.Fatal(err)
 	}
-	// No transcript fresher than the snapshot (an empty Claude root): a
-	// fresher one would take over the session values instead (#263).
-	got := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	got := Status(Options{ClaudeRoot: emptyRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
 	if !got.Stale {
 		t.Fatalf("Stale = false, want true for a %v-old snapshot", stale)
 	}
@@ -152,7 +156,7 @@ func TestStatusDropsSessionValuesFromStaleSnapshot(t *testing.T) {
 		t.Errorf("stale snapshot lost account-level values: limits=%+v model=%+v", got.Limits, got.Model)
 	}
 
-	if err := cache.WriteSnapshot(snapshotAt(time.Minute), now.Add(-time.Minute)); err != nil {
+	if err := cache.WriteSnapshot(snapshotAt(time.Minute), now.Add(-time.Minute), claudeRoot); err != nil {
 		t.Fatal(err)
 	}
 	got = Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]

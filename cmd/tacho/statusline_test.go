@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
 func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	dailyCost := 1.2
@@ -32,7 +34,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 			schema.Unavailable(schema.ToolCodex),
 		},
 	}
-	if err := cache.WriteStatus(cached); err != nil {
+	if err := cache.WriteStatus(cached, core.Roots(core.Options{})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +56,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 		t.Fatalf("statusline output = %q, want %q", got, want)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
@@ -114,6 +116,7 @@ func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 	t.Setenv("HOME", t.TempDir())
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -130,7 +133,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok || len(snap.Limits) != 1 || snap.Limits[0].UsedPct == nil || *snap.Limits[0].UsedPct != 42 {
 		t.Fatalf("snapshot after empty stdin = %+v, %v", snap, ok)
 	}
@@ -139,6 +142,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -154,7 +158,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok || len(snap.Limits) != 1 || snap.Limits[0].UsedPct == nil || *snap.Limits[0].UsedPct != 42 {
 		t.Fatalf("snapshot after empty JSON = %+v, %v", snap, ok)
 	}
@@ -163,6 +167,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 func TestRunStatuslinePreservesSnapshotLimitsWhenLivePayloadOmitsThem(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -179,7 +184,7 @@ func TestRunStatuslinePreservesSnapshotLimitsWhenLivePayloadOmitsThem(t *testing
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
@@ -218,9 +223,20 @@ func writeClaudeSnapshotWithLimits(t *testing.T, now, observed time.Time, limits
 		CollectedAt: &collected,
 		Limits:      limits,
 	}
-	if err := cache.WriteSnapshot(tool, observed); err != nil {
+	root := core.Roots(core.Options{})[schema.ToolClaudeCode] // the root runStatuslineWithIO resolves (#321)
+	if err := cache.WriteSnapshot(tool, observed, root); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// isolateClaudeRoot points CLAUDE_CONFIG_DIR at an empty directory and
+// returns it: the snapshot records the root it was observed from (#321), so a
+// test's writes and reads must agree on one, and no real transcripts are read.
+func isolateClaudeRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	return dir
 }
 
 // window builds a limit; a zero resetsAt leaves the reset time unset.
@@ -239,6 +255,7 @@ func window(name string, minutes int, usedPct float64, resetsAt time.Time) schem
 func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
@@ -253,7 +270,7 @@ func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
 		t.Errorf("statusline output = %q, want -- (the window already reset)", got)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
@@ -267,6 +284,7 @@ func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
 func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-3 * time.Hour)
@@ -280,14 +298,14 @@ func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
 	if len(snap.Limits) != 1 || snap.Limits[0].Window != schema.WindowWeekly {
 		t.Fatalf("snapshot limits = %+v, want only the weekly window", snap.Limits)
 	}
-	if _, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now); !ok || !got.Equal(observed) {
+	if _, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root); !ok || !got.Equal(observed) {
 		t.Errorf("limits observation = %v, %v, want original %v", got, ok, observed)
 	}
 }
@@ -297,6 +315,7 @@ func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
 func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
@@ -308,7 +327,7 @@ func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
@@ -323,6 +342,7 @@ func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
 func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -334,7 +354,7 @@ func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
@@ -352,6 +372,7 @@ func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-29 * 24 * time.Hour)
@@ -363,11 +384,11 @@ func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok || len(snap.Limits) != 1 || snap.Limits[0].UsedPct == nil || *snap.Limits[0].UsedPct != 42 {
 		t.Fatalf("snapshot after preserve = %+v, %v", snap, ok)
 	}
-	_, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	_, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("rewritten snapshot lost its limits observation time")
 	}
@@ -382,6 +403,7 @@ func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 func TestRunStatuslineDropsPreservedLimitsPastMaxAge(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-cache.SnapshotMaxAge - time.Hour)
@@ -393,11 +415,32 @@ func TestRunStatuslineDropsPreservedLimitsPastMaxAge(t *testing.T) {
 		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
 
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now)
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok {
 		t.Fatal("snapshot was not written")
 	}
 	if snap.Limits != nil {
 		t.Fatalf("limits observed %v ago were still preserved: %+v", now.Sub(observed), snap.Limits)
+	}
+}
+
+// The written snapshot records the config root it was observed from, so a
+// tacho run against another root does not pick it up (#321).
+func TestRunStatuslineSnapshotRecordsRoot(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	root := isolateClaudeRoot(t)
+
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	input := `{"session_id":"session-1","model":{"id":"claude-test","display_name":"Claude Test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.model}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	if _, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root); !ok {
+		t.Fatal("snapshot not served to the root it was observed from")
+	}
+	if _, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, t.TempDir()); ok {
+		t.Error("snapshot served to a run against another config root")
 	}
 }

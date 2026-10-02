@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -20,7 +21,7 @@ func TestWatchStatusBypassesTTLCache(t *testing.T) {
 		SchemaVersion: schema.Version,
 		GeneratedAt:   "cached-status",
 		Tools:         []schema.Tool{{Tool: schema.ToolCodex, Available: true}},
-	}); err != nil {
+	}, core.Roots(core.Options{})); err != nil {
 		t.Fatal(err)
 	}
 

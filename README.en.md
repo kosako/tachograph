@@ -189,7 +189,10 @@ the session's tokens / cost describe the most recently observed session, so
 they turn into `--` once stale). While you use Claude outside the status line
 (IDE, desktop, `claude -p`), the snapshot is still shown until it goes stale;
 after that a fresher transcript supplies the model and session instead, and
-only the limit windows that haven't reset yet are carried over.
+only the limit windows that haven't reset yet are carried over. The
+snapshot (and the 30-second cache) is tied to the config directories
+(`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, `~/.claude` / `~/.codex` by default) it
+was observed from; a tacho run against other directories does not use it.
 
 ### Customizing the status line
 

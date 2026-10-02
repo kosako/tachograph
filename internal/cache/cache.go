@@ -24,6 +24,11 @@ const SnapshotMaxAge = 30 * 24 * time.Hour
 
 type snapshotFile struct {
 	SchemaVersion string `json:"schema_version"`
+	// Root is the agent's config root the snapshot was observed from
+	// (CLAUDE_CONFIG_DIR or its default). A reader working against another
+	// root — a second profile on the same machine — must not take this
+	// snapshot's session or limits for its own (#321).
+	Root string `json:"root,omitempty"`
 	// LimitsCollectedAt is when Limits were originally observed from a live
 	// statusline payload. Re-saves that merely carry limits forward keep the
 	// original time, so preserved limits age out from their real observation
@@ -45,8 +50,17 @@ func Dir() (string, error) {
 	return filepath.Join(base, "tachograph"), nil
 }
 
-// ReadStatus returns the cached status if its file is younger than ttl.
-func ReadStatus(ttl time.Duration, now time.Time) (*schema.Status, bool) {
+// statusFile is the TTL cache's on-disk form: the status document plus the
+// config roots (by tool) it was assembled from, so a run against other roots
+// — another profile on the same machine — doesn't take it for its own (#321).
+type statusFile struct {
+	Roots map[string]string `json:"roots,omitempty"`
+	schema.Status
+}
+
+// ReadStatus returns the cached status if its file is younger than ttl and
+// it was assembled from the same config roots.
+func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*schema.Status, bool) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, false
@@ -60,15 +74,20 @@ func ReadStatus(ttl time.Duration, now time.Time) (*schema.Status, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var s schema.Status
-	if json.Unmarshal(b, &s) != nil || s.SchemaVersion != schema.Version {
+	var f statusFile
+	if json.Unmarshal(b, &f) != nil || f.SchemaVersion != schema.Version || !sameRoots(f.Roots, roots) {
 		return nil, false
 	}
-	return &s, true
+	return &f.Status, true
 }
 
-func WriteStatus(s *schema.Status) error {
-	return writeJSON("status.json", s)
+// WriteStatus caches s as assembled from roots (by tool, see ReadStatus).
+func WriteStatus(s *schema.Status, roots map[string]string) error {
+	f := statusFile{Roots: map[string]string{}, Status: *s}
+	for tool, root := range roots {
+		f.Roots[tool], _ = normalizeRoot(root) // unresolvable roots are stored as none
+	}
+	return writeJSON("status.json", f)
 }
 
 // WriteSnapshot persists a single tool's collected state outside the TTL
@@ -77,9 +96,10 @@ func WriteStatus(s *schema.Status) error {
 // limitsObserved is when t.Limits were actually observed live: now for a
 // payload that carried them, the original observation for limits preserved
 // from a previous snapshot. With no limits (or a zero time) the field stays
-// unset.
-func WriteSnapshot(t schema.Tool, limitsObserved time.Time) error {
+// unset. root is the config root the payload was observed from (#321).
+func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
 	f := snapshotFile{SchemaVersion: schema.Version, Tool: t}
+	f.Root, _ = normalizeRoot(root) // unresolvable roots are stored as none
 	if len(t.Limits) > 0 && !limitsObserved.IsZero() {
 		s := limitsObserved.Local().Format(time.RFC3339)
 		f.LimitsCollectedAt = &s
@@ -91,10 +111,11 @@ func WriteSnapshot(t schema.Tool, limitsObserved time.Time) error {
 // stale flag recomputed against now. Rate limits age out separately, from
 // their original observation time: a snapshot that preserved old limits
 // shortly before its writer went quiet would otherwise keep showing them
-// past the ceiling for up to another maxAge (#186).
-func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Tool, bool) {
+// past the ceiling for up to another maxAge (#186). Only a snapshot observed
+// from root is served (#321).
+func ReadSnapshot(tool string, maxAge time.Duration, now time.Time, root string) (*schema.Tool, bool) {
 	snap, ok := readSnapshotFile(tool)
-	if !ok || snap.CollectedAt == nil {
+	if !ok || !sameRoot(snap.Root, root) || snap.CollectedAt == nil {
 		return nil, false
 	}
 	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
@@ -116,10 +137,11 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time) (*schema.Too
 // backend they were observed under and their original observation time, for
 // callers deciding whether to carry them into a payload that lacks limits.
 // maxAge is measured from that observation, so limits that are only being
-// carried forward still age out (#186).
-func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time) ([]schema.Limit, string, time.Time, bool) {
+// carried forward still age out (#186). Only a snapshot observed from root
+// is consulted (#321).
+func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root string) ([]schema.Limit, string, time.Time, bool) {
 	snap, ok := readSnapshotFile(tool)
-	if !ok || len(snap.Limits) == 0 {
+	if !ok || !sameRoot(snap.Root, root) || len(snap.Limits) == 0 {
 		return nil, "", time.Time{}, false
 	}
 	observed, ok := snap.limitsObservedAt()
@@ -127,6 +149,47 @@ func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time) ([]sch
 		return nil, "", time.Time{}, false
 	}
 	return snap.Limits, snap.Backend, observed, true
+}
+
+// normalizeRoot is the form config roots are stored and compared in: the
+// absolute, cleaned path, resolved against the current directory at the time
+// (a relative CLAUDE_CONFIG_DIR names a different directory from a different
+// cwd). ok is false for an empty root and for one that can't be made
+// absolute (the current directory is gone): such a root is neither stored
+// nor matched, so it can't be mistaken for another reader's.
+func normalizeRoot(root string) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	return abs, true
+}
+
+// sameRoot reports whether two config roots name the same directory. A root
+// that doesn't normalize never matches: a snapshot written before the root
+// was recorded carries none, as does a run whose root couldn't be resolved,
+// and neither may be taken for a given profile's (#321).
+func sameRoot(a, b string) bool {
+	na, okA := normalizeRoot(a)
+	nb, okB := normalizeRoot(b)
+	return okA && okB && na == nb
+}
+
+// sameRoots reports whether two root sets (by tool) name the same
+// directories for the same tools; an empty set matches nothing.
+func sameRoots(a, b map[string]string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for tool, root := range a {
+		if other, ok := b[tool]; !ok || !sameRoot(root, other) {
+			return false
+		}
+	}
+	return true
 }
 
 // limitsObservedAt resolves when the snapshot's limits were originally

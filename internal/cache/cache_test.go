@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/kosako/tachograph/internal/schema"
 )
+
+// snapRoot stands in for the config root snapshots are observed from, and
+// testRoots for the roots a status document is assembled from (#321).
+const snapRoot = "/profiles/a"
+
+var testRoots = map[string]string{schema.ToolClaudeCode: snapRoot, schema.ToolCodex: "/profiles/codex"}
 
 func setCacheDir(t *testing.T) string {
 	t.Helper()
@@ -24,14 +31,14 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	dir := setCacheDir(t)
 	now := time.Now()
 
-	if _, ok := ReadStatus(StatusTTL, now); ok {
+	if _, ok := ReadStatus(StatusTTL, now, testRoots); ok {
 		t.Fatal("ReadStatus hit on empty cache")
 	}
 	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
-	if err := WriteStatus(s); err != nil {
+	if err := WriteStatus(s, testRoots); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := ReadStatus(StatusTTL, now)
+	got, ok := ReadStatus(StatusTTL, now, testRoots)
 	if !ok || got.GeneratedAt != s.GeneratedAt {
 		t.Fatalf("ReadStatus = %+v, %v", got, ok)
 	}
@@ -42,7 +49,7 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadStatus(StatusTTL, now); ok {
+	if _, ok := ReadStatus(StatusTTL, now, testRoots); ok {
 		t.Error("ReadStatus hit on expired cache")
 	}
 }
@@ -93,7 +100,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: strconv.Itoa(i)}
-			if err := WriteStatus(s); err != nil {
+			if err := WriteStatus(s, testRoots); err != nil {
 				t.Errorf("WriteStatus: %v", err)
 			}
 		}(i)
@@ -102,7 +109,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 	close(stop)
 	readerWG.Wait()
 
-	got, ok := ReadStatus(StatusTTL, now)
+	got, ok := ReadStatus(StatusTTL, now, testRoots)
 	if !ok {
 		t.Fatal("ReadStatus miss after concurrent writes")
 	}
@@ -118,10 +125,10 @@ func TestWriteStatusConcurrent(t *testing.T) {
 func TestStatusRejectsOtherSchemaVersion(t *testing.T) {
 	dir := setCacheDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "status.json"),
-		[]byte(`{"schema_version":"9.9","generated_at":"x","tools":[]}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"9.9","roots":{"claude-code":"`+snapRoot+`","codex":"/profiles/codex"},"generated_at":"x","tools":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadStatus(StatusTTL, time.Now()); ok {
+	if _, ok := ReadStatus(StatusTTL, time.Now(), testRoots); ok {
 		t.Error("ReadStatus accepted a different schema_version")
 	}
 }
@@ -134,11 +141,11 @@ func TestSnapshot(t *testing.T) {
 	tool := schema.Unavailable(schema.ToolClaudeCode)
 	tool.Available = true
 	tool.CollectedAt = &collected
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || !got.Available {
 		t.Fatalf("ReadSnapshot = %+v, %v", got, ok)
 	}
@@ -146,13 +153,13 @@ func TestSnapshot(t *testing.T) {
 		t.Error("Stale = true for 2-minute-old snapshot")
 	}
 
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(SnapshotMaxAge+time.Minute)); ok {
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(SnapshotMaxAge+time.Minute), snapRoot); ok {
 		t.Error("ReadSnapshot returned a snapshot older than maxAge")
 	}
 
 	// Returned within maxAge but past the stale threshold → Stale recomputed
 	// to true. Age here is ~92min (> 60min threshold) but under the 2h maxAge.
-	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute))
+	got, ok = ReadSnapshot(schema.ToolClaudeCode, 2*time.Hour, now.Add(90*time.Minute), snapRoot)
 	if !ok || !got.Stale {
 		t.Errorf("ReadSnapshot stale recompute: got %+v, %v", got, ok)
 	}
@@ -174,11 +181,11 @@ func TestReadSnapshotLimits(t *testing.T) {
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
 	observed := now.Add(-29 * 24 * time.Hour)
-	if err := WriteSnapshot(tool, observed); err != nil {
+	if err := WriteSnapshot(tool, observed, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	limits, backend, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	limits, backend, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || len(limits) != 1 || backend != schema.BackendSubscription {
 		t.Fatalf("ReadSnapshotLimits = %+v, %q, %v", limits, backend, ok)
 	}
@@ -188,7 +195,7 @@ func TestReadSnapshotLimits(t *testing.T) {
 
 	// The snapshot file is 2 minutes old, but the limits observation is 29
 	// days old: 2 more days puts it past SnapshotMaxAge.
-	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(2*24*time.Hour)); ok {
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now.Add(2*24*time.Hour), snapRoot); ok {
 		t.Error("limits past maxAge from their observation were returned")
 	}
 }
@@ -209,11 +216,11 @@ func TestReadSnapshotDropsExpiredLimits(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour)); err != nil {
+	if err := WriteSnapshot(tool, now.Add(-SnapshotMaxAge-time.Hour), snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	got, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok || !got.Available {
 		t.Fatalf("ReadSnapshot = %+v, %v (a fresh snapshot must still be served)", got, ok)
 	}
@@ -241,11 +248,11 @@ func TestReadSnapshotLimitsFallsBackToCollectedAt(t *testing.T) {
 		CollectedAt: &collected,
 		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
 	}
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now)
+	_, _, got, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
 	if !ok {
 		t.Fatal("ReadSnapshotLimits = not ok, want CollectedAt fallback")
 	}
@@ -262,11 +269,11 @@ func TestReadSnapshotLimitsWithoutLimits(t *testing.T) {
 	tool := schema.Unavailable(schema.ToolClaudeCode)
 	tool.Available = true
 	tool.CollectedAt = &collected
-	if err := WriteSnapshot(tool, time.Time{}); err != nil {
+	if err := WriteSnapshot(tool, time.Time{}, snapRoot); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
 		t.Error("ReadSnapshotLimits returned ok for a snapshot without limits")
 	}
 }
@@ -276,11 +283,184 @@ func TestSnapshotRejectsOtherSchemaVersion(t *testing.T) {
 	now := time.Now()
 	collected := now.Format(time.RFC3339)
 	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
-		[]byte(`{"schema_version":"9.9","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"9.9","root":"`+snapRoot+`","tool":"claude-code","available":true,"collected_at":"`+collected+`"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now); ok {
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
 		t.Error("ReadSnapshot accepted a different schema_version")
+	}
+}
+
+// A snapshot is tied to the config root it was observed from: a reader
+// working against another root (a second Claude profile) gets neither the
+// snapshot nor limits to carry from it (#321). Roots compare as paths.
+func TestSnapshotRootMismatch(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	pct := 42.0
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Limits:      []schema.Limit{{Window: schema.WindowFiveHour, UsedPct: &pct}},
+	}
+	if err := WriteSnapshot(tool, now.Add(-time.Minute), snapRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot+"/"); !ok {
+		t.Error("ReadSnapshot = not ok for the same root spelled with a trailing slash")
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, "/profiles/b"); ok {
+		t.Error("ReadSnapshot served a snapshot observed from another root")
+	}
+	if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, "/profiles/b"); ok {
+		t.Error("ReadSnapshotLimits offered limits observed from another root")
+	}
+}
+
+// Roots are stored absolute, resolved against the writer's directory: a
+// reader in that directory matches under any spelling, a reader elsewhere
+// matches only the writer's absolute path, never the same relative spelling
+// (#321).
+func TestSnapshotRootIsStoredAbsolute(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, CollectedAt: &collected}
+
+	writerDir, otherDir := t.TempDir(), t.TempDir()
+	t.Chdir(writerDir)
+	if err := WriteSnapshot(tool, time.Time{}, "profiles/rel"); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd() // as the writer resolved it (symlinks included)
+	absRoot := filepath.Join(cwd, "profiles", "rel")
+	for _, same := range []string{"profiles/rel", "./profiles/rel/", absRoot} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, same); !ok {
+			t.Errorf("ReadSnapshot = not ok for %q from the writer's directory", same)
+		}
+	}
+
+	t.Chdir(otherDir)
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, "profiles/rel"); ok {
+		t.Error("ReadSnapshot matched the same relative spelling from another directory")
+	}
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, absRoot); !ok {
+		t.Error("ReadSnapshot = not ok for the writer's absolute root from another directory")
+	}
+}
+
+// A root that can't be made absolute (the current directory is gone) is
+// stored as none and matches nothing — not even the same spelling from the
+// same broken directory — rather than falling back to a relative path that
+// another reader would resolve against its own directory.
+func TestSnapshotUnresolvableRootNeverMatches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the current directory can't be removed on Windows")
+	}
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, CollectedAt: &collected}
+
+	gone := filepath.Join(t.TempDir(), "gone")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filepath.Abs("profiles/rel"); err == nil {
+		t.Skip("filepath.Abs still resolves a relative path from a removed directory here")
+	}
+	if err := WriteSnapshot(tool, time.Time{}, "profiles/rel"); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{"profiles/rel", "/profiles/rel", ""} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshot served a snapshot whose root couldn't be resolved to root %q", root)
+		}
+	}
+}
+
+// A snapshot without a recorded root (written before #321) and a reader
+// whose root couldn't be resolved never match — not even each other, and not
+// a root spelled ".", which Clean would otherwise equate with "".
+func TestSnapshotWithoutRootNeverMatches(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	collected := now.Add(-time.Minute).Format(time.RFC3339)
+	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
+		[]byte(`{"schema_version":"`+schema.Version+`","tool":"claude-code","available":true,"backend":"subscription","collected_at":"`+collected+`","limits":[{"window":"5h","used_pct":42}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{snapRoot, ".", ""} {
+		if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshot served a root-less snapshot to root %q", root)
+		}
+		if _, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, root); ok {
+			t.Errorf("ReadSnapshotLimits offered a root-less snapshot's limits to root %q", root)
+		}
+	}
+}
+
+// The TTL cache is keyed by the roots the document was assembled from: a run
+// against other roots (another profile) misses and assembles its own (#321).
+func TestStatusCacheNotSharedAcrossRoots(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now()
+	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
+	if err := WriteStatus(s, testRoots); err != nil {
+		t.Fatal(err)
+	}
+	same := map[string]string{schema.ToolClaudeCode: snapRoot + "/", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadStatus(StatusTTL, now, same); !ok {
+		t.Error("ReadStatus missed for the same roots")
+	}
+	other := map[string]string{schema.ToolClaudeCode: "/profiles/b", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadStatus(StatusTTL, now, other); ok {
+		t.Error("ReadStatus served a document assembled from another Claude root")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, map[string]string{schema.ToolClaudeCode: snapRoot}); ok {
+		t.Error("ReadStatus served a document to a run that resolved fewer roots")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, nil); ok {
+		t.Error("ReadStatus served a document to a run with no resolved roots")
+	}
+}
+
+// The TTL cache's roots are stored absolute too: the same relative roots hit
+// from the writer's directory, miss from another, and the writer's absolute
+// roots hit from anywhere (#321).
+func TestStatusCacheRootsStoredAbsolute(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now()
+	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Format(time.RFC3339)}
+	rel := map[string]string{schema.ToolClaudeCode: "profiles/claude", schema.ToolCodex: "profiles/codex"}
+
+	writerDir, otherDir := t.TempDir(), t.TempDir()
+	t.Chdir(writerDir)
+	if err := WriteStatus(s, rel); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd()
+	abs := map[string]string{
+		schema.ToolClaudeCode: filepath.Join(cwd, "profiles", "claude"),
+		schema.ToolCodex:      filepath.Join(cwd, "profiles", "codex"),
+	}
+	if _, ok := ReadStatus(StatusTTL, now, rel); !ok {
+		t.Error("ReadStatus missed for the same relative roots from the writer's directory")
+	}
+
+	t.Chdir(otherDir)
+	if _, ok := ReadStatus(StatusTTL, now, rel); ok {
+		t.Error("ReadStatus hit for the same relative spelling from another directory")
+	}
+	if _, ok := ReadStatus(StatusTTL, now, abs); !ok {
+		t.Error("ReadStatus missed for the writer's absolute roots from another directory")
 	}
 }
 
