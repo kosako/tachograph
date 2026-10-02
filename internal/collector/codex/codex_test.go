@@ -435,6 +435,45 @@ func TestCollectFallsBackPastEmptyTokenCountInFile(t *testing.T) {
 	}
 }
 
+// tcLimitsLine is a token_count carrying usage and the account's 5h window.
+// ts may be empty to write an event without a timestamp.
+func tcLimitsLine(ts string, total int64, usedPct int) string {
+	stamp := ""
+	if ts != "" {
+		stamp = fmt.Sprintf(`"timestamp":%q,`, ts)
+	}
+	return fmt.Sprintf(`{%s"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":0,"total_tokens":%d},"model_context_window":200000},"rate_limits":{"limit_id":"codex","primary":{"used_percent":%d,"window_minutes":300,"resets_at":1779646858},"secondary":null,"plan_type":"plus"}}}`,
+		stamp, total, total, usedPct)
+}
+
+// A token_count without a timestamp can't be ordered, so pickSession drops
+// it; lastEvents must therefore not settle on it either, or the file's
+// earlier well-formed snapshot and limits are lost with it (#320).
+func TestCollectFallsBackPastTimestamplessTokenCountInFile(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "sessions", "2026", "05", "24")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-dddddddddddd.jsonl",
+		ctxLine("2026-05-24T10:00:00.000Z", "gpt-x", "/x")+"\n"+
+			tcLimitsLine("2026-05-24T10:05:00.000Z", 150, 42)+"\n"+
+			tcLimitsLine("", 999, 99),
+		time.Date(2026, 5, 24, 10, 6, 0, 0, time.UTC))
+
+	now, _ := time.Parse(time.RFC3339, "2026-05-24T10:07:00Z")
+	got := Collect(Options{Root: root, Now: now})
+	if got.Error != nil {
+		t.Fatalf("Error = %+v, want the earlier timestamped token_count", got.Error)
+	}
+	if got.Session == nil || got.Session.Tokens == nil || got.Session.Tokens.Total != 150 {
+		t.Errorf("Session.Tokens = %+v, want 150 from the last timestamped token_count", got.Session)
+	}
+	if len(got.Limits) != 1 || got.Limits[0].UsedPct == nil || *got.Limits[0].UsedPct != 42 {
+		t.Errorf("Limits = %+v, want the timestamped 5h window at 42%%", got.Limits)
+	}
+}
+
 // With nothing but empty token_counts there is genuinely no usable data:
 // surface no_token_count rather than rendering an all-null tool.
 func TestCollectNoTokenCountWhenAllEmpty(t *testing.T) {
