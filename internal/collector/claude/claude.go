@@ -113,8 +113,8 @@ type statuslineRateLimits struct {
 }
 
 type slWindow struct {
-	UsedPercentage float64 `json:"used_percentage"`
-	ResetsAt       int64   `json:"resets_at"` // epoch seconds
+	UsedPercentage *float64 `json:"used_percentage"` // nullable: absent means unknown, not 0 (#322)
+	ResetsAt       int64    `json:"resets_at"`       // epoch seconds
 }
 
 func fromStatusline(opts Options) schema.Tool {
@@ -202,11 +202,15 @@ func fromStatusline(opts Options) schema.Tool {
 }
 
 func toLimit(window string, mins int, w *slWindow) schema.Limit {
-	pct := w.UsedPercentage
 	l := schema.Limit{
 		Window:        window,
 		WindowMinutes: &mins,
-		UsedPct:       &pct,
+	}
+	// A window without used_percentage is one whose use is unknown; it stays
+	// null rather than reading as 0% used / 100% left (#322).
+	if w.UsedPercentage != nil {
+		pct := *w.UsedPercentage
+		l.UsedPct = &pct
 	}
 	// resets_at is nullable: keep an absent/zero epoch as null rather than
 	// formatting it as 1970-01-01.

@@ -12,15 +12,46 @@ import (
 
 func noEnv(string) string { return "" }
 
+func pctOf(v float64) *float64 { return &v }
+
 // toLimit must keep an absent/zero resets_at as null, not 1970-01-01.
 func TestToLimitNullResetsAt(t *testing.T) {
-	l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: 5, ResetsAt: 0})
+	l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 0})
 	if l.ResetsAt != nil {
 		t.Errorf("ResetsAt = %v, want nil for zero epoch", *l.ResetsAt)
 	}
-	l = toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: 5, ResetsAt: 1779646858})
+	l = toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(5), ResetsAt: 1779646858})
 	if l.ResetsAt == nil {
 		t.Error("ResetsAt = nil, want set for a real epoch")
+	}
+}
+
+// A window without used_percentage reports an unknown use, not 0% (#322);
+// a real 0 is still 0.
+func TestToLimitMissingUsedPercentage(t *testing.T) {
+	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{ResetsAt: 1779646858}); l.UsedPct != nil {
+		t.Errorf("UsedPct = %v, want nil without used_percentage", *l.UsedPct)
+	}
+	if l := toLimit(schema.WindowFiveHour, 300, &slWindow{UsedPercentage: pctOf(0)}); l.UsedPct == nil || *l.UsedPct != 0 {
+		t.Errorf("UsedPct = %v, want 0 for an explicit 0", l.UsedPct)
+	}
+}
+
+// End to end: a statusline payload whose window lacks used_percentage keeps
+// the window (and its reset time) with used_pct null (#322).
+func TestFromStatuslineMissingUsedPercentage(t *testing.T) {
+	input := []byte(`{"model":{"id":"claude-x","display_name":"X"},"rate_limits":{"five_hour":{"resets_at":1779646858},"seven_day":{"used_percentage":null,"resets_at":1779646858}}}`)
+	got := Collect(Options{Root: t.TempDir(), StatuslineInput: input, Getenv: noEnv})
+	if got.Error != nil || len(got.Limits) != 2 {
+		t.Fatalf("Error = %+v, Limits = %+v, want two windows", got.Error, got.Limits)
+	}
+	for _, l := range got.Limits {
+		if l.UsedPct != nil {
+			t.Errorf("%s UsedPct = %v, want nil when the payload has no used_percentage", l.Window, *l.UsedPct)
+		}
+		if l.ResetsAt == nil {
+			t.Errorf("%s ResetsAt = nil, want the payload's reset time kept", l.Window)
+		}
 	}
 }
 

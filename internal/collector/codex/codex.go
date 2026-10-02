@@ -397,11 +397,15 @@ func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) s
 
 func toLimit(w *rlWindow) schema.Limit {
 	mins := w.WindowMinutes
-	pct := w.UsedPercent
 	l := schema.Limit{
 		Window:        windowName(mins),
 		WindowMinutes: &mins,
-		UsedPct:       &pct,
+	}
+	// A window without used_percent is one whose use is unknown; it stays
+	// null rather than reading as 0% used / 100% left (#322).
+	if w.UsedPercent != nil {
+		pct := *w.UsedPercent
+		l.UsedPct = &pct
 	}
 	// resets_at is nullable: an absent/zero epoch must stay null, not format
 	// as 1970-01-01 (which would render as a reset far in the past).
