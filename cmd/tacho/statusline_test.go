@@ -459,6 +459,13 @@ func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	root := isolateClaudeRoot(t)
+	// The limit-less payloads must still read as subscription for the carry
+	// to happen, whatever the runner's environment says; and the Codex side
+	// of core.Status must not scan the real ~/.codex.
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
 
 	t0, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	resets := t0.Add(4 * time.Hour) // observed 60 min into the 5h window
