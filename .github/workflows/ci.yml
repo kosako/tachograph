@@ -31,6 +31,17 @@ jobs:
           version: "~> v2"
           args: check
 
+  # The snapshot lock has its own Windows implementation (LockFileEx), which
+  # the ubuntu test job can't exercise: run the lock tests on Windows (#330).
+  lock-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/cache/ -run LockFile
+
   # Exercise the real npm install path (npm pack → global install → postinstall
   # download, checksum verification, tar/zip extraction, bin shim → `tacho
   # version`) on every supported OS, since the extraction tooling differs (GNU

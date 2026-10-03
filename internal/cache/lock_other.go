@@ -1,4 +1,4 @@
-//go:build !darwin && !linux
+//go:build !darwin && !linux && !windows
 
 package cache
 
@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// lockFile has no file lock to take here: the standard library offers none
-// on these systems, and tacho keeps to it, so concurrent statusline merges
-// keep their narrow race (#330).
+// lockFile has no file lock to take on the systems tacho doesn't ship for:
+// concurrent statusline merges there keep their narrow race (#330).
 func lockFile(string, time.Duration) (func(), error) {
 	return nil, errors.ErrUnsupported
 }

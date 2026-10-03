@@ -754,7 +754,7 @@ func TestWriteStatuslineSnapshotSavesWhereLockUnsupported(t *testing.T) {
 // statusline waits, gives up, still prints its line, and leaves the snapshot
 // to the holder (#330).
 func TestRunStatuslineLeavesLockedSnapshot(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		t.Skip("no snapshot lock on " + runtime.GOOS)
 	}
 	root := subscriptionStatuslineEnv(t)
@@ -778,5 +778,29 @@ func TestRunStatuslineLeavesLockedSnapshot(t *testing.T) {
 	}
 	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 90 {
 		t.Errorf("snapshot weekly = %v, want 90 left to the holder", got[schema.WindowWeekly])
+	}
+}
+
+// Two readings in the same second keep their order: the snapshot holds the
+// one observed later in that second, not the one that happened to arrive
+// last (#330).
+func TestRunStatuslineKeepsOrderWithinSecond(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	resets := now.Add(time.Hour)
+	second := now.Add(-time.Minute) // both readings fall in this second
+	run := func(used int, at time.Time) {
+		t.Helper()
+		input := fmt.Sprintf(`{"session_id":"s","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":%d,"resets_at":%d}}}`,
+			transcriptRespondedAt(t, at), used, resets.Unix())
+		var out bytes.Buffer
+		if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+			t.Fatalf("runStatuslineWithIO exit = %d", code)
+		}
+	}
+	run(92, second.Add(900*time.Millisecond))
+	run(89, second.Add(100*time.Millisecond))
+	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 92 {
+		t.Errorf("snapshot weekly = %v, want the reading from later in the second (92)", got[schema.WindowWeekly])
 	}
 }

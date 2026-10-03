@@ -198,7 +198,9 @@ func fromStatusline(opts Options) schema.Tool {
 	t.Fallback = fb
 
 	if rl := in.RateLimits; rl != nil && t.Backend == schema.BackendSubscription {
-		observed := limitsObservedAt(lastResponse, sessionStart(in.Cost, opts.Now), opts.Now).Local().Format(time.RFC3339)
+		// Sub-second precision keeps two readings in the same second in order
+		// when merged into the snapshot (#330).
+		observed := limitsObservedAt(lastResponse, sessionStart(in.Cost, opts.Now), opts.Now).Local().Format(time.RFC3339Nano)
 		var limits []schema.Limit
 		if rl.FiveHour != nil {
 			limits = append(limits, toLimit(schema.WindowFiveHour, 300, rl.FiveHour, observed))

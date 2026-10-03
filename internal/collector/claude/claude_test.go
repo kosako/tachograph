@@ -493,6 +493,7 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 		want         time.Duration // observed_at, before now
 	}{
 		{name: "last response", transcript: responded, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
+		{name: "sub-second last response", transcript: responded, lastResponse: 2750 * time.Millisecond, want: 2750 * time.Millisecond},
 		{name: "session start", running: ms(600000), want: 10 * time.Minute},
 		{name: "start after the last response (a resumed session's probe)", transcript: responded, lastResponse: 3 * time.Hour, running: ms(600000), want: 10 * time.Minute},
 		{name: "last response after the start", transcript: responded, lastResponse: time.Minute, running: ms(600000), want: time.Minute},
@@ -539,7 +540,7 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 			if got.Error != nil || len(got.Limits) != 1 {
 				t.Fatalf("Error = %+v, Limits = %+v", got.Error, got.Limits)
 			}
-			want := now.Add(-c.want).Local().Format(time.RFC3339)
+			want := now.Add(-c.want).Local().Format(time.RFC3339Nano)
 			if l := got.Limits[0]; l.ObservedAt == nil || *l.ObservedAt != want {
 				t.Errorf("ObservedAt = %v, want %s", l.ObservedAt, want)
 			}
