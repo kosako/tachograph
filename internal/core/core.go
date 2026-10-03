@@ -2,6 +2,8 @@
 package core
 
 import (
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -198,7 +200,7 @@ func fresher(tr, snap schema.Tool) bool {
 
 // carryLimits moves the snapshot's rate limits onto the transcript route's
 // tool, which cannot see them. Only between subscription sources (like the
-// statusline's preserveSnapshotLimits), and only the windows RunningLimits
+// statusline's mergeSnapshotLimits), and only the windows RunningLimits
 // keeps.
 func carryLimits(tr *schema.Tool, snap schema.Tool, now time.Time) {
 	if tr.Backend != schema.BackendSubscription || snap.Backend != schema.BackendSubscription {
@@ -225,6 +227,64 @@ func RunningLimits(limits []schema.Limit, now time.Time) []schema.Limit {
 		kept = append(kept, l)
 	}
 	return kept
+}
+
+// MergeLimits combines a statusline payload's windows with the ones carried
+// from the snapshot (already cut to RunningLimits), one window at a time. A
+// window only carried is kept, and one both have is taken from whichever was
+// observed later: an idle session redrawing its statusline pushes a reading
+// as old as its last API response, which must not roll back a newer one
+// another session saved (#330). The payload's reading wins a tie, and
+// whenever either observation time can't be read. The result keeps the
+// schema's ascending window_minutes order whatever side each window came from.
+func MergeLimits(live, carried []schema.Limit) []schema.Limit {
+	var merged []schema.Limit
+	inLive := map[string]bool{}
+	for _, l := range live {
+		inLive[l.Window] = true
+		for _, c := range carried {
+			if c.Window == l.Window && observedAfter(c, l) {
+				l = c
+				break
+			}
+		}
+		merged = append(merged, l)
+	}
+	for _, c := range carried {
+		if !inLive[c.Window] {
+			merged = append(merged, c)
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return windowLength(merged[i]) < windowLength(merged[j])
+	})
+	return merged
+}
+
+// windowLength is a limit's window_minutes for ordering; a window of unknown
+// length sorts last.
+func windowLength(l schema.Limit) int {
+	if l.WindowMinutes == nil {
+		return math.MaxInt
+	}
+	return *l.WindowMinutes
+}
+
+// ObservationTime is when l was observed; ok is false when its observed_at is
+// missing or unreadable.
+func ObservationTime(l schema.Limit) (time.Time, bool) {
+	if l.ObservedAt == nil {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, *l.ObservedAt)
+	return ts, err == nil
+}
+
+// observedAfter reports whether a was observed strictly later than b.
+func observedAfter(a, b schema.Limit) bool {
+	ta, okA := ObservationTime(a)
+	tb, okB := ObservationTime(b)
+	return okA && okB && ta.After(tb)
 }
 
 // dropSessionScope clears the values that describe "the current session",

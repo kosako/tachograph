@@ -93,10 +93,10 @@ func WriteStatus(s *schema.Status, roots map[string]string) error {
 // WriteSnapshot persists a single tool's collected state outside the TTL
 // cache. Used by `tacho statusline` to piggyback Claude Code's push so
 // other renderers can show rate limits without a statusline stdin.
-// limitsObserved is when t.Limits were actually observed live: now for a
-// payload that carried them, the original observation for limits preserved
-// from a previous snapshot. With no limits (or a zero time) the field stays
-// unset. root is the config root the payload was observed from (#321).
+// limitsObserved is when t.Limits were originally observed: the oldest of
+// their windows' observations, a window carried from a previous snapshot
+// keeping its own. With no limits (or a zero time) the field stays unset.
+// root is the config root the payload was observed from (#321).
 func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
 	f := snapshotFile{SchemaVersion: schema.Version, Tool: t}
 	f.Root, _ = normalizeRoot(root) // unresolvable roots are stored as none
@@ -135,7 +135,7 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time, root string)
 
 // ReadSnapshotLimits returns the snapshot's rate limits together with the
 // backend they were observed under and their original observation time, for
-// callers deciding whether to carry them into a payload that lacks limits.
+// callers merging them into a live payload's.
 // maxAge is measured from that observation, so limits that are only being
 // carried forward still age out (#186). Only a snapshot observed from root
 // is consulted (#321).

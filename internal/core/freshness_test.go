@@ -125,7 +125,7 @@ func TestCarriedSnapshotLimitsDropWindowsWithoutReset(t *testing.T) {
 }
 
 // Limits are carried only between subscription sources, like
-// preserveSnapshotLimits: an API-key transcript has no rate limits.
+// mergeSnapshotLimits: an API-key transcript has no rate limits.
 func TestNoLimitsCarriedToNonSubscriptionTranscript(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	clearClaudeBackendEnv(t)
@@ -179,6 +179,55 @@ func TestRunningLimits(t *testing.T) {
 	}
 	if RunningLimits(nil, now) != nil {
 		t.Error("RunningLimits(nil) should be nil")
+	}
+}
+
+// MergeLimits takes each window from whichever reading was observed later,
+// so an idle session's old reading can't roll back a newer one, while a
+// newer one wins even when it is lower — a reset or a raised limit (#330).
+// A window only one side has is kept, and the result stays in ascending
+// window_minutes order whichever side each window came from.
+func TestMergeLimits(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	minutes := map[string]int{schema.WindowFiveHour: 300, schema.WindowWeekly: 10080}
+	at := func(window string, used float64, observed *string) schema.Limit {
+		m := minutes[window]
+		return schema.Limit{Window: window, WindowMinutes: &m, UsedPct: fptr(used), ObservedAt: observed}
+	}
+	newer, older := rfc(now.Add(-time.Minute)), rfc(now.Add(-3*time.Hour))
+	bad := "not-a-time"
+	type reading struct {
+		window string
+		used   float64
+	}
+	cases := []struct {
+		name          string
+		live, carried []schema.Limit
+		want          []reading
+	}{
+		{name: "carried reading is newer", live: []schema.Limit{at("weekly", 89, older)}, carried: []schema.Limit{at("weekly", 92, newer)}, want: []reading{{"weekly", 92}}},
+		{name: "live reading is newer, even lower", live: []schema.Limit{at("weekly", 3, newer)}, carried: []schema.Limit{at("weekly", 92, older)}, want: []reading{{"weekly", 3}}},
+		{name: "tie goes to live", live: []schema.Limit{at("weekly", 90, newer)}, carried: []schema.Limit{at("weekly", 92, newer)}, want: []reading{{"weekly", 90}}},
+		{name: "unreadable carried time", live: []schema.Limit{at("weekly", 89, older)}, carried: []schema.Limit{at("weekly", 92, &bad)}, want: []reading{{"weekly", 89}}},
+		{name: "missing carried time", live: []schema.Limit{at("weekly", 89, older)}, carried: []schema.Limit{at("weekly", 92, nil)}, want: []reading{{"weekly", 89}}},
+		{name: "window only carried, shorter", live: []schema.Limit{at("weekly", 92, newer)}, carried: []schema.Limit{at("5h", 30, older)}, want: []reading{{"5h", 30}, {"weekly", 92}}},
+		{name: "window only live", live: []schema.Limit{at("5h", 4, newer), at("weekly", 92, newer)}, carried: nil, want: []reading{{"5h", 4}, {"weekly", 92}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := MergeLimits(c.live, c.carried)
+			if len(got) != len(c.want) {
+				t.Fatalf("MergeLimits = %+v, want %v", got, c.want)
+			}
+			for i, w := range c.want {
+				if got[i].Window != w.window || got[i].UsedPct == nil || *got[i].UsedPct != w.used {
+					t.Errorf("limits[%d] = %s %v, want %s %v", i, got[i].Window, got[i].UsedPct, w.window, w.used)
+				}
+			}
+		})
+	}
+	if MergeLimits(nil, nil) != nil {
+		t.Error("MergeLimits(nil, nil) should be nil: no limits stay null")
 	}
 }
 

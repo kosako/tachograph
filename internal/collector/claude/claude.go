@@ -96,15 +96,20 @@ type StatuslineInput struct {
 	Workspace struct {
 		CurrentDir string `json:"current_dir"`
 	} `json:"workspace"`
-	Cost *struct {
-		TotalCostUSD float64 `json:"total_cost_usd"`
-	} `json:"cost"`
+	Cost          *statuslineCost `json:"cost"`
 	ContextWindow *struct {
 		ContextWindowSize int64    `json:"context_window_size"`
 		UsedPercentage    *float64 `json:"used_percentage"`
 		CurrentUsage      *Usage   `json:"current_usage"`
 	} `json:"context_window"`
 	RateLimits *statuslineRateLimits `json:"rate_limits"`
+}
+
+type statuslineCost struct {
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	// TotalDurationMS counts from the session's start; a float so a
+	// fractional value can't fail the whole payload's decoding.
+	TotalDurationMS *float64 `json:"total_duration_ms"`
 }
 
 type statuslineRateLimits struct {
@@ -173,12 +178,16 @@ func fromStatusline(opts Options) schema.Tool {
 	// substitute) — see #185. This covers the main transcript;
 	// core.AddSessionTree widens it to the session's subagent / workflow
 	// transcripts (#262).
+	var lastResponse time.Time // the session's latest API response on record
 	if in.TranscriptPath != "" {
 		if b, err := os.ReadFile(in.TranscriptPath); err == nil {
 			if totals, last := usageFromTranscript(b); last != nil {
 				totals.Total = totals.Input + totals.Output
 				sess.Tokens = &totals
 				fb.SessionTokens = &totals.Total
+				if ts, err := time.Parse(time.RFC3339Nano, last.Timestamp); err == nil {
+					lastResponse = ts
+				}
 			}
 		}
 	}
@@ -189,20 +198,52 @@ func fromStatusline(opts Options) schema.Tool {
 	t.Fallback = fb
 
 	if rl := in.RateLimits; rl != nil && t.Backend == schema.BackendSubscription {
+		// Sub-second precision keeps two readings in the same second in order
+		// when merged into the snapshot (#330).
+		observed := limitsObservedAt(lastResponse, sessionStart(in.Cost, opts.Now), opts.Now).Local().Format(time.RFC3339Nano)
 		var limits []schema.Limit
 		if rl.FiveHour != nil {
-			limits = append(limits, toLimit(schema.WindowFiveHour, 300, rl.FiveHour, collected))
+			limits = append(limits, toLimit(schema.WindowFiveHour, 300, rl.FiveHour, observed))
 		}
 		if rl.SevenDay != nil {
-			limits = append(limits, toLimit(schema.WindowWeekly, 10080, rl.SevenDay, collected))
+			limits = append(limits, toLimit(schema.WindowWeekly, 10080, rl.SevenDay, observed))
 		}
 		t.Limits = limits
 	}
 	return t
 }
 
-// toLimit builds a window observed live at observed (RFC 3339): the payload
-// is the observation, so the window's observed_at is the tool's collected_at.
+// limitsObservedAt dates the rate limits a payload carries. Claude Code
+// refreshes them only from an API response (and a quota probe as the session
+// starts), but redraws the statusline on other triggers too — a reset time
+// passing, the prompt cache expiring, a mode toggle — so an idle session
+// pushes a reading as old as its last response. The payload doesn't date it,
+// so the later of the session's last response on record and its start does
+// (#330): an estimate that errs old, since a subagent's responses refresh the
+// reading without reaching the main transcript. A payload carrying neither is
+// dated at receipt, as is one whose dates lie ahead of it.
+func limitsObservedAt(lastResponse, sessionStart, now time.Time) time.Time {
+	observed := lastResponse
+	if sessionStart.After(observed) {
+		observed = sessionStart
+	}
+	if observed.IsZero() || observed.After(now) {
+		return now
+	}
+	return observed
+}
+
+// sessionStart is when the payload's session began, from the time Claude
+// Code says it has been running; zero when the payload doesn't say.
+func sessionStart(cost *statuslineCost, now time.Time) time.Time {
+	if cost == nil || cost.TotalDurationMS == nil {
+		return time.Time{}
+	}
+	return now.Add(-time.Duration(*cost.TotalDurationMS * float64(time.Millisecond)))
+}
+
+// toLimit builds a window observed at observed (RFC 3339; see
+// limitsObservedAt).
 func toLimit(window string, mins int, w *slWindow, observed string) schema.Limit {
 	l := schema.Limit{
 		Window:        window,
