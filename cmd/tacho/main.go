@@ -537,7 +537,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 		// The snapshot belongs to the config root this payload was observed
 		// from (#321); the payload names none, so resolve it as Status does.
 		root := core.Roots(core.Options{})[schema.ToolClaudeCode]
-		writeStatuslineSnapshot(&claudeTool, now, root)
+		writeStatuslineSnapshot(&claudeTool, now, root, cache.LockSnapshot)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
 	for i := range s.Tools {
@@ -578,18 +578,25 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 }
 
 // writeStatuslineSnapshot merges the payload's limits with the snapshot's and
-// saves it, holding the snapshot's lock from the read to the write: another
-// session's statusline saving in between would otherwise be overwritten by
-// this older merge (#330). Without the lock — still held elsewhere after the
-// wait, or unsupported here — it saves anyway: a snapshot left unwritten is
-// worse than the narrow race.
-func writeStatuslineSnapshot(t *schema.Tool, now time.Time, root string) {
-	if unlock, err := cache.LockSnapshot(t.Tool); err == nil {
+// saves it, holding the snapshot's lock (taken with lock, cache.LockSnapshot)
+// from the read to the write: another session's statusline saving in between
+// would otherwise be overwritten by this older merge (#330). When the lock
+// isn't had — another session still holds it after the wait — the merge
+// still serves this statusline's line but isn't saved, since saving it could
+// roll back what the holder saves; the next run saves again. A system without
+// a file lock saves unlocked, keeping the narrow race, or nothing would ever
+// be saved there.
+func writeStatuslineSnapshot(t *schema.Tool, now time.Time, root string, lock func(tool string) (func(), error)) {
+	unlock, err := lock(t.Tool)
+	if err == nil {
 		defer unlock()
 	}
+	save := err == nil || errors.Is(err, errors.ErrUnsupported)
 	limitsObserved := mergeSnapshotLimits(t, now, root)
 	core.AddProjections(t, now) // the statusline row bypasses core.Status for Claude (#295)
-	_ = cache.WriteSnapshot(*t, limitsObserved, root)
+	if save {
+		_ = cache.WriteSnapshot(*t, limitsObserved, root)
+	}
 }
 
 // mergeSnapshotLimits merges the cached snapshot's windows into the live

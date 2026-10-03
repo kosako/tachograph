@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -664,10 +665,95 @@ func TestRunStatuslineDatesCarriedWindowWithoutReadableObservation(t *testing.T)
 	}
 }
 
-// While another session's statusline holds the snapshot for its merge, a
-// statusline waits, then merges with what that session saved — it doesn't
-// read first and save its older merge over the newer one (#330).
-func TestRunStatuslineWaitsForConcurrentSnapshotWrite(t *testing.T) {
+// liveClaudeTool is a collected statusline payload whose windows were
+// observed at observed.
+func liveClaudeTool(now, observed time.Time, windows ...schema.Limit) schema.Tool {
+	collected := now.Format(time.RFC3339)
+	obs := observed.Format(time.RFC3339)
+	for i := range windows {
+		windows[i].ObservedAt = &obs
+	}
+	return schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription, CollectedAt: &collected, Limits: windows}
+}
+
+// snapshotUsed is the snapshot's used_pct by window.
+func snapshotUsed(t *testing.T, now time.Time, root string) map[string]float64 {
+	t.Helper()
+	used := map[string]float64{}
+	if snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root); ok {
+		for _, l := range snap.Limits {
+			used[l.Window] = *l.UsedPct
+		}
+	}
+	return used
+}
+
+// The snapshot is read only once its lock is held, and saved before it is
+// let go: a session that saved a newer reading while this one waited is
+// merged with, not overwritten (#330).
+func TestWriteStatuslineSnapshotMergesUnderLock(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	resets := now.Add(time.Hour)
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Hour), window(schema.WindowWeekly, 10080, 90, resets))
+	tool := liveClaudeTool(now, now.Add(-5*time.Minute),
+		window(schema.WindowFiveHour, 300, 4, now.Add(3*time.Hour)),
+		window(schema.WindowWeekly, 10080, 91, resets))
+
+	var atUnlock map[string]float64
+	lock := func(string) (func(), error) {
+		// Another session saves a newer weekly reading while this one waits.
+		writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute), window(schema.WindowWeekly, 10080, 92, resets))
+		return func() { atUnlock = snapshotUsed(t, now, root) }, nil
+	}
+	writeStatuslineSnapshot(&tool, now, root, lock)
+
+	want := map[string]float64{schema.WindowFiveHour: 4, schema.WindowWeekly: 92}
+	if fmt.Sprint(atUnlock) != fmt.Sprint(want) {
+		t.Errorf("snapshot at unlock = %v, want %v: this session's 5h merged with the other's newer weekly, saved before the unlock", atUnlock, want)
+	}
+}
+
+// While another session keeps the snapshot locked past the wait, this
+// statusline still merges for its own line but doesn't save, since saving
+// could roll back what the holder saves (#330).
+func TestWriteStatuslineSnapshotSkipsSaveWithoutLock(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute),
+		window(schema.WindowFiveHour, 300, 6, now.Add(3*time.Hour)),
+		window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour)))
+	tool := liveClaudeTool(now, now, window(schema.WindowWeekly, 10080, 95, now.Add(time.Hour)))
+
+	writeStatuslineSnapshot(&tool, now, root, func(string) (func(), error) { return nil, errors.New("still held") })
+
+	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 92 {
+		t.Errorf("snapshot weekly = %v, want 92 left as the holder saves it", got[schema.WindowWeekly])
+	}
+	if len(tool.Limits) != 2 {
+		t.Errorf("line limits = %+v, want the payload's weekly with the snapshot's 5h", tool.Limits)
+	}
+}
+
+// A system without a file lock saves unlocked: not saving would leave the
+// snapshot never updated there (#330).
+func TestWriteStatuslineSnapshotSavesWhereLockUnsupported(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute), window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour)))
+	tool := liveClaudeTool(now, now, window(schema.WindowWeekly, 10080, 95, now.Add(time.Hour)))
+
+	writeStatuslineSnapshot(&tool, now, root, func(string) (func(), error) { return nil, errors.ErrUnsupported })
+
+	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 95 {
+		t.Errorf("snapshot weekly = %v, want the newer 95 saved", got[schema.WindowWeekly])
+	}
+}
+
+// End to end with the real lock held by another session the whole time: the
+// statusline waits, gives up, still prints its line, and leaves the snapshot
+// to the holder (#330).
+func TestRunStatuslineLeavesLockedSnapshot(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("no snapshot lock on " + runtime.GOOS)
 	}
@@ -675,38 +761,22 @@ func TestRunStatuslineWaitsForConcurrentSnapshotWrite(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	resets := now.Add(time.Hour)
 	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Hour), window(schema.WindowWeekly, 10080, 90, resets))
-
-	// Another session is mid-merge.
 	unlock, err := cache.LockSnapshot(schema.ToolClaudeCode)
 	if err != nil {
 		t.Fatalf("LockSnapshot: %v", err)
 	}
+	defer unlock()
+
 	input := fmt.Sprintf(`{"session_id":"a","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":91,"resets_at":%d}}}`,
 		transcriptRespondedAt(t, now.Add(-5*time.Minute)), resets.Unix())
-	done := make(chan int, 1)
-	go func() {
-		var out bytes.Buffer
-		done <- runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now)
-	}()
-	select {
-	case <-done:
-		unlock()
-		t.Fatal("the statusline saved while another session held the snapshot")
-	case <-time.After(100 * time.Millisecond):
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
 	}
-	// That session saves a newer reading and lets go.
-	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute), window(schema.WindowWeekly, 10080, 92, resets))
-	unlock()
-	select {
-	case code := <-done:
-		if code != 0 {
-			t.Fatalf("runStatuslineWithIO exit = %d", code)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the statusline still waits after the snapshot was released")
+	if got := strings.TrimSpace(out.String()); got != "9%" {
+		t.Errorf("statusline output = %q, want its own reading (9%%)", got)
 	}
-	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
-	if !ok || len(snap.Limits) != 1 || *snap.Limits[0].UsedPct != 92 {
-		t.Fatalf("snapshot = %+v, %v, want the other session's newer 92%% kept", snap, ok)
+	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 90 {
+		t.Errorf("snapshot weekly = %v, want 90 left to the holder", got[schema.WindowWeekly])
 	}
 }

@@ -7,40 +7,51 @@ import (
 	"time"
 )
 
-// A second holder waits while the lock is held — two opens of the lock file
-// exclude each other even within one process — and gets it once released.
+// A second open of the lock file is excluded while the first holds it —
+// even within one process — and gets it once the first lets go.
 func TestLockFileExcludesAnotherHolder(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	unlock, err := lockFile("x.lock", time.Second)
 	if err != nil {
 		t.Fatalf("first lock: %v", err)
 	}
-	got := make(chan error, 1)
-	go func() {
-		second, err := lockFile("x.lock", 5*time.Second)
-		if err == nil {
-			second()
-		}
-		got <- err
-	}()
-	select {
-	case err := <-got:
-		t.Fatalf("second holder returned (err = %v) while the lock was held", err)
-	case <-time.After(100 * time.Millisecond):
+	if second, err := lockFile("x.lock", 20*time.Millisecond); err == nil {
+		second()
+		unlock()
+		t.Fatal("second lock taken while the first was held")
 	}
 	unlock()
-	select {
-	case err := <-got:
-		if err != nil {
-			t.Fatalf("second lock after release: %v", err)
-		}
-	case <-time.After(4 * time.Second):
-		t.Fatal("second holder still waiting after the lock was released")
+	second, err := lockFile("x.lock", 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("lock after the first let go: %v", err)
+	}
+	second()
+}
+
+// A waiter gets the lock as soon as its holder lets go within the wait.
+func TestLockFileAcquiresOnceReleasedDuringWait(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	unlock, err := lockFile("x.lock", time.Second)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		unlock()
+	}()
+	start := time.Now()
+	second, err := lockFile("x.lock", 5*time.Second)
+	if err != nil {
+		t.Fatalf("lock after the holder let go: %v", err)
+	}
+	second()
+	if waited := time.Since(start); waited < 40*time.Millisecond {
+		t.Errorf("acquired after %v, before the holder let go", waited)
 	}
 }
 
 // Past its wait a holder gives up with an error instead of blocking the
-// statusline, and the lock taken by the other is unaffected.
+// statusline.
 func TestLockFileGivesUpAfterWait(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	unlock, err := lockFile("x.lock", time.Second)
