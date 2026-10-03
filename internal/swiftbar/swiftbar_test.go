@@ -8,6 +8,7 @@ import (
 
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
+	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -720,5 +721,27 @@ func TestGaugeStatusMarksOldReading(t *testing.T) {
 	}
 	if s.Tools[0].Stale {
 		t.Error("gaugeStatus changed the status passed in")
+	}
+}
+
+// `tacho swiftbar --png` previews the menu bar's ring through GaugePNG, so
+// the two show the same image for the same input — an old reading grayed in
+// both, not only in the menu bar (#331).
+func TestGaugePNGMatchesTitleImage(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 2*time.Hour)}}
+	cfg := config.Default()
+	cfg.Menubar.Metric = render.MetricLimitWeekly
+	limits := render.LimitDisplay(cfg.Limits.Display)
+	b64, ok := GaugePNG(s, now, true, cfg.Menubar.Metric, limits)
+	if !ok {
+		t.Fatal("GaugePNG rendered nothing")
+	}
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	if title != "| image="+b64 {
+		t.Error("the menu bar ring and GaugePNG differ for the same input")
+	}
+	if raw, _ := menubar.PNGBase64(s, true, cfg.Menubar.Metric, limits); raw == b64 {
+		t.Error("GaugePNG drew the old reading like a fresh one (ring not grayed)")
 	}
 }

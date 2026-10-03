@@ -227,7 +227,7 @@ func titleLine(s schema.Status, now time.Time, dark bool, cfg config.Config, lim
 		return numberTitle(s, now, metric, limits)
 	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(gaugeStatus(s, now, metric), dark, metric, limits); ok {
+		if b64, ok := GaugePNG(s, now, dark, metric, limits); ok {
 			return "| image=" + b64
 		}
 	}
@@ -246,6 +246,13 @@ func shownStale(t schema.Tool, now time.Time, metric string) bool {
 
 // staleMark is appended to a menu bar value that is an old reading.
 const staleMark = "⚠"
+
+// GaugePNG is the meter style's gauge image (base64 PNG) for s, with the
+// ring of each tool whose shown limit is an old reading grayed: the image the
+// menu bar shows and `tacho swiftbar --png` previews (#331).
+func GaugePNG(s schema.Status, now time.Time, dark bool, metric string, limits render.LimitDisplay) (string, bool) {
+	return menubar.PNGBase64(gaugeStatus(s, now, metric), dark, metric, limits)
+}
 
 // gaugeStatus is s with each tool whose shown limit is an old reading marked
 // stale, which grays its ring; s itself is left as is.
