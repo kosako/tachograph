@@ -728,6 +728,7 @@ func TestGaugeStatusMarksOldReading(t *testing.T) {
 // the two show the same image for the same input — an old reading grayed in
 // both, not only in the menu bar (#331).
 func TestGaugePNGMatchesTitleImage(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "") // the meter style draws the image, not the moon text
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
 	s := schema.Status{Tools: []schema.Tool{observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 2*time.Hour)}}
 	cfg := config.Default()
