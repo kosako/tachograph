@@ -115,18 +115,48 @@ func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text s
 // the limit pressure that does exist instead of "--". The fallback self-
 // reverts once the configured window reappears in the payload.
 func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text string, pressure PressureLevel) {
-	frac, text, pressure = Metric(t, metric, d)
-	if !IsLimitMetric(metric) || text != Missing || !t.Available || t.Error != nil {
-		return frac, text, pressure
+	l, ok := MenubarLimit(t, metric)
+	if !ok {
+		return Metric(t, metric, d)
 	}
-	for _, l := range t.Limits {
-		if l.UsedPct == nil {
-			continue
-		}
-		f, txt, p := limitGauge(*l.UsedPct, d)
-		return f, windowShort(l.Window) + txt, p
+	frac, text, pressure = limitGauge(*l.UsedPct, d)
+	if l.Window != limitWindow(metric) {
+		text = windowShort(l.Window) + text
 	}
 	return frac, text, pressure
+}
+
+// MenubarLimit is the window the menu bar shows for a limit metric: the
+// configured one when the tool reports it, else the tool's first reported
+// window (see MenubarMetric). ok is false for the other metrics and when the
+// tool reports no window.
+func MenubarLimit(t schema.Tool, metric string) (schema.Limit, bool) {
+	if !IsLimitMetric(metric) || !t.Available || t.Error != nil {
+		return schema.Limit{}, false
+	}
+	window := limitWindow(metric)
+	for _, l := range t.Limits {
+		if l.Window == window && l.UsedPct != nil {
+			return l, true
+		}
+	}
+	for _, l := range t.Limits {
+		if l.UsedPct != nil {
+			return l, true
+		}
+	}
+	return schema.Limit{}, false
+}
+
+// limitWindow is the window a limit metric reads.
+func limitWindow(metric string) string {
+	switch metric {
+	case MetricLimit5h:
+		return schema.WindowFiveHour
+	case MetricLimitWeekly:
+		return schema.WindowWeekly
+	}
+	return ""
 }
 
 // IsLimitMetric reports whether metric is one of the rate-limit windows.

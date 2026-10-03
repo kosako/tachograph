@@ -80,7 +80,7 @@ func (r Renderer) Render(s schema.Status, now time.Time, dark bool, cfg config.C
 	metric := effectiveMetric(cfg, hideLimits)
 
 	var b strings.Builder
-	b.WriteString(titleLine(shown, dark, cfg, limits, metric))
+	b.WriteString(titleLine(shown, now, dark, cfg, limits, metric))
 	b.WriteString("\n---\n")
 	for i, t := range shown.Tools {
 		if i > 0 {
@@ -217,24 +217,58 @@ func (r Renderer) clickOption(b *strings.Builder, depth int, label string, param
 // style it is the metric value as text. cost/tokens have no gauge fraction,
 // so the meter style falls back to the number text for them. For gauge
 // metrics, TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the
-// image.
-func titleLine(s schema.Status, dark bool, cfg config.Config, limits render.LimitDisplay, metric string) string {
+// image. A value that is an old reading is marked in every style (see
+// shownStale).
+func titleLine(s schema.Status, now time.Time, dark bool, cfg config.Config, limits render.LimitDisplay, metric string) string {
 	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
 	// have no fraction, so the ring would always be empty — fall back to the
 	// number style for them.
 	if cfg.Menubar.Style == config.StyleNumber || !render.MetricIsGauge(metric) {
-		return numberTitle(s, metric, limits)
+		return numberTitle(s, now, metric, limits)
 	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
-		if b64, ok := menubar.PNGBase64(s, dark, metric, limits); ok {
+		if b64, ok := GaugePNG(s, now, dark, metric, limits); ok {
 			return "| image=" + b64
 		}
 	}
-	return title(s, metric, limits)
+	return title(s, now, metric, limits)
 }
 
-// numberTitle renders the chosen metric per tool as text, e.g. "C 24% X 7%".
-func numberTitle(s schema.Status, metric string, limits render.LimitDisplay) string {
+// shownStale reports whether the limit the menu bar shows for t is an old
+// reading: the tool's row is stale, or the window was observed longer ago
+// than the tool's stale threshold — use and resets since then aren't in it
+// (#331). cost / tokens are recomputed from the logs on every run and are
+// never shown as old.
+func shownStale(t schema.Tool, now time.Time, metric string) bool {
+	l, ok := render.MenubarLimit(t, metric)
+	return ok && (t.Stale || core.ObservedStale(t.Tool, l, now))
+}
+
+// staleMark is appended to a menu bar value that is an old reading.
+const staleMark = "⚠"
+
+// GaugePNG is the meter style's gauge image (base64 PNG) for s, with the
+// ring of each tool whose shown limit is an old reading grayed: the image the
+// menu bar shows and `tacho swiftbar --png` previews (#331).
+func GaugePNG(s schema.Status, now time.Time, dark bool, metric string, limits render.LimitDisplay) (string, bool) {
+	return menubar.PNGBase64(gaugeStatus(s, now, metric), dark, metric, limits)
+}
+
+// gaugeStatus is s with each tool whose shown limit is an old reading marked
+// stale, which grays its ring; s itself is left as is.
+func gaugeStatus(s schema.Status, now time.Time, metric string) schema.Status {
+	tools := make([]schema.Tool, len(s.Tools))
+	for i, t := range s.Tools {
+		t.Stale = t.Stale || shownStale(t, now, metric)
+		tools[i] = t
+	}
+	s.Tools = tools
+	return s
+}
+
+// numberTitle renders the chosen metric per tool as text, e.g. "C 24% X 7%",
+// with an old reading marked ("C 24%⚠").
+func numberTitle(s schema.Status, now time.Time, metric string, limits render.LimitDisplay) string {
 	var parts []string
 	for _, t := range s.Tools {
 		if !t.Available || t.Error != nil {
@@ -245,6 +279,9 @@ func numberTitle(s schema.Status, metric string, limits render.LimitDisplay) str
 			initial = "C"
 		}
 		_, text, _ := render.MenubarMetric(t, metric, limits)
+		if shownStale(t, now, metric) {
+			text += staleMark
+		}
 		parts = append(parts, initial+" "+text)
 	}
 	if len(parts) == 0 {
@@ -257,8 +294,8 @@ func numberTitle(s schema.Status, metric string, limits render.LimitDisplay) str
 // The moon shows the chosen gauge metric — for a limit window its headroom
 // (full = nothing used yet) or use per limits, or the tool's first reported
 // window when the chosen one is missing (same fallback as the ring and the
-// number style).
-func title(s schema.Status, metric string, limits render.LimitDisplay) string {
+// number style). An old reading is marked as in the number style.
+func title(s schema.Status, now time.Time, metric string, limits render.LimitDisplay) string {
 	var parts []string
 	for _, t := range s.Tools {
 		initial := "X"
@@ -269,7 +306,11 @@ func title(s schema.Status, metric string, limits render.LimitDisplay) string {
 			continue
 		}
 		if frac, _, _ := render.MenubarMetric(t, metric, limits); frac != nil {
-			parts = append(parts, initial+render.Moon(*frac*100))
+			dial := initial + render.Moon(*frac*100)
+			if shownStale(t, now, metric) {
+				dial += staleMark
+			}
+			parts = append(parts, dial)
 		} else {
 			parts = append(parts, initial+render.DialMissing)
 		}
@@ -471,7 +512,8 @@ const labelW = 7
 
 // limitRow renders a rate-limit window with a bar and figure showing what
 // is left or what is used per limits, reset time, and pressure color by use
-// (or "--" when the window is absent).
+// (or "--" when the window is absent). A window observed longer ago than the
+// tool's stale threshold is grayed and marked with its age, "⚠3h" (#331).
 func (r Renderer) limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time, limits render.LimitDisplay) {
 	for _, l := range t.Limits {
 		if l.Window == window && l.UsedPct != nil {
@@ -481,7 +523,12 @@ func (r Renderer) limitRow(b *strings.Builder, t schema.Tool, window, label stri
 			if l.ResetsAt != nil {
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
-			r.dataRow(b, line, r.lineColor(t, render.PressureFor(used)))
+			color := r.lineColor(t, render.PressureFor(used))
+			if core.ObservedStale(t.Tool, l, now) {
+				line += " " + staleMark + render.Age(*l.ObservedAt, now)
+				color = colorGray
+			}
+			r.dataRow(b, line, color)
 			return
 		}
 	}

@@ -29,6 +29,18 @@ func staleAfter(tool string) time.Duration {
 	return schema.StaleAfterMinutes * time.Minute
 }
 
+// ObservedStale reports whether l was observed longer ago than its tool's
+// stale threshold (see staleAfter): use and resets since then aren't in the
+// reading (#331). A limit without a readable observation time isn't reported
+// stale — its age is unknown.
+func ObservedStale(tool string, l schema.Limit, now time.Time) bool {
+	if l.ObservedAt == nil {
+		return false
+	}
+	observed, err := time.Parse(time.RFC3339, *l.ObservedAt)
+	return err == nil && now.Sub(observed) > staleAfter(tool)
+}
+
 // project is the window-average extrapolation of one limit. With D the
 // window length, R its reset time, O the observation time, and U the use
 // observed, the window is taken to have begun at R − D with nothing used; E =

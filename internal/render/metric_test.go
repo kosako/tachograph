@@ -195,3 +195,25 @@ func TestMenubarMetricFallback(t *testing.T) {
 		t.Errorf("MenubarMetric(nil-only) text = %q, want %q", text, Missing)
 	}
 }
+
+// MenubarLimit is the window MenubarMetric shows, so the menu bar can tell
+// how old that reading is (#331).
+func TestMenubarLimit(t *testing.T) {
+	wk := 15.0
+	weeklyOnly := schema.Tool{Tool: schema.ToolCodex, Available: true, Limits: []schema.Limit{{Window: schema.WindowWeekly, UsedPct: &wk}}}
+	if l, ok := MenubarLimit(metricTool(), MetricLimit5h); !ok || l.Window != schema.WindowFiveHour {
+		t.Errorf("MenubarLimit(5h present) = %+v, %v, want the 5h window", l, ok)
+	}
+	if l, ok := MenubarLimit(weeklyOnly, MetricLimit5h); !ok || l.Window != schema.WindowWeekly {
+		t.Errorf("MenubarLimit(5h, weekly-only) = %+v, %v, want the weekly fallback", l, ok)
+	}
+	if _, ok := MenubarLimit(weeklyOnly, MetricCost); ok {
+		t.Error("MenubarLimit(cost) = ok, want none for a non-limit metric")
+	}
+	if _, ok := MenubarLimit(schema.Tool{Tool: schema.ToolCodex, Available: true}, MetricLimit5h); ok {
+		t.Error("MenubarLimit(no limits) = ok, want none")
+	}
+	if _, ok := MenubarLimit(schema.Tool{Tool: schema.ToolCodex, Limits: weeklyOnly.Limits}, MetricLimit5h); ok {
+		t.Error("MenubarLimit(unavailable) = ok, want none")
+	}
+}

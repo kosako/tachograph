@@ -20,7 +20,6 @@ import (
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/daily"
-	"github.com/kosako/tachograph/internal/menubar"
 	"github.com/kosako/tachograph/internal/notify"
 	"github.com/kosako/tachograph/internal/pricing"
 	"github.com/kosako/tachograph/internal/render"
@@ -167,7 +166,7 @@ func runSwiftbar(args []string) int {
 	s := core.Status(core.Options{Now: now})
 	shown := cfg.FilterStatus(s)
 	if *pngOut != "" {
-		b64, ok := menubar.PNGBase64(shown, dark, cfg.Menubar.Metric, render.LimitDisplay(cfg.Limits.Display))
+		b64, ok := swiftbar.GaugePNG(shown, now, dark, cfg.Menubar.Metric, render.LimitDisplay(cfg.Limits.Display))
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
