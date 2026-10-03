@@ -537,9 +537,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 		// The snapshot belongs to the config root this payload was observed
 		// from (#321); the payload names none, so resolve it as Status does.
 		root := core.Roots(core.Options{})[schema.ToolClaudeCode]
-		limitsObserved := mergeSnapshotLimits(&claudeTool, now, root)
-		core.AddProjections(&claudeTool, now) // the statusline row bypasses core.Status for Claude (#295)
-		_ = cache.WriteSnapshot(claudeTool, limitsObserved, root)
+		writeStatuslineSnapshot(&claudeTool, now, root)
 	}
 	s := core.Status(core.Options{Now: now}) // codex side rides the TTL cache
 	for i := range s.Tools {
@@ -577,6 +575,21 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 		return t.Fallback.SessionTokens != nil || t.Fallback.EstimatedCostUSD != nil
 	}
 	return false
+}
+
+// writeStatuslineSnapshot merges the payload's limits with the snapshot's and
+// saves it, holding the snapshot's lock from the read to the write: another
+// session's statusline saving in between would otherwise be overwritten by
+// this older merge (#330). Without the lock — still held elsewhere after the
+// wait, or unsupported here — it saves anyway: a snapshot left unwritten is
+// worse than the narrow race.
+func writeStatuslineSnapshot(t *schema.Tool, now time.Time, root string) {
+	if unlock, err := cache.LockSnapshot(t.Tool); err == nil {
+		defer unlock()
+	}
+	limitsObserved := mergeSnapshotLimits(t, now, root)
+	core.AddProjections(t, now) // the statusline row bypasses core.Status for Claude (#295)
+	_ = cache.WriteSnapshot(*t, limitsObserved, root)
 }
 
 // mergeSnapshotLimits merges the cached snapshot's windows into the live

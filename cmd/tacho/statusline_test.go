@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -660,5 +661,52 @@ func TestRunStatuslineDatesCarriedWindowWithoutReadableObservation(t *testing.T)
 	_, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
 	if !ok || !got.Equal(observed) {
 		t.Errorf("limits observation = %v, %v, want the snapshot's %v (not re-stamped)", got, ok, observed)
+	}
+}
+
+// While another session's statusline holds the snapshot for its merge, a
+// statusline waits, then merges with what that session saved — it doesn't
+// read first and save its older merge over the newer one (#330).
+func TestRunStatuslineWaitsForConcurrentSnapshotWrite(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("no snapshot lock on " + runtime.GOOS)
+	}
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	resets := now.Add(time.Hour)
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Hour), window(schema.WindowWeekly, 10080, 90, resets))
+
+	// Another session is mid-merge.
+	unlock, err := cache.LockSnapshot(schema.ToolClaudeCode)
+	if err != nil {
+		t.Fatalf("LockSnapshot: %v", err)
+	}
+	input := fmt.Sprintf(`{"session_id":"a","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":91,"resets_at":%d}}}`,
+		transcriptRespondedAt(t, now.Add(-5*time.Minute)), resets.Unix())
+	done := make(chan int, 1)
+	go func() {
+		var out bytes.Buffer
+		done <- runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now)
+	}()
+	select {
+	case <-done:
+		unlock()
+		t.Fatal("the statusline saved while another session held the snapshot")
+	case <-time.After(100 * time.Millisecond):
+	}
+	// That session saves a newer reading and lets go.
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute), window(schema.WindowWeekly, 10080, 92, resets))
+	unlock()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("runStatuslineWithIO exit = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the statusline still waits after the snapshot was released")
+	}
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	if !ok || len(snap.Limits) != 1 || *snap.Limits[0].UsedPct != 92 {
+		t.Fatalf("snapshot = %+v, %v, want the other session's newer 92%% kept", snap, ok)
 	}
 }
