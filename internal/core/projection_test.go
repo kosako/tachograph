@@ -190,3 +190,28 @@ func TestStatusProjectsSnapshotLimits(t *testing.T) {
 		}
 	}
 }
+
+// A limit observed longer ago than its tool's stale threshold is an old
+// reading; one without a readable observation time has no known age (#331).
+func TestObservedStale(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	bad := "not-a-time"
+	cases := []struct {
+		name     string
+		tool     string
+		observed *string
+		want     bool
+	}{
+		{name: "claude within the hour", tool: schema.ToolClaudeCode, observed: rfc(now.Add(-60 * time.Minute)), want: false},
+		{name: "claude past the hour", tool: schema.ToolClaudeCode, observed: rfc(now.Add(-61 * time.Minute)), want: true},
+		{name: "codex within 5 hours", tool: schema.ToolCodex, observed: rfc(now.Add(-4 * time.Hour)), want: false},
+		{name: "codex past 5 hours", tool: schema.ToolCodex, observed: rfc(now.Add(-301 * time.Minute)), want: true},
+		{name: "no observation time", tool: schema.ToolClaudeCode, observed: nil, want: false},
+		{name: "unreadable observation time", tool: schema.ToolClaudeCode, observed: &bad, want: false},
+	}
+	for _, c := range cases {
+		if got := ObservedStale(c.tool, schema.Limit{Window: schema.WindowWeekly, ObservedAt: c.observed}, now); got != c.want {
+			t.Errorf("%s: ObservedStale = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

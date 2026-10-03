@@ -637,3 +637,88 @@ func TestRendererBinPathClickTarget(t *testing.T) {
 		t.Errorf("settings should click the renderer's BinPath:\n%s", out)
 	}
 }
+
+// observedAgo dates every window of tl as observed ago before now.
+func observedAgo(tl schema.Tool, now time.Time, ago time.Duration) schema.Tool {
+	at := now.Add(-ago).Format(time.RFC3339)
+	for i := range tl.Limits {
+		tl.Limits[i].ObservedAt = &at
+	}
+	return tl
+}
+
+// A menu bar value whose window was observed longer ago than its tool's
+// stale threshold (Claude 60 min, Codex 5 h) is marked in the number style,
+// as is one from a stale row; a fresh one is not, and neither is cost, which
+// is recomputed from the logs on every run (#331).
+func TestRenderNumberStyleMarksOldReading(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
+	cases := []struct {
+		name   string
+		tool   schema.Tool
+		metric string
+		want   string
+	}{
+		{name: "claude observed 2h ago", tool: observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 2*time.Hour), metric: render.MetricLimitWeekly, want: "C 8%" + staleMark},
+		{name: "claude observed 10m ago", tool: observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 10*time.Minute), metric: render.MetricLimitWeekly, want: "C 8%"},
+		{name: "codex observed 2h ago", tool: observedAgo(tool(schema.ToolCodex, false, 24, 92), now, 2*time.Hour), metric: render.MetricLimitWeekly, want: "X 8%"},
+		{name: "stale row without an observation time", tool: tool(schema.ToolClaudeCode, true, 24, 92), metric: render.MetricLimitWeekly, want: "C 8%" + staleMark},
+		{name: "cost on a stale row", tool: observedAgo(tool(schema.ToolClaudeCode, true, 24, 92), now, 2*time.Hour), metric: render.MetricCost, want: "C " + render.Missing},
+	}
+	for _, c := range cases {
+		cfg := config.Default()
+		cfg.Menubar.Style = config.StyleNumber
+		cfg.Menubar.Metric = c.metric
+		s := schema.Status{Tools: []schema.Tool{c.tool}}
+		if got := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]; got != c.want {
+			t.Errorf("%s: number title = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The moon-dial text title marks an old reading the same way (#331).
+func TestRenderTextTitleMarksOldReading(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 2*time.Hour)}}
+	cfg := config.Default()
+	cfg.Menubar.Metric = render.MetricLimitWeekly
+	title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+	if want := "C" + render.Moon(8) + staleMark; title != want {
+		t.Errorf("text title = %q, want %q", title, want)
+	}
+}
+
+// In the dropdown a window observed longer ago than the tool's stale
+// threshold is grayed and carries its age, even when the row itself is fresh;
+// a fresh window keeps its pressure color and no mark (#331).
+func TestRenderLimitRowMarksOldObservation(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
+	old := schema.Status{Tools: []schema.Tool{observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 3*time.Hour)}}
+	out := (Renderer{}).Render(old, now, true, config.Default(), core.DailyHistory{})
+	if want := barRow("weekly", 8, " "+staleMark+"3h") + " | font=" + dataFont + " color=" + colorGray; !strings.Contains(out, want) {
+		t.Errorf("old weekly row missing %q:\n%s", want, out)
+	}
+	fresh := schema.Status{Tools: []schema.Tool{observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 10*time.Minute)}}
+	out = (Renderer{}).Render(fresh, now, true, config.Default(), core.DailyHistory{})
+	if want := barRow("weekly", 8, "") + " | font=" + dataFont + " color=" + (Renderer{}).attnRed(); !strings.Contains(out, want) {
+		t.Errorf("fresh weekly row missing %q:\n%s", want, out)
+	}
+}
+
+// The ring grays a tool whose shown limit is an old reading by marking it
+// stale for the gauge only; the status passed in is left as is (#331).
+func TestGaugeStatusMarksOldReading(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T12:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{
+		observedAgo(tool(schema.ToolClaudeCode, false, 24, 92), now, 2*time.Hour),
+		observedAgo(tool(schema.ToolCodex, false, 24, 92), now, 2*time.Hour),
+	}}
+	g := gaugeStatus(s, now, render.MetricLimitWeekly)
+	if !g.Tools[0].Stale || g.Tools[1].Stale {
+		t.Errorf("gauge stale = %v / %v, want the Claude reading (2h > 60 min) only", g.Tools[0].Stale, g.Tools[1].Stale)
+	}
+	if s.Tools[0].Stale {
+		t.Error("gaugeStatus changed the status passed in")
+	}
+}

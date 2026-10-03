@@ -194,6 +194,16 @@ snapshot (and the 30-second cache) is tied to the config directories
 (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, `~/.claude` / `~/.codex` by default) it
 was observed from; a tacho run against other directories does not use it.
 
+**Current limitation (freshness of Claude's limits, #331)**: the only Claude
+5h / weekly figures tacho can read are the ones Claude Code passes to the
+statusLine — what Claude Code received with its API responses. So they don't
+update while Claude Code on this Mac isn't calling the API, and use on
+Claude.ai, in the desktop app's chat, or on another machine shows up only once
+Claude Code on this Mac calls the API again. Even in use they can lag behind
+the official figures (Claude Code's `/usage`, the desktop app's settings): in
+one case a one-point gap lasted about 20 minutes. Old readings get the `⚠` in
+SwiftBar.
+
 ### Customizing the status line
 
 Put a one-line template in `~/.config/tachograph/statusline.tmpl` (or pass the
@@ -270,9 +280,13 @@ bar shows a tachometer per tool — the logo ringed by a fuel-gauge-style ring
 showing the 5-hour headroom by default (the Metric setting below can switch it
 to weekly), which drains clockwise as you use it (or fills up, with the usage
 display); clicking reveals per-tool details. The ring is colored by usage
-(green/yellow/red, gray when stale). Only the ring marks stale data — the
-number and moon-text displays show old values as is — so check each tool's
-dropdown header (`⚠` + age) for how old the data is. The logo and track are
+(green/yellow/red, gray for an old reading). When the 5h / weekly value shown
+is an old reading — the window was observed longer ago than the tool's stale
+threshold (Claude 60 minutes / Codex 5 hours), or the tool's row is stale —
+the ring turns gray and the number and moon-text displays get a `⚠` (e.g.
+`C 8%⚠`). In the dropdown, besides each tool's header (`⚠` + age when the row
+is stale), a 5h / weekly row whose observation is old is dimmed and shows its
+age (e.g. `⚠3h`). The logo and track are
 white by default (for Dark mode or a wallpaper-darkened menu bar); set
 `TACHO_APPEARANCE=light` if your menu bar is light. Set
 `TACHO_SWIFTBAR_TEXT=1` to fall back to the moon-dial text (`C🌔 X🌑`; with the
