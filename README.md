@@ -192,7 +192,7 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 
 | 数字表示・残量 | メーター表示・使用率 |
 | --- | --- |
-| <img src="assets/screenshots/swiftbar-number.png" alt="SwiftBarの数字表示（残量）とドロップダウン" height="720"> | <img src="assets/screenshots/swiftbar-meter.png" alt="SwiftBarのメーター表示（使用率）とドロップダウン" height="720"> |
+| <img src="assets/screenshots/swiftbar-number.png" alt="SwiftBarの数字表示(残量)とドロップダウン" height="720"> | <img src="assets/screenshots/swiftbar-meter.png" alt="SwiftBarのメーター表示(使用率)とドロップダウン" height="720"> |
 
 ```sh
 brew install swiftbar          # 未導入なら(起動してプラグインフォルダを選んでおく)
