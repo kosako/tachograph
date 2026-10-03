@@ -190,6 +190,10 @@ tacho config statusline-preset moon      # 選んで statusline.tmpl に書き�
 
 どのエージェントが動いていても(何も動いていなくても)常時見える表示面として、[SwiftBar](https://github.com/swiftbar/SwiftBar) プラグインを同梱しています。メニューバーにはツールごとのタコメーター(ロゴの周りのリングが既定では 5h 枠の残量を示し、使うほど時計回りに減っていく燃料計。使用率表示に切り替えると使うほど溜まる。後述の「指標」で weekly 枠にも切り替え可)、クリックで各ツールの詳細が出ます。リングは使用率で緑/黄/赤(古い値はグレー)。表示している 5h / weekly の値が古いとき — その枠の観測がツールの stale 閾値(Claude 60 分 / Codex 5 時間)より前か、ツールの行が stale のとき — は、リングがグレーになり、数字や月齢テキストには `⚠` が付きます(例: `C 8%⚠`)。ドロップダウンでは、行が stale のときの各ツールの見出し(`⚠` + 経過時間)に加えて、観測が古い 5h / weekly の行も薄く表示し、観測からの経過時間(例: `⚠3h`)を付けます。ロゴ/トラックは既定で白(ダークモードや壁紙で暗くなったメニューバー向け)。ライト背景のメニューバーなら `TACHO_APPEARANCE=light` で黒にできます。`TACHO_SWIFTBAR_TEXT=1` で月齢テキスト表示(`C🌔 X🌑`、既定の残量表示では満月 = 全部残っている。使用率表示では満月 = 使い切り)にフォールバックできます。
 
+| 数字表示・残量 | メーター表示・使用率 |
+| --- | --- |
+| <img src="assets/screenshots/swiftbar-number.png" alt="SwiftBarの数字表示（残量）とドロップダウン" height="720"> | <img src="assets/screenshots/swiftbar-meter.png" alt="SwiftBarのメーター表示（使用率）とドロップダウン" height="720"> |
+
 ```sh
 brew install swiftbar          # 未導入なら(起動してプラグインフォルダを選んでおく)
 tacho setup swiftbar --write   # プラグインフォルダに tacho.30s.sh を置く

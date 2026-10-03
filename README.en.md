@@ -293,6 +293,10 @@ white by default (for Dark mode or a wallpaper-darkened menu bar); set
 default headroom display a full moon = all left, with the usage display a full
 moon = used up).
 
+| Number display · Remaining capacity | Meter display · Usage |
+| --- | --- |
+| <img src="assets/screenshots/swiftbar-number.png" alt="SwiftBar number display (remaining capacity) and dropdown" height="720"> | <img src="assets/screenshots/swiftbar-meter.png" alt="SwiftBar meter display (usage) and dropdown" height="720"> |
+
 ```sh
 brew install swiftbar          # if you don't have it (launch it and pick a plugin folder)
 tacho setup swiftbar --write   # put tacho.30s.sh in that plugin folder
