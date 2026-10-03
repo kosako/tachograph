@@ -472,25 +472,36 @@ func TestFromStatuslineLimitsObservedAt(t *testing.T) {
 // The rate limits a payload carries are dated by when Claude Code could last
 // have refreshed them — the later of the session's last recorded API
 // response and its start (the quota probe) — not by the redraw that pushed
-// them, which for an idle session can be hours later (#330).
+// them, which for an idle session can be hours later (#330). A transcript
+// that can't be read, or whose last response has no readable timestamp,
+// leaves the session's start; with neither, the payload is dated at receipt.
 func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	ms := func(d time.Duration) *float64 {
-		v := float64(d / time.Millisecond)
-		return &v
-	}
+	ms := func(v float64) *float64 { return &v }
+	const (
+		noTranscript = iota
+		responded    // last response at lastResponse before now
+		unreadable   // transcript_path names no file
+		noTimestamp  // the usage line carries no timestamp
+		badTimestamp // the usage line's timestamp doesn't parse
+	)
 	cases := []struct {
 		name         string
-		transcript   bool
+		transcript   int
 		lastResponse time.Duration // before now
 		running      *float64      // cost.total_duration_ms; nil = not given
 		want         time.Duration // observed_at, before now
 	}{
-		{name: "last response", transcript: true, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
-		{name: "session start", running: ms(10 * time.Minute), want: 10 * time.Minute},
-		{name: "start after the last response (a resumed session's probe)", transcript: true, lastResponse: 3 * time.Hour, running: ms(10 * time.Minute), want: 10 * time.Minute},
-		{name: "last response after the start", transcript: true, lastResponse: time.Minute, running: ms(10 * time.Minute), want: time.Minute},
-		{name: "dated ahead of receipt", transcript: true, lastResponse: -time.Hour, want: 0},
+		{name: "last response", transcript: responded, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
+		{name: "session start", running: ms(600000), want: 10 * time.Minute},
+		{name: "start after the last response (a resumed session's probe)", transcript: responded, lastResponse: 3 * time.Hour, running: ms(600000), want: 10 * time.Minute},
+		{name: "last response after the start", transcript: responded, lastResponse: time.Minute, running: ms(600000), want: time.Minute},
+		{name: "dated ahead of receipt", transcript: responded, lastResponse: -time.Hour, want: 0},
+		{name: "fractional duration", running: ms(1500.5), want: 1500500 * time.Microsecond},
+		{name: "unreadable transcript, start given", transcript: unreadable, running: ms(600000), want: 10 * time.Minute},
+		{name: "unreadable transcript, no start", transcript: unreadable, want: 0},
+		{name: "no timestamp, start given", transcript: noTimestamp, running: ms(600000), want: 10 * time.Minute},
+		{name: "unparsable timestamp, no start", transcript: badTimestamp, want: 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -498,12 +509,23 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 				"model":       map[string]any{"id": "claude-x"},
 				"rate_limits": map[string]any{"five_hour": map[string]any{"used_percentage": 12, "resets_at": now.Add(2 * time.Hour).Unix()}},
 			}
-			if c.transcript {
-				path := filepath.Join(t.TempDir(), "session.jsonl")
-				line := `{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse).UTC().Format(time.RFC3339Nano) + `","message":{"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}`
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			usage := `"message":{"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}`
+			var line string
+			switch c.transcript {
+			case responded:
+				line = `{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse).UTC().Format(time.RFC3339Nano) + `",` + usage + `}`
+			case noTimestamp:
+				line = `{"type":"assistant",` + usage + `}`
+			case badTimestamp:
+				line = `{"type":"assistant","timestamp":"not-a-time",` + usage + `}`
+			}
+			if line != "" {
 				if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if c.transcript != noTranscript {
 				payload["transcript_path"] = path
 			}
 			if c.running != nil {
@@ -522,16 +544,5 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 				t.Errorf("ObservedAt = %v, want %s", l.ObservedAt, want)
 			}
 		})
-	}
-}
-
-// A fractional total_duration_ms decodes: the payload must not fail as a
-// whole over it.
-func TestFromStatuslineFractionalDuration(t *testing.T) {
-	input := []byte(`{"model":{"id":"claude-x"},"cost":{"total_cost_usd":0.5,"total_duration_ms":1500.5},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":1781258400}}}`)
-	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	got := Collect(Options{Root: t.TempDir(), Now: now, StatuslineInput: input, Getenv: noEnv})
-	if got.Error != nil || len(got.Limits) != 1 {
-		t.Fatalf("Error = %+v, Limits = %+v", got.Error, got.Limits)
 	}
 }

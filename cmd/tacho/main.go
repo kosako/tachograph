@@ -593,12 +593,26 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 // re-stamp old limits as fresh.
 func mergeSnapshotLimits(t *schema.Tool, now time.Time, root string) time.Time {
 	if t.Backend == schema.BackendSubscription {
-		carried, backend, _, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now, root)
+		carried, backend, observed, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now, root)
 		if ok && backend == schema.BackendSubscription {
-			t.Limits = core.MergeLimits(t.Limits, core.RunningLimits(carried, now))
+			t.Limits = core.MergeLimits(t.Limits, datedLimits(core.RunningLimits(carried, now), observed))
 		}
 	}
 	return earliestObservation(t.Limits)
+}
+
+// datedLimits gives each carried window whose observed_at is missing or
+// unreadable the snapshot's own observation time (limits_collected_at), so
+// it keeps aging out from when it was seen (#186) and can be weighed against
+// the payload's reading (#330).
+func datedLimits(limits []schema.Limit, observed time.Time) []schema.Limit {
+	stamp := observed.Local().Format(time.RFC3339)
+	for i := range limits {
+		if _, ok := core.ObservationTime(limits[i]); !ok {
+			limits[i].ObservedAt = &stamp
+		}
+	}
+	return limits
 }
 
 // earliestObservation is the oldest observed_at among limits; zero when none
@@ -606,11 +620,7 @@ func mergeSnapshotLimits(t *schema.Tool, now time.Time, root string) time.Time {
 func earliestObservation(limits []schema.Limit) time.Time {
 	var earliest time.Time
 	for _, l := range limits {
-		if l.ObservedAt == nil {
-			continue
-		}
-		ts, err := time.Parse(time.RFC3339, *l.ObservedAt)
-		if err == nil && (earliest.IsZero() || ts.Before(earliest)) {
+		if ts, ok := core.ObservationTime(l); ok && (earliest.IsZero() || ts.Before(earliest)) {
 			earliest = ts
 		}
 	}

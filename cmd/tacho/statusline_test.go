@@ -217,14 +217,9 @@ func writeClaudeSnapshotWithLimitObserved(t *testing.T, now time.Time, usedPct f
 }
 
 // writeClaudeSnapshotWithLimits seeds a fresh subscription snapshot
-// (CollectedAt 2 minutes ago) carrying limits observed at observed, each
-// window dated as the collector dates them.
+// (CollectedAt 2 minutes ago) carrying limits observed at observed.
 func writeClaudeSnapshotWithLimits(t *testing.T, now, observed time.Time, limits ...schema.Limit) {
 	t.Helper()
-	obs := observed.Format(time.RFC3339)
-	for i := range limits {
-		limits[i].ObservedAt = &obs
-	}
 	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
 	tool := schema.Tool{
 		Tool:        schema.ToolClaudeCode,
@@ -605,8 +600,8 @@ func TestRunStatuslineNewerPayloadReplacesLimits(t *testing.T) {
 	if !ok || len(snap.Limits) != 1 || *snap.Limits[0].UsedPct != 3 {
 		t.Fatalf("snapshot after a newer, lower reading = %+v, %v", snap, ok)
 	}
-	if want := now.Add(-5 * time.Second).Local().Format(time.RFC3339); snap.Limits[0].ObservedAt == nil || *snap.Limits[0].ObservedAt != want {
-		t.Errorf("ObservedAt = %v, want the last response %s", snap.Limits[0].ObservedAt, want)
+	if got, ok := core.ObservationTime(snap.Limits[0]); !ok || !got.Equal(now.Add(-5*time.Second)) {
+		t.Errorf("observed = %v, %v, want the last response %v", got, ok, now.Add(-5*time.Second))
 	}
 }
 
@@ -631,19 +626,39 @@ func TestRunStatuslineCarriesWindowsThePayloadLacks(t *testing.T) {
 	}
 
 	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
-	if !ok || len(snap.Limits) != 2 {
-		t.Fatalf("snapshot = %+v, %v, want both windows", snap, ok)
+	if !ok || len(snap.Limits) != 2 || snap.Limits[0].Window != schema.WindowFiveHour || snap.Limits[1].Window != schema.WindowWeekly {
+		t.Fatalf("snapshot = %+v, %v, want the 5h then the weekly window (ascending window_minutes)", snap, ok)
 	}
-	for _, l := range snap.Limits {
-		want := now.Local().Format(time.RFC3339) // the live weekly, dated at receipt
-		if l.Window == schema.WindowFiveHour {
-			want = carriedAt.Format(time.RFC3339)
-		}
-		if l.ObservedAt == nil || *l.ObservedAt != want {
-			t.Errorf("%s ObservedAt = %v, want %s", l.Window, l.ObservedAt, want)
+	// The carried 5h keeps its observation; the live weekly is dated at receipt.
+	for i, want := range []time.Time{carriedAt, now} {
+		if got, ok := core.ObservationTime(snap.Limits[i]); !ok || !got.Equal(want) {
+			t.Errorf("%s observed = %v, %v, want %v", snap.Limits[i].Window, got, ok, want)
 		}
 	}
 	if _, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root); !ok || !got.Equal(carriedAt) {
 		t.Errorf("limits observation = %v, %v, want the older window's %v", got, ok, carriedAt)
+	}
+}
+
+// A carried window whose observed_at can't be read takes the snapshot's own
+// observation time instead of losing it, so it still ages out from when it
+// was seen, not from the rewrite (#186, #330).
+func TestRunStatuslineDatesCarriedWindowWithoutReadableObservation(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	observed := now.Add(-29 * 24 * time.Hour)
+	bad := "not-a-time"
+	l := window(schema.WindowFiveHour, 300, 42, now.Add(2*time.Hour))
+	l.ObservedAt = &bad
+	writeClaudeSnapshotWithLimits(t, now, observed, l)
+
+	input := `{"session_id":"s","model":{"id":"claude-test"}}`
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.5h.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	_, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	if !ok || !got.Equal(observed) {
+		t.Errorf("limits observation = %v, %v, want the snapshot's %v (not re-stamped)", got, ok, observed)
 	}
 }

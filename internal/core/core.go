@@ -2,6 +2,8 @@
 package core
 
 import (
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -233,7 +235,8 @@ func RunningLimits(limits []schema.Limit, now time.Time) []schema.Limit {
 // observed later: an idle session redrawing its statusline pushes a reading
 // as old as its last API response, which must not roll back a newer one
 // another session saved (#330). The payload's reading wins a tie, and
-// whenever either observation time can't be read.
+// whenever either observation time can't be read. The result keeps the
+// schema's ascending window_minutes order whatever side each window came from.
 func MergeLimits(live, carried []schema.Limit) []schema.Limit {
 	var merged []schema.Limit
 	inLive := map[string]bool{}
@@ -252,17 +255,36 @@ func MergeLimits(live, carried []schema.Limit) []schema.Limit {
 			merged = append(merged, c)
 		}
 	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return windowLength(merged[i]) < windowLength(merged[j])
+	})
 	return merged
+}
+
+// windowLength is a limit's window_minutes for ordering; a window of unknown
+// length sorts last.
+func windowLength(l schema.Limit) int {
+	if l.WindowMinutes == nil {
+		return math.MaxInt
+	}
+	return *l.WindowMinutes
+}
+
+// ObservationTime is when l was observed; ok is false when its observed_at is
+// missing or unreadable.
+func ObservationTime(l schema.Limit) (time.Time, bool) {
+	if l.ObservedAt == nil {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, *l.ObservedAt)
+	return ts, err == nil
 }
 
 // observedAfter reports whether a was observed strictly later than b.
 func observedAfter(a, b schema.Limit) bool {
-	if a.ObservedAt == nil || b.ObservedAt == nil {
-		return false
-	}
-	ta, errA := time.Parse(time.RFC3339, *a.ObservedAt)
-	tb, errB := time.Parse(time.RFC3339, *b.ObservedAt)
-	return errA == nil && errB == nil && ta.After(tb)
+	ta, okA := ObservationTime(a)
+	tb, okB := ObservationTime(b)
+	return okA && okB && ta.After(tb)
 }
 
 // dropSessionScope clears the values that describe "the current session",
