@@ -452,8 +452,9 @@ func TestUsageKey(t *testing.T) {
 	}
 }
 
-// The statusline payload is the observation: each window's observed_at is
-// the tool's collected_at (#295).
+// A payload that names neither a transcript nor the session's duration is
+// dated at receipt: each window's observed_at is the tool's collected_at
+// (#295).
 func TestFromStatuslineLimitsObservedAt(t *testing.T) {
 	input := []byte(`{"model":{"id":"claude-x"},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":1779646858},"seven_day":{"used_percentage":3,"resets_at":1779646858}}}`)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -465,5 +466,72 @@ func TestFromStatuslineLimitsObservedAt(t *testing.T) {
 		if l.ObservedAt == nil || *l.ObservedAt != *got.CollectedAt {
 			t.Errorf("%s ObservedAt = %v, want collected_at %s", l.Window, l.ObservedAt, *got.CollectedAt)
 		}
+	}
+}
+
+// The rate limits a payload carries are dated by when Claude Code could last
+// have refreshed them — the later of the session's last recorded API
+// response and its start (the quota probe) — not by the redraw that pushed
+// them, which for an idle session can be hours later (#330).
+func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	ms := func(d time.Duration) *float64 {
+		v := float64(d / time.Millisecond)
+		return &v
+	}
+	cases := []struct {
+		name         string
+		transcript   bool
+		lastResponse time.Duration // before now
+		running      *float64      // cost.total_duration_ms; nil = not given
+		want         time.Duration // observed_at, before now
+	}{
+		{name: "last response", transcript: true, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
+		{name: "session start", running: ms(10 * time.Minute), want: 10 * time.Minute},
+		{name: "start after the last response (a resumed session's probe)", transcript: true, lastResponse: 3 * time.Hour, running: ms(10 * time.Minute), want: 10 * time.Minute},
+		{name: "last response after the start", transcript: true, lastResponse: time.Minute, running: ms(10 * time.Minute), want: time.Minute},
+		{name: "dated ahead of receipt", transcript: true, lastResponse: -time.Hour, want: 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			payload := map[string]any{
+				"model":       map[string]any{"id": "claude-x"},
+				"rate_limits": map[string]any{"five_hour": map[string]any{"used_percentage": 12, "resets_at": now.Add(2 * time.Hour).Unix()}},
+			}
+			if c.transcript {
+				path := filepath.Join(t.TempDir(), "session.jsonl")
+				line := `{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse).UTC().Format(time.RFC3339Nano) + `","message":{"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}`
+				if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				payload["transcript_path"] = path
+			}
+			if c.running != nil {
+				payload["cost"] = map[string]any{"total_cost_usd": 0.5, "total_duration_ms": *c.running}
+			}
+			input, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := Collect(Options{Root: t.TempDir(), Now: now, StatuslineInput: input, Getenv: noEnv})
+			if got.Error != nil || len(got.Limits) != 1 {
+				t.Fatalf("Error = %+v, Limits = %+v", got.Error, got.Limits)
+			}
+			want := now.Add(-c.want).Local().Format(time.RFC3339)
+			if l := got.Limits[0]; l.ObservedAt == nil || *l.ObservedAt != want {
+				t.Errorf("ObservedAt = %v, want %s", l.ObservedAt, want)
+			}
+		})
+	}
+}
+
+// A fractional total_duration_ms decodes: the payload must not fail as a
+// whole over it.
+func TestFromStatuslineFractionalDuration(t *testing.T) {
+	input := []byte(`{"model":{"id":"claude-x"},"cost":{"total_cost_usd":0.5,"total_duration_ms":1500.5},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":1781258400}}}`)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	got := Collect(Options{Root: t.TempDir(), Now: now, StatuslineInput: input, Getenv: noEnv})
+	if got.Error != nil || len(got.Limits) != 1 {
+		t.Fatalf("Error = %+v, Limits = %+v", got.Error, got.Limits)
 	}
 }

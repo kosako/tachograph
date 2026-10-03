@@ -537,7 +537,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 		// The snapshot belongs to the config root this payload was observed
 		// from (#321); the payload names none, so resolve it as Status does.
 		root := core.Roots(core.Options{})[schema.ToolClaudeCode]
-		limitsObserved := preserveSnapshotLimits(&claudeTool, now, root)
+		limitsObserved := mergeSnapshotLimits(&claudeTool, now, root)
 		core.AddProjections(&claudeTool, now) // the statusline row bypasses core.Status for Claude (#295)
 		_ = cache.WriteSnapshot(claudeTool, limitsObserved, root)
 	}
@@ -579,33 +579,42 @@ func shouldWriteStatuslineSnapshot(input []byte, t schema.Tool) bool {
 	return false
 }
 
-// preserveSnapshotLimits carries rate limits from the cached snapshot into a
-// live payload that lacks them, so one limit-less payload doesn't erase the
-// limits other renderers show. It returns when the tool's limits were
-// originally observed — now for live limits, the snapshot's own observation
-// for preserved ones, zero when the tool ends up without limits — so the
-// snapshot rewrite can't re-stamp old limits as fresh. Limits are carried
-// only between subscription payloads: bedrock/api/vertex keep limits null by
-// the collector contract (#186).
-func preserveSnapshotLimits(t *schema.Tool, now time.Time, root string) time.Time {
-	if len(t.Limits) > 0 {
-		return now
+// mergeSnapshotLimits merges the cached snapshot's windows into the live
+// payload's (core.MergeLimits): a window the payload lacks is carried, so a
+// payload without limits or with one window doesn't erase what other
+// renderers show, and one the snapshot observed later is kept over the
+// payload's older reading (#330). Only the windows still running are
+// carried: a window past its reset would otherwise be re-saved under a fresh
+// collected_at and read (and notify) as the current one (#318). Limits are
+// merged only between subscription payloads: bedrock/api/vertex keep limits
+// null by the collector contract (#186). It returns when the tool's limits
+// were originally observed — the oldest of their windows' observations, zero
+// when the tool ends up without limits — so the snapshot rewrite can't
+// re-stamp old limits as fresh.
+func mergeSnapshotLimits(t *schema.Tool, now time.Time, root string) time.Time {
+	if t.Backend == schema.BackendSubscription {
+		carried, backend, _, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now, root)
+		if ok && backend == schema.BackendSubscription {
+			t.Limits = core.MergeLimits(t.Limits, core.RunningLimits(carried, now))
+		}
 	}
-	if t.Backend != schema.BackendSubscription {
-		return time.Time{}
+	return earliestObservation(t.Limits)
+}
+
+// earliestObservation is the oldest observed_at among limits; zero when none
+// can be read.
+func earliestObservation(limits []schema.Limit) time.Time {
+	var earliest time.Time
+	for _, l := range limits {
+		if l.ObservedAt == nil {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, *l.ObservedAt)
+		if err == nil && (earliest.IsZero() || ts.Before(earliest)) {
+			earliest = ts
+		}
 	}
-	limits, backend, observed, ok := cache.ReadSnapshotLimits(t.Tool, cache.SnapshotMaxAge, now, root)
-	if !ok || backend != schema.BackendSubscription {
-		return time.Time{}
-	}
-	// Only the windows still running are worth carrying: a window past its
-	// reset would otherwise be re-saved under a fresh collected_at and read
-	// (and notify) as the current one (#318).
-	if limits = core.RunningLimits(limits, now); len(limits) == 0 {
-		return time.Time{}
-	}
-	t.Limits = limits
-	return observed
+	return earliest
 }
 
 // loadTemplate reads ~/.config/tachograph/statusline.tmpl (XDG and

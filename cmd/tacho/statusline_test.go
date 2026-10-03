@@ -217,9 +217,14 @@ func writeClaudeSnapshotWithLimitObserved(t *testing.T, now time.Time, usedPct f
 }
 
 // writeClaudeSnapshotWithLimits seeds a fresh subscription snapshot
-// (CollectedAt 2 minutes ago) carrying limits observed at observed.
+// (CollectedAt 2 minutes ago) carrying limits observed at observed, each
+// window dated as the collector dates them.
 func writeClaudeSnapshotWithLimits(t *testing.T, now, observed time.Time, limits ...schema.Limit) {
 	t.Helper()
+	obs := observed.Format(time.RFC3339)
+	for i := range limits {
+		limits[i].ObservedAt = &obs
+	}
 	collected := now.Add(-2 * time.Minute).Format(time.RFC3339)
 	tool := schema.Tool{
 		Tool:        schema.ToolClaudeCode,
@@ -515,5 +520,130 @@ func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
 	}
 	if p.ElapsedPctAtObservation == nil || *p.ElapsedPctAtObservation != 20 {
 		t.Errorf("stale-carried elapsed = %v, want 20 (the window itself is sound)", p.ElapsedPctAtObservation)
+	}
+}
+
+// subscriptionStatuslineEnv isolates a statusline run that must read as a
+// subscription payload whatever the runner's environment says, without
+// core.Status scanning the real ~/.codex.
+func subscriptionStatuslineEnv(t *testing.T) string {
+	t.Helper()
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+	return isolateClaudeRoot(t)
+}
+
+// transcriptRespondedAt writes a session transcript whose last API response
+// is at, as Claude Code records it, and returns its path.
+func transcriptRespondedAt(t *testing.T, at time.Time) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"assistant","sessionId":"s","timestamp":"` + at.UTC().Format(time.RFC3339Nano) + `","message":{"id":"m","model":"claude-test","usage":{"input_tokens":1,"output_tokens":1}},"requestId":"r"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// An idle session redraws its statusline (here once its 5h window ended)
+// with the weekly reading of its last API response, three hours old. The
+// snapshot holds a newer reading from another session: the weekly window
+// keeps it, and the 5h window the payload lacks is carried, not erased
+// (#330).
+func TestRunStatuslineOlderPayloadDoesNotRollBackLimits(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-time.Minute),
+		window(schema.WindowFiveHour, 300, 6, now.Add(3*time.Hour)),
+		window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour)))
+
+	input := fmt.Sprintf(`{"session_id":"idle","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":89,"resets_at":%d}}}`,
+		transcriptRespondedAt(t, now.Add(-3*time.Hour)), now.Add(time.Hour).Unix())
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct} {claude.5h.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "8% 94%" {
+		t.Errorf("statusline output = %q, want the newer weekly and the carried 5h (8%% 94%%)", got)
+	}
+
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	if !ok {
+		t.Fatal("snapshot was not written")
+	}
+	got := map[string]float64{}
+	for _, l := range snap.Limits {
+		got[l.Window] = *l.UsedPct
+	}
+	if len(got) != 2 || got[schema.WindowWeekly] != 92 || got[schema.WindowFiveHour] != 6 {
+		t.Errorf("snapshot limits = %v, want weekly 92 kept and 5h 6 carried", got)
+	}
+}
+
+// A payload observed later wins even with a lower reading: use only falls
+// when the window is reset or the limit raised, and that must show (#330).
+func TestRunStatuslineNewerPayloadReplacesLimits(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	writeClaudeSnapshotWithLimits(t, now, now.Add(-10*time.Minute),
+		window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour)))
+
+	input := fmt.Sprintf(`{"session_id":"active","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":3,"resets_at":%d}}}`,
+		transcriptRespondedAt(t, now.Add(-5*time.Second)), now.Add(time.Hour).Unix())
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "97%" {
+		t.Errorf("statusline output = %q, want the newer reading (97%%)", got)
+	}
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	if !ok || len(snap.Limits) != 1 || *snap.Limits[0].UsedPct != 3 {
+		t.Fatalf("snapshot after a newer, lower reading = %+v, %v", snap, ok)
+	}
+	if want := now.Add(-5 * time.Second).Local().Format(time.RFC3339); snap.Limits[0].ObservedAt == nil || *snap.Limits[0].ObservedAt != want {
+		t.Errorf("ObservedAt = %v, want the last response %s", snap.Limits[0].ObservedAt, want)
+	}
+}
+
+// A payload with one window keeps the snapshot's other running window, with
+// its own observation; the limits as a whole date from the older of the two,
+// so the carried window still ages out from when it was seen (#186, #330).
+func TestRunStatuslineCarriesWindowsThePayloadLacks(t *testing.T) {
+	root := subscriptionStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	carriedAt := now.Add(-5 * time.Minute)
+	writeClaudeSnapshotWithLimits(t, now, carriedAt,
+		window(schema.WindowFiveHour, 300, 30, now.Add(2*time.Hour)),
+		window(schema.WindowWeekly, 10080, 50, now.Add(72*time.Hour)))
+
+	input := fmt.Sprintf(`{"session_id":"s","model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":51,"resets_at":%d}}}`, now.Add(72*time.Hour).Unix())
+	var out bytes.Buffer
+	if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct} {claude.5h.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "49% 70%" {
+		t.Errorf("statusline output = %q, want the live weekly and the carried 5h (49%% 70%%)", got)
+	}
+
+	snap, ok := cache.ReadSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	if !ok || len(snap.Limits) != 2 {
+		t.Fatalf("snapshot = %+v, %v, want both windows", snap, ok)
+	}
+	for _, l := range snap.Limits {
+		want := now.Local().Format(time.RFC3339) // the live weekly, dated at receipt
+		if l.Window == schema.WindowFiveHour {
+			want = carriedAt.Format(time.RFC3339)
+		}
+		if l.ObservedAt == nil || *l.ObservedAt != want {
+			t.Errorf("%s ObservedAt = %v, want %s", l.Window, l.ObservedAt, want)
+		}
+	}
+	if _, _, got, ok := cache.ReadSnapshotLimits(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root); !ok || !got.Equal(carriedAt) {
+		t.Errorf("limits observation = %v, %v, want the older window's %v", got, ok, carriedAt)
 	}
 }
