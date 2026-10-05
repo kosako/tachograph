@@ -468,26 +468,18 @@ func TestStatusCacheRootsStoredAbsolute(t *testing.T) {
 // key or schema version (a release or price change starts it over).
 func TestDailyHistoryRoundTripAndKey(t *testing.T) {
 	dir := setCacheDir(t)
-	if _, ok := ReadDailyHistory("k1"); ok {
+	if _, ok := ReadDailyHistory("k1", testRoots); ok {
 		t.Fatal("ReadDailyHistory hit on empty cache")
 	}
-	cost := 1.5
-	at := "2026-07-04T09:00:00+09:00"
-	days := map[string]map[string]DailyHistoryEntry{
-		"2026-07-03": {
-			schema.ToolClaudeCode: {Daily: &schema.Daily{Tokens: 100, CostUSD: &cost}, CheckedAt: at},
-			schema.ToolCodex:      {CheckedAt: at}, // unknown when checked
-		},
-	}
-	if err := WriteDailyHistory("k1", days); err != nil {
+	if err := WriteDailyHistory("k1", testRoots, testHistoryDays()); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := ReadDailyHistory("k1")
+	got, ok := ReadDailyHistory("k1", testRoots)
 	claude, codex := got["2026-07-03"][schema.ToolClaudeCode], got["2026-07-03"][schema.ToolCodex]
-	if !ok || claude.Daily == nil || claude.Daily.Tokens != 100 || *claude.Daily.CostUSD != 1.5 || claude.CheckedAt != at || codex.Daily != nil || codex.CheckedAt != at {
+	if !ok || claude.Daily == nil || claude.Daily.Tokens != 100 || *claude.Daily.CostUSD != 1.5 || claude.CheckedAt != testHistoryAt || codex.Daily != nil || codex.CheckedAt != testHistoryAt {
 		t.Fatalf("ReadDailyHistory = %+v, %v", got, ok)
 	}
-	if _, ok := ReadDailyHistory("k2"); ok {
+	if _, ok := ReadDailyHistory("k2", testRoots); ok {
 		t.Error("ReadDailyHistory hit for another key")
 	}
 
@@ -498,7 +490,126 @@ func TestDailyHistoryRoundTripAndKey(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadDailyHistory("k1"); ok {
+	if _, ok := ReadDailyHistory("k1", testRoots); ok {
 		t.Error("ReadDailyHistory hit for another schema version")
+	}
+}
+
+const testHistoryAt = "2026-07-04T09:00:00+09:00"
+
+// testHistoryDays is one closed day with a known Claude figure and an
+// unknown (unreadable when checked) Codex one.
+func testHistoryDays() map[string]map[string]DailyHistoryEntry {
+	cost := 1.5
+	return map[string]map[string]DailyHistoryEntry{
+		"2026-07-03": {
+			schema.ToolClaudeCode: {Daily: &schema.Daily{Tokens: 100, CostUSD: &cost}, CheckedAt: testHistoryAt},
+			schema.ToolCodex:      {CheckedAt: testHistoryAt},
+		},
+	}
+}
+
+// The daily-history cache is tied to the config roots its days were read
+// from, like the TTL cache: a run against other roots (another profile)
+// misses and recomputes its own days (#337).
+func TestDailyHistoryNotSharedAcrossRoots(t *testing.T) {
+	setCacheDir(t)
+	if err := WriteDailyHistory("k1", testRoots, testHistoryDays()); err != nil {
+		t.Fatal(err)
+	}
+	same := map[string]string{schema.ToolClaudeCode: snapRoot + "/", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadDailyHistory("k1", same); !ok {
+		t.Error("ReadDailyHistory missed for the same roots")
+	}
+	otherClaude := map[string]string{schema.ToolClaudeCode: "/profiles/b", schema.ToolCodex: "/profiles/codex"}
+	if _, ok := ReadDailyHistory("k1", otherClaude); ok {
+		t.Error("ReadDailyHistory served days read from another Claude root")
+	}
+	otherCodex := map[string]string{schema.ToolClaudeCode: snapRoot, schema.ToolCodex: "/profiles/codex-b"}
+	if _, ok := ReadDailyHistory("k1", otherCodex); ok {
+		t.Error("ReadDailyHistory served days read from another Codex root")
+	}
+	if _, ok := ReadDailyHistory("k1", map[string]string{schema.ToolClaudeCode: snapRoot}); ok {
+		t.Error("ReadDailyHistory served days to a run that resolved fewer roots")
+	}
+	if _, ok := ReadDailyHistory("k1", nil); ok {
+		t.Error("ReadDailyHistory served days to a run with no resolved roots")
+	}
+}
+
+// The daily-history cache's roots are stored absolute: the same relative
+// roots hit from the writer's directory, miss from another, and the writer's
+// absolute roots hit from anywhere (#337, as for the TTL cache in #321).
+func TestDailyHistoryRootsStoredAbsolute(t *testing.T) {
+	setCacheDir(t)
+	rel := map[string]string{schema.ToolClaudeCode: "profiles/claude", schema.ToolCodex: "profiles/codex"}
+
+	writerDir, otherDir := t.TempDir(), t.TempDir()
+	t.Chdir(writerDir)
+	if err := WriteDailyHistory("k1", rel, testHistoryDays()); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd() // as the writer resolved it (symlinks included)
+	abs := map[string]string{
+		schema.ToolClaudeCode: filepath.Join(cwd, "profiles", "claude"),
+		schema.ToolCodex:      filepath.Join(cwd, "profiles", "codex"),
+	}
+	if _, ok := ReadDailyHistory("k1", rel); !ok {
+		t.Error("ReadDailyHistory missed for the same relative roots from the writer's directory")
+	}
+
+	t.Chdir(otherDir)
+	if _, ok := ReadDailyHistory("k1", rel); ok {
+		t.Error("ReadDailyHistory hit for the same relative spelling from another directory")
+	}
+	if _, ok := ReadDailyHistory("k1", abs); !ok {
+		t.Error("ReadDailyHistory missed for the writer's absolute roots from another directory")
+	}
+}
+
+// A daily history written before the roots were recorded (#337) is a miss
+// for every reader, so an upgrade recomputes the closed days once instead of
+// serving days of an unknown profile.
+func TestDailyHistoryWithoutRootsNeverMatches(t *testing.T) {
+	dir := setCacheDir(t)
+	if err := os.WriteFile(filepath.Join(dir, "daily-history.json"),
+		[]byte(`{"schema_version":"`+schema.Version+`","key":"k1","days":{"2026-07-03":{"claude-code":{"daily":{"tokens":100},"checked_at":"`+testHistoryAt+`"}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, roots := range []map[string]string{testRoots, nil} {
+		if _, ok := ReadDailyHistory("k1", roots); ok {
+			t.Errorf("ReadDailyHistory served a root-less history to roots %v", roots)
+		}
+	}
+}
+
+// A root that can't be made absolute (the current directory is gone) is
+// stored as none and matches nothing — not even the same spelling from the
+// same broken directory — so the days it was written with are never served.
+func TestDailyHistoryUnresolvableRootNeverMatches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the current directory can't be removed on Windows")
+	}
+	setCacheDir(t)
+	gone := filepath.Join(t.TempDir(), "gone")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filepath.Abs("profiles/rel"); err == nil {
+		t.Skip("filepath.Abs still resolves a relative path from a removed directory here")
+	}
+	roots := map[string]string{schema.ToolClaudeCode: "profiles/rel", schema.ToolCodex: "/profiles/codex"}
+	if err := WriteDailyHistory("k1", roots, testHistoryDays()); err != nil {
+		t.Fatal(err)
+	}
+	for _, claudeRoot := range []string{"profiles/rel", "/profiles/rel", ""} {
+		r := map[string]string{schema.ToolClaudeCode: claudeRoot, schema.ToolCodex: "/profiles/codex"}
+		if _, ok := ReadDailyHistory("k1", r); ok {
+			t.Errorf("ReadDailyHistory served days whose Claude root couldn't be resolved to root %q", claudeRoot)
+		}
 	}
 }

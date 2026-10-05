@@ -85,11 +85,7 @@ func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*sch
 
 // WriteStatus caches s as assembled from roots (by tool, see ReadStatus).
 func WriteStatus(s *schema.Status, roots map[string]string) error {
-	f := statusFile{Roots: map[string]string{}, Status: *s}
-	for tool, root := range roots {
-		f.Roots[tool], _ = normalizeRoot(root) // unresolvable roots are stored as none
-	}
-	return writeJSON("status.json", f)
+	return writeJSON("status.json", statusFile{Roots: storedRoots(roots), Status: *s})
 }
 
 // WriteSnapshot persists a single tool's collected state outside the TTL
@@ -178,6 +174,16 @@ func sameRoot(a, b string) bool {
 	na, okA := normalizeRoot(a)
 	nb, okB := normalizeRoot(b)
 	return okA && okB && na == nb
+}
+
+// storedRoots is the form a cache file records the config roots (by tool)
+// it was built from, for sameRoots to compare against a reader's.
+func storedRoots(roots map[string]string) map[string]string {
+	stored := map[string]string{}
+	for tool, root := range roots {
+		stored[tool], _ = normalizeRoot(root) // unresolvable roots are stored as none
+	}
+	return stored
 }
 
 // sameRoots reports whether two root sets (by tool) name the same
@@ -288,16 +294,20 @@ type DailyHistoryEntry struct {
 // history rows (#243). It is derived data: every entry can be recomputed
 // from the logs, it never holds more than the window's closed days, and it
 // is dropped whole when its key (binary identity, schema, pricing override)
-// changes. Days map a local calendar day to each tool's entry.
+// changes or a reader works against other config roots — another profile's
+// days are never served as this one's (#337, as for the TTL cache in #321).
+// Days map a closed day, under the caller's key for it, to each tool's entry.
 type dailyHistoryFile struct {
 	SchemaVersion string                                  `json:"schema_version"`
 	Key           string                                  `json:"key"`
+	Roots         map[string]string                       `json:"roots,omitempty"`
 	Days          map[string]map[string]DailyHistoryEntry `json:"days"`
 }
 
 // ReadDailyHistory returns the cached closed days when the file exists and
-// was written under the same key and schema version; otherwise nothing.
-func ReadDailyHistory(key string) (map[string]map[string]DailyHistoryEntry, bool) {
+// was written under the same key, schema version, and config roots (by
+// tool); otherwise nothing.
+func ReadDailyHistory(key string, roots map[string]string) (map[string]map[string]DailyHistoryEntry, bool) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, false
@@ -307,15 +317,16 @@ func ReadDailyHistory(key string) (map[string]map[string]DailyHistoryEntry, bool
 		return nil, false
 	}
 	var f dailyHistoryFile
-	if json.Unmarshal(b, &f) != nil || f.SchemaVersion != schema.Version || f.Key != key || f.Days == nil {
+	if json.Unmarshal(b, &f) != nil || f.SchemaVersion != schema.Version || f.Key != key || !sameRoots(f.Roots, roots) || f.Days == nil {
 		return nil, false
 	}
 	return f.Days, true
 }
 
-// WriteDailyHistory replaces the cached closed days under key.
-func WriteDailyHistory(key string, days map[string]map[string]DailyHistoryEntry) error {
-	return writeJSON("daily-history.json", dailyHistoryFile{SchemaVersion: schema.Version, Key: key, Days: days})
+// WriteDailyHistory replaces the cached closed days under key, as computed
+// from roots (by tool, see ReadDailyHistory).
+func WriteDailyHistory(key string, roots map[string]string, days map[string]map[string]DailyHistoryEntry) error {
+	return writeJSON("daily-history.json", dailyHistoryFile{SchemaVersion: schema.Version, Key: key, Roots: storedRoots(roots), Days: days})
 }
 
 // SessionTreeCache persists, for one Claude session tree, what

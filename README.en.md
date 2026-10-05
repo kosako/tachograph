@@ -346,8 +346,10 @@ only when the cache lacks them — normally just yesterday, after midnight; the
 6 days up to yesterday at once on the first run or when the cache is rebuilt —
 and kept in `daily-history.json` in the cache directory (`tacho doctor`
 prints where); anything older than 7 days is dropped. It is a derived cache
-that can always be rebuilt from the logs, is rebuilt when the tacho binary
-(version) or `pricing.json` changes, and can be deleted freely (the next
+that can always be rebuilt from the logs: it is rebuilt when the tacho binary
+(version), `pricing.json`, or the config directories it reads
+(`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) change, days whose midnights move with a
+change of timezone are recomputed, and it can be deleted freely (the next
 refresh recreates it).
 
 The **Settings** submenu at the bottom picks values from a list (the current

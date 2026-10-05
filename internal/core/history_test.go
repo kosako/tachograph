@@ -41,14 +41,6 @@ func writeClaudeMessage(t *testing.T, root string, ts time.Time, tokens int64) {
 	}
 }
 
-// setLocal switches the local timezone for the rest of the test.
-func setLocal(t *testing.T, loc *time.Location) {
-	t.Helper()
-	prev := time.Local
-	time.Local = loc
-	t.Cleanup(func() { time.Local = prev })
-}
-
 func historyStatus(todayTokens int64) schema.Status {
 	return schema.Status{Tools: []schema.Tool{
 		{Tool: schema.ToolClaudeCode, Available: true, Daily: &schema.Daily{Tokens: todayTokens}},
@@ -56,13 +48,47 @@ func historyStatus(todayTokens int64) schema.Status {
 	}}
 }
 
-func unreadableRoot(t *testing.T) string {
+// hideRoot makes root's logs unreadable in place — the directory moved aside,
+// a plain file left at its path — and returns a func that puts it back. The
+// root keeps its name, so the history cache (tied to the roots, #337) still
+// applies: whatever comes back for a closed day comes from the cache.
+func hideRoot(t *testing.T, root string) (restore func()) {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "root")
+	aside := root + ".hidden"
+	if err := os.Rename(root, aside); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(root, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return root
+	return func() {
+		t.Helper()
+		if err := os.Remove(root); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(aside, root); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// cachedDay is the history cache's entry for the local calendar day date,
+// looked up under the day's span as RecentHistory keys it.
+func cachedDay(t *testing.T, cached map[string]map[string]cache.DailyHistoryEntry, date string) map[string]cache.DailyHistoryEntry {
+	t.Helper()
+	d, err := time.ParseInLocation("2006-01-02", date, time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cached[daySpan(d)]
+}
+
+// setLocal switches the local timezone for the rest of the test.
+func setLocal(t *testing.T, loc *time.Location) {
+	t.Helper()
+	prev := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = prev })
 }
 
 func claudeTokens(h DailyHistory, i int) int64 {
@@ -86,7 +112,8 @@ func TestRecentHistoryCachesClosedDays(t *testing.T) {
 		today.AddDate(0, 0, -9): 900, // outside a 7-day window
 	})
 
-	h := RecentHistory(Options{ClaudeRoot: root, CodexRoot: t.TempDir(), Now: now}, historyStatus(50), 7, "v1")
+	opts := Options{ClaudeRoot: root, CodexRoot: t.TempDir(), Now: now}
+	h := RecentHistory(opts, historyStatus(50), 7, "v1")
 	if len(h.Days) != 7 || h.Days[0] != "2026-06-28" || h.Days[6] != "2026-07-04" {
 		t.Fatalf("Days = %v, want 2026-06-28 … 2026-07-04", h.Days)
 	}
@@ -105,15 +132,19 @@ func TestRecentHistoryCachesClosedDays(t *testing.T) {
 		t.Errorf("codex today = %+v, want nil (status carries no daily)", h.Tools[schema.ToolCodex][6])
 	}
 
-	// Served from the cache: unreadable roots would otherwise yield unknown.
-	again := RecentHistory(Options{ClaudeRoot: unreadableRoot(t), CodexRoot: unreadableRoot(t), Now: now.Add(time.Hour)}, historyStatus(75), 7, "v1")
+	// Served from the cache: the same roots, now unreadable, would otherwise
+	// yield unknown.
+	hideRoot(t, opts.ClaudeRoot)
+	hideRoot(t, opts.CodexRoot)
+	opts.Now = now.Add(time.Hour)
+	again := RecentHistory(opts, historyStatus(75), 7, "v1")
 	for i, w := range []int64{0, 0, 0, 400, 0, 200, 75} {
 		if got := claudeTokens(again, i); got != w {
 			t.Errorf("cached day %s claude tokens = %d, want %d", again.Days[i], got, w)
 		}
 	}
-	cached, ok := cache.ReadDailyHistory("v1|")
-	if !ok || len(cached) != 6 || cached["2026-06-25"] != nil {
+	cached, ok := cache.ReadDailyHistory("v1|", Roots(opts))
+	if !ok || len(cached) != 6 || cachedDay(t, cached, "2026-06-25") != nil {
 		t.Errorf("cache holds %d days (%v), want the 6 closed days of the window only", len(cached), keys(cached))
 	}
 }
@@ -126,29 +157,37 @@ func TestRecentHistoryRekeysAndRetriesUnknown(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
 	now := today.Add(9 * time.Hour)
-	root := claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 200})
-	codex := t.TempDir()
+	opts := Options{
+		ClaudeRoot: claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 200}),
+		CodexRoot:  t.TempDir(),
+		Now:        now,
+	}
+	roots := Roots(opts)
 
-	RecentHistory(Options{ClaudeRoot: root, CodexRoot: codex, Now: now}, historyStatus(0), 3, "v1")
+	RecentHistory(opts, historyStatus(0), 3, "v1")
 
 	// New key with Claude unreadable: Claude unknown (nil) and not cached,
 	// Codex recomputed and cached under the new key.
-	h := RecentHistory(Options{ClaudeRoot: unreadableRoot(t), CodexRoot: codex, Now: now}, historyStatus(0), 3, "v2")
+	showClaude := hideRoot(t, opts.ClaudeRoot)
+	h := RecentHistory(opts, historyStatus(0), 3, "v2")
 	if h.Tools[schema.ToolClaudeCode][1] != nil {
 		t.Errorf("claude yesterday = %+v under a new key with unreadable logs, want nil", h.Tools[schema.ToolClaudeCode][1])
 	}
-	if _, ok := cache.ReadDailyHistory("v1|"); ok {
+	if _, ok := cache.ReadDailyHistory("v1|", roots); ok {
 		t.Error("old key still readable, want it discarded")
 	}
-	cached, ok := cache.ReadDailyHistory("v2|")
-	y := cached["2026-07-03"]
+	cached, ok := cache.ReadDailyHistory("v2|", roots)
+	y := cachedDay(t, cached, "2026-07-03")
 	if !ok || y[schema.ToolClaudeCode].Daily != nil || y[schema.ToolClaudeCode].CheckedAt == "" || y[schema.ToolCodex].Daily == nil {
 		t.Errorf("v2 cache = %v, want codex known and claude unknown (with its check time) for yesterday", cached)
 	}
 
 	// Logs readable again but the unknown was checked moments ago: served
 	// as unknown without a rescan (one scan per unknownRetry, not per tick).
-	h = RecentHistory(Options{ClaudeRoot: root, CodexRoot: unreadableRoot(t), Now: now.Add(time.Minute)}, historyStatus(0), 3, "v2")
+	showClaude()
+	hideRoot(t, opts.CodexRoot)
+	opts.Now = now.Add(time.Minute)
+	h = RecentHistory(opts, historyStatus(0), 3, "v2")
 	if h.Tools[schema.ToolClaudeCode][1] != nil {
 		t.Errorf("claude yesterday = %+v within the retry interval, want nil (not rescanned)", h.Tools[schema.ToolClaudeCode][1])
 	}
@@ -157,12 +196,13 @@ func TestRecentHistoryRekeysAndRetriesUnknown(t *testing.T) {
 	}
 
 	// Past the retry interval the missing tool is computed and cached.
-	h = RecentHistory(Options{ClaudeRoot: root, CodexRoot: unreadableRoot(t), Now: now.Add(unknownRetry)}, historyStatus(0), 3, "v2")
+	opts.Now = now.Add(unknownRetry)
+	h = RecentHistory(opts, historyStatus(0), 3, "v2")
 	if got := claudeTokens(h, 1); got != 200 {
 		t.Errorf("claude yesterday after retry = %d, want 200", got)
 	}
-	cached, _ = cache.ReadDailyHistory("v2|")
-	if cached["2026-07-03"][schema.ToolClaudeCode].Daily == nil {
+	cached, _ = cache.ReadDailyHistory("v2|", roots)
+	if cachedDay(t, cached, "2026-07-03")[schema.ToolClaudeCode].Daily == nil {
 		t.Error("claude yesterday not cached after the retry")
 	}
 }
@@ -177,18 +217,20 @@ func TestRecentHistoryGraceWindow(t *testing.T) {
 	root := claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 200, today.AddDate(0, 0, -2): 100})
 	codex := t.TempDir()
 
+	roots := Roots(Options{ClaudeRoot: root, CodexRoot: codex})
+
 	early := RecentHistory(Options{ClaudeRoot: root, CodexRoot: codex, Now: today.Add(5 * time.Minute)}, historyStatus(0), 3, "v1")
 	if got := claudeTokens(early, 1); got != 200 {
 		t.Errorf("claude yesterday inside grace = %d, want 200 (computed live)", got)
 	}
-	cached, ok := cache.ReadDailyHistory("v1|")
-	if !ok || cached["2026-07-03"] != nil || cached["2026-07-02"] == nil {
+	cached, ok := cache.ReadDailyHistory("v1|", roots)
+	if !ok || cachedDay(t, cached, "2026-07-03") != nil || cachedDay(t, cached, "2026-07-02") == nil {
 		t.Errorf("cache inside grace = %v, want the day before yesterday only", keys(cached))
 	}
 
 	RecentHistory(Options{ClaudeRoot: root, CodexRoot: codex, Now: today.Add(closedDayGrace)}, historyStatus(0), 3, "v1")
-	cached, _ = cache.ReadDailyHistory("v1|")
-	if cached["2026-07-03"] == nil {
+	cached, _ = cache.ReadDailyHistory("v1|", roots)
+	if cachedDay(t, cached, "2026-07-03") == nil {
 		t.Errorf("cache after grace = %v, want yesterday stored", keys(cached))
 	}
 }
@@ -218,6 +260,89 @@ func TestHistoryAcrossSkippedMidnight(t *testing.T) {
 	r := RecentHistory(opts, historyStatus(50), 3, "v1")
 	if fmt.Sprint(r.Days) != wantDays || claudeTokens(r, 0) != 100 || claudeTokens(r, 1) != 200 || claudeTokens(r, 2) != 50 {
 		t.Errorf("RecentHistory: days %v, claude %d / %d / %d, want %s with 100 / 200 / today's 50", r.Days, claudeTokens(r, 0), claudeTokens(r, 1), claudeTokens(r, 2), wantDays)
+	}
+}
+
+// The cache is tied to the config roots its days were read from: after a
+// switch to another profile's root the closed days are recomputed from that
+// profile's logs instead of served from the previous one's cache (#337).
+func TestRecentHistoryRecomputesForAnotherRoot(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
+	now := today.Add(9 * time.Hour)
+	a := claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 200})
+	b := claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 300})
+	codex := t.TempDir()
+
+	for _, c := range []struct {
+		name, root string
+		want       int64
+	}{
+		{"profile a", a, 200},
+		{"profile b after a", b, 300},
+		{"back on profile a", a, 200},
+	} {
+		h := RecentHistory(Options{ClaudeRoot: c.root, CodexRoot: codex, Now: now}, historyStatus(0), 3, "v1")
+		if got := claudeTokens(h, 1); got != c.want {
+			t.Errorf("%s: claude yesterday = %d, want %d (from its own logs)", c.name, got, c.want)
+		}
+	}
+}
+
+// Days are cut at local midnights, so each is cached under the instants it
+// spans: after a timezone change the closed days are recomputed under the
+// new midnights instead of served under the same dates (#337).
+func TestRecentHistoryRecomputesAfterTimezoneChange(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	setLocal(t, time.UTC)
+	root := t.TempDir()
+	// 2026-07-02 20:00 in UTC is 2026-07-03 05:00 at UTC+9.
+	writeClaudeMessage(t, root, time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC), 500)
+	opts := Options{ClaudeRoot: root, CodexRoot: t.TempDir(), Now: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
+
+	h := RecentHistory(opts, historyStatus(0), 3, "v1")
+	if h.Days[0] != "2026-07-02" || claudeTokens(h, 0) != 500 || claudeTokens(h, 1) != 0 {
+		t.Fatalf("in UTC: days %v, claude %d / %d, want 2026-07-02 = 500 and 2026-07-03 = 0", h.Days, claudeTokens(h, 0), claudeTokens(h, 1))
+	}
+
+	setLocal(t, time.FixedZone("UTC+9", 9*60*60))
+	h = RecentHistory(opts, historyStatus(0), 3, "v1")
+	if h.Days[0] != "2026-07-02" || claudeTokens(h, 0) != 0 || claudeTokens(h, 1) != 500 {
+		t.Errorf("at UTC+9: days %v, claude %d / %d, want 2026-07-02 = 0 and 2026-07-03 = 500 (recomputed under the new midnights)", h.Days, claudeTokens(h, 0), claudeTokens(h, 1))
+	}
+}
+
+// daySpan names the instants a local day covers, offsets included, so the
+// same date in two timezones is two keys; any instant of the day gives the
+// same span.
+func TestDaySpan(t *testing.T) {
+	setLocal(t, time.FixedZone("UTC+9", 9*60*60))
+	want := "2026-07-03T00:00:00+09:00/2026-07-04T00:00:00+09:00"
+	for _, d := range []time.Time{
+		time.Date(2026, 7, 3, 0, 0, 0, 0, time.Local),
+		time.Date(2026, 7, 3, 23, 59, 59, 0, time.Local),
+		time.Date(2026, 7, 3, 5, 0, 0, 0, time.UTC), // 14:00 at UTC+9
+	} {
+		if got := daySpan(d); got != want {
+			t.Errorf("daySpan(%v) = %q, want %q", d, got, want)
+		}
+	}
+	setLocal(t, time.UTC)
+	if got := daySpan(time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)); got == want {
+		t.Errorf("daySpan in UTC = %q, the same key as at UTC+9", got)
+	}
+
+	// A daylight-saving switch makes a 23-hour day; its span still runs from
+	// its midnight to the next one.
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("no tz database here: %v", err)
+	}
+	setLocal(t, ny)
+	if got, want := daySpan(time.Date(2026, 3, 8, 12, 0, 0, 0, ny)), "2026-03-08T00:00:00-05:00/2026-03-09T00:00:00-04:00"; got != want {
+		t.Errorf("daySpan on the DST switch = %q, want %q", got, want)
 	}
 }
 

@@ -44,9 +44,10 @@ func Status(opts Options) schema.Status {
 
 // Roots are the config roots a Status for opts reads, by tool — the same
 // resolution the collectors use (CLAUDE_CONFIG_DIR / CODEX_HOME, else the
-// defaults under the home directory). The TTL cache and the Claude snapshot
-// are keyed by them, so another profile's data is never served as this
-// one's (#321). A root that can't be resolved is left out.
+// defaults under the home directory). The TTL cache, the Claude snapshot,
+// and the daily history are keyed by them, so another profile's data is
+// never served as this one's (#321, #337). A root that can't be resolved is
+// left out.
 func Roots(opts Options) map[string]string {
 	roots := map[string]string{}
 	if r, ok := agentpath.ClaudeRoot(opts.ClaudeRoot); ok {
@@ -367,7 +368,11 @@ const unknownRetry = time.Hour
 // more than n-1 days of history. build identifies the binary and keys the
 // cache together with the schema version and the pricing override, so a new
 // build or a price change recomputes instead of serving figures `tacho daily`
-// would no longer produce.
+// would no longer produce. Likewise the cache is tied to the config roots the
+// days were read from (Roots), and each day is cached under the instants it
+// spans (daySpan): after switching profiles or timezones the closed days are
+// recomputed, not served from another profile or another timezone's midnights
+// (#337).
 func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHistory {
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
@@ -377,12 +382,13 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 	yesterday := daily.DayKey(daily.DayStartFrom(today, -1))
 	inGrace := opts.Now.Sub(today) < closedDayGrace // yesterday may still get late lines
 	key := build + "|" + pricing.OverrideStamp()
+	roots := Roots(opts)
 
 	// Cached closed days inside the window; older entries fall off here.
-	cached, _ := cache.ReadDailyHistory(key)
+	cached, _ := cache.ReadDailyHistory(key, roots)
 	closed := map[string]map[string]cache.DailyHistoryEntry{}
 	for d := start; d.Before(today); d = daily.DayStartFrom(d, 1) {
-		if c := cached[daily.DayKey(d)]; c != nil {
+		if c := cached[daySpan(d)]; c != nil {
 			closed[daily.DayKey(d)] = c
 		}
 	}
@@ -423,12 +429,13 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 	}
 	if store {
 		keep := map[string]map[string]cache.DailyHistoryEntry{}
-		for day, c := range closed {
-			if !(inGrace && day == yesterday) {
-				keep[day] = c
+		for d := start; d.Before(today); d = daily.DayStartFrom(d, 1) {
+			day := daily.DayKey(d)
+			if c := closed[day]; c != nil && !(inGrace && day == yesterday) {
+				keep[daySpan(d)] = c
 			}
 		}
-		_ = cache.WriteDailyHistory(key, keep) // serving the live result matters more than caching it
+		_ = cache.WriteDailyHistory(key, roots, keep) // serving the live result matters more than caching it
 	}
 
 	out := DailyHistory{Tools: map[string][]*schema.Daily{}}
@@ -444,6 +451,17 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 		out.Tools[tool] = col
 	}
 	return out
+}
+
+// daySpan is the history cache's key for the local day d falls on: the
+// instants the day starts and ends, offsets included. The days are cut at
+// local midnights (daily.DayKey), so a day cached under another timezone
+// covers other instants and is recomputed rather than served under the same
+// date (#337).
+func daySpan(d time.Time) string {
+	start := daily.DayStart(d)
+	end := daily.DayStartFrom(start, 1)
+	return start.Format(time.RFC3339) + "/" + end.Format(time.RFC3339)
 }
 
 // retryDue reports whether an unknown entry checked at checkedAt is old
