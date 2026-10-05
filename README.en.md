@@ -406,8 +406,10 @@ tacho config set notify.thresholds ""         # off (the default)
 - Each (tool, window, threshold) fires **once per reset cycle**; it re-arms
   when the headroom rises back above the threshold or the reset time changes.
   Dropping past several thresholds at once fires only the deepest one.
-- Stale values never fire. A notification that fails to send is retried on
-  the next refresh.
+- Stale values never fire — not only when the whole tool is stale but also
+  for a 5h / weekly window whose observation is old (the ones SwiftBar marks
+  with ⚠), and such a reading leaves the announcement record as it is. A
+  notification that fails to send is retried on the next refresh.
 - What has been announced is kept in `notify-state.json` in the cache
   directory; deleting it only means one more notification.
 

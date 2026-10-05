@@ -23,6 +23,19 @@ func limitsTool(name string, stale bool, used5, usedW float64, resets5 string) s
 
 func status(tools ...schema.Tool) schema.Status { return schema.Status{Tools: tools} }
 
+// testNow is the evaluation time; windows without observed_at have no age,
+// so it only matters to the tests that set one.
+var testNow = time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+
+// observedAgo stamps every window of tool as observed ago before testNow.
+func observedAgo(tool schema.Tool, ago time.Duration) schema.Tool {
+	observed := testNow.Add(-ago).Format(time.RFC3339)
+	for i := range tool.Limits {
+		tool.Limits[i].ObservedAt = &observed
+	}
+	return tool
+}
+
 // A window fires once per threshold per cycle: crossing 50% announces once,
 // staying below it stays quiet, crossing 30% announces again, rising back
 // above 30% re-arms it, and a new reset time re-arms everything.
@@ -30,25 +43,25 @@ func TestEvaluateFiresOncePerThresholdPerCycle(t *testing.T) {
 	th := []int{50, 30, 10}
 	r1 := "2026-09-20T03:00:00+09:00"
 
-	ev, st := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 55, 10, r1)), th, State{})
+	ev, st := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 55, 10, r1)), th, State{}, testNow)
 	if len(ev) != 1 || ev[0].Key != "claude-code/5h" || ev[0].Threshold != 50 || ev[0].Remaining != 45 {
 		t.Fatalf("first crossing: events = %+v", ev)
 	}
-	if ev, _ = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 58, 10, r1)), th, st); len(ev) != 0 {
+	if ev, _ = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 58, 10, r1)), th, st, testNow); len(ev) != 0 {
 		t.Errorf("still below 50%%: events = %+v, want none", ev)
 	}
-	ev, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 72, 10, r1)), th, st)
+	ev, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 72, 10, r1)), th, st, testNow)
 	if len(ev) != 1 || ev[0].Threshold != 30 {
 		t.Fatalf("crossing 30%%: events = %+v", ev)
 	}
 	// Back above 30% (but below 50%): 30 re-arms, 50 stays announced.
-	_, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 60, 10, r1)), th, st)
-	ev, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 75, 10, r1)), th, st)
+	_, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 60, 10, r1)), th, st, testNow)
+	ev, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 75, 10, r1)), th, st, testNow)
 	if len(ev) != 1 || ev[0].Threshold != 30 {
 		t.Fatalf("re-crossing 30%% after re-arm: events = %+v", ev)
 	}
 	// New cycle: the reset time changed, so 50 fires again.
-	ev, _ = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 55, 10, "2026-09-20T08:00:00+09:00")), th, st)
+	ev, _ = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 55, 10, "2026-09-20T08:00:00+09:00")), th, st, testNow)
 	if len(ev) != 1 || ev[0].Threshold != 50 {
 		t.Errorf("new cycle: events = %+v, want 50 again", ev)
 	}
@@ -58,14 +71,14 @@ func TestEvaluateFiresOncePerThresholdPerCycle(t *testing.T) {
 // and marks all of them so none fires later in the same cycle.
 func TestEvaluateCollapsesMultipleCrossings(t *testing.T) {
 	th := []int{50, 30, 10}
-	ev, st := Evaluate(status(limitsTool(schema.ToolCodex, false, 95, 0, "")), th, State{})
+	ev, st := Evaluate(status(limitsTool(schema.ToolCodex, false, 95, 0, "")), th, State{}, testNow)
 	if len(ev) != 1 || ev[0].Threshold != 10 || ev[0].Remaining != 5 {
 		t.Fatalf("events = %+v, want one event at 10", ev)
 	}
 	if got := st["codex/5h"].Notified; len(got) != 3 {
 		t.Errorf("Notified = %v, want all three thresholds", got)
 	}
-	if ev, _ = Evaluate(status(limitsTool(schema.ToolCodex, false, 96, 0, "")), th, st); len(ev) != 0 {
+	if ev, _ = Evaluate(status(limitsTool(schema.ToolCodex, false, 96, 0, "")), th, st, testNow); len(ev) != 0 {
 		t.Errorf("events = %+v after collapse, want none", ev)
 	}
 }
@@ -74,33 +87,98 @@ func TestEvaluateCollapsesMultipleCrossings(t *testing.T) {
 // no thresholds means nothing fires; the input state is never mutated.
 func TestEvaluateSkipsAndPreservesState(t *testing.T) {
 	th := []int{50}
-	_, st := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 60, 0, "")), th, State{})
+	_, st := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 60, 0, "")), th, State{}, testNow)
 	before := append([]int(nil), st["claude-code/5h"].Notified...)
 
-	ev, next := Evaluate(status(limitsTool(schema.ToolClaudeCode, true, 99, 99, "")), th, st)
+	ev, next := Evaluate(status(limitsTool(schema.ToolClaudeCode, true, 99, 99, "")), th, st, testNow)
 	if len(ev) != 0 || len(next["claude-code/5h"].Notified) != 1 {
 		t.Errorf("stale tool: events = %+v, state = %+v, want none and the record kept", ev, next)
 	}
 	errTool := schema.Unavailable(schema.ToolCodex)
 	errTool.Available = true
 	errTool.Error = &schema.Error{Code: "x"}
-	if ev, _ := Evaluate(status(schema.Unavailable(schema.ToolClaudeCode), errTool), th, State{}); len(ev) != 0 {
+	if ev, _ := Evaluate(status(schema.Unavailable(schema.ToolClaudeCode), errTool), th, State{}, testNow); len(ev) != 0 {
 		t.Errorf("unavailable / errored tools: events = %+v, want none", ev)
 	}
-	if ev, _ := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 99, 99, "")), nil, State{}); len(ev) != 0 {
+	if ev, _ := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 99, 99, "")), nil, State{}, testNow); len(ev) != 0 {
 		t.Errorf("no thresholds: events = %+v, want none", ev)
 	}
 	// Only the 5h and weekly windows are watched: a collector-reported odd
 	// window size (e.g. Codex with an unexpected window_minutes) is ignored.
 	used := 99.0
 	odd := schema.Tool{Tool: schema.ToolCodex, Available: true, Limits: []schema.Limit{{Window: "6h", UsedPct: &used}}}
-	if ev, st := Evaluate(status(odd), th, State{}); len(ev) != 0 || len(st) != 0 {
+	if ev, st := Evaluate(status(odd), th, State{}, testNow); len(ev) != 0 || len(st) != 0 {
 		t.Errorf("odd window: events = %+v, state = %+v, want none", ev, st)
 	}
 	// Re-arm through the same state must not have touched the caller's copy.
-	Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 10, 0, "")), th, st)
+	Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 10, 0, "")), th, st, testNow)
 	if got := st["claude-code/5h"].Notified; len(got) != len(before) || got[0] != before[0] {
 		t.Errorf("input State mutated: %v, want %v", got, before)
+	}
+}
+
+// A window observed longer ago than its tool's stale threshold — the reading
+// SwiftBar marks ⚠ (#331) — neither fires nor touches its record, even on a
+// tool that is itself fresh; the same reading observed recently fires
+// (#338). The threshold is the tool's: 60 minutes for Claude, 5 hours for
+// Codex.
+func TestEvaluateSkipsOldObservations(t *testing.T) {
+	th := []int{50}
+	for _, c := range []struct {
+		name  string
+		tool  string
+		ago   time.Duration
+		fires bool
+	}{
+		{"Claude, 10 minutes old", schema.ToolClaudeCode, 10 * time.Minute, true},
+		{"Claude, 2 hours old", schema.ToolClaudeCode, 2 * time.Hour, false},
+		{"Codex, 2 hours old", schema.ToolCodex, 2 * time.Hour, true},
+		{"Codex, 6 hours old", schema.ToolCodex, 6 * time.Hour, false},
+	} {
+		ev, st := Evaluate(status(observedAgo(limitsTool(c.tool, false, 80, 80, ""), c.ago)), th, State{}, testNow)
+		if c.fires && len(ev) != 2 {
+			t.Errorf("%s: events = %+v, want both windows", c.name, ev)
+		}
+		if !c.fires && (len(ev) != 0 || len(st) != 0) {
+			t.Errorf("%s: events = %+v, state = %+v, want none and no record", c.name, ev, st)
+		}
+	}
+
+	// The windows of one tool are judged one by one: next to a fresh window,
+	// an old one stays silent and keeps its record (which would otherwise
+	// start a new cycle, its reset time differing), and the fresh one fires.
+	mixed := func(ago5h, agoWk time.Duration) schema.Tool {
+		tool := limitsTool(schema.ToolClaudeCode, false, 80, 80, "")
+		o5, ow := testNow.Add(-ago5h).Format(time.RFC3339), testNow.Add(-agoWk).Format(time.RFC3339)
+		tool.Limits[0].ObservedAt, tool.Limits[1].ObservedAt = &o5, &ow
+		return tool
+	}
+	kept := Window{ResetsAt: "2026-09-19T12:00:00Z"}
+	for _, c := range []struct {
+		name       string
+		tool       schema.Tool
+		fires, old string
+	}{
+		{"old 5h, fresh weekly", mixed(2*time.Hour, 10*time.Minute), "claude-code/weekly", "claude-code/5h"},
+		{"fresh 5h, old weekly", mixed(10*time.Minute, 2*time.Hour), "claude-code/5h", "claude-code/weekly"},
+	} {
+		ev, next := Evaluate(status(c.tool), th, State{c.old: kept}, testNow)
+		if len(ev) != 1 || ev[0].Key != c.fires {
+			t.Errorf("%s: events = %+v, want %s only", c.name, ev, c.fires)
+		}
+		if got := next[c.old]; got.ResetsAt != kept.ResetsAt || len(got.Notified) != 0 {
+			t.Errorf("%s: record of the old window = %+v, want %+v kept", c.name, got, kept)
+		}
+	}
+
+	// An old reading keeps the record as it was: its headroom back above
+	// 50% doesn't re-arm the threshold, nor does its reset time start a new
+	// cycle.
+	_, st := Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 60, 0, "2026-09-19T12:00:00Z")), th, State{}, testNow)
+	old := observedAgo(limitsTool(schema.ToolClaudeCode, false, 10, 0, "2026-09-19T17:00:00Z"), 2*time.Hour)
+	_, next := Evaluate(status(old), th, st, testNow)
+	if got := next["claude-code/5h"]; got.ResetsAt != "2026-09-19T12:00:00Z" || len(got.Notified) != 1 || got.Notified[0] != 50 {
+		t.Errorf("record after an old reading = %+v, want the 12:00 cycle with 50 still announced", got)
 	}
 }
 
