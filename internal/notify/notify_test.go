@@ -144,6 +144,33 @@ func TestEvaluateSkipsOldObservations(t *testing.T) {
 		}
 	}
 
+	// The windows of one tool are judged one by one: next to a fresh window,
+	// an old one stays silent and keeps its record (which would otherwise
+	// start a new cycle, its reset time differing), and the fresh one fires.
+	mixed := func(ago5h, agoWk time.Duration) schema.Tool {
+		tool := limitsTool(schema.ToolClaudeCode, false, 80, 80, "")
+		o5, ow := testNow.Add(-ago5h).Format(time.RFC3339), testNow.Add(-agoWk).Format(time.RFC3339)
+		tool.Limits[0].ObservedAt, tool.Limits[1].ObservedAt = &o5, &ow
+		return tool
+	}
+	kept := Window{ResetsAt: "2026-09-19T12:00:00Z"}
+	for _, c := range []struct {
+		name       string
+		tool       schema.Tool
+		fires, old string
+	}{
+		{"old 5h, fresh weekly", mixed(2*time.Hour, 10*time.Minute), "claude-code/weekly", "claude-code/5h"},
+		{"fresh 5h, old weekly", mixed(10*time.Minute, 2*time.Hour), "claude-code/5h", "claude-code/weekly"},
+	} {
+		ev, next := Evaluate(status(c.tool), th, State{c.old: kept}, testNow)
+		if len(ev) != 1 || ev[0].Key != c.fires {
+			t.Errorf("%s: events = %+v, want %s only", c.name, ev, c.fires)
+		}
+		if got := next[c.old]; got.ResetsAt != kept.ResetsAt || len(got.Notified) != 0 {
+			t.Errorf("%s: record of the old window = %+v, want %+v kept", c.name, got, kept)
+		}
+	}
+
 	// An old reading keeps the record as it was: its headroom back above
 	// 50% doesn't re-arm the threshold, nor does its reset time start a new
 	// cycle.
