@@ -344,6 +344,25 @@ func TestDaySpan(t *testing.T) {
 	if got, want := daySpan(time.Date(2026, 3, 8, 12, 0, 0, 0, ny)), "2026-03-08T00:00:00-05:00/2026-03-09T00:00:00-04:00"; got != want {
 		t.Errorf("daySpan on the DST switch = %q, want %q", got, want)
 	}
+
+	// Where the switch skips midnight (America/Santiago, 2026-09-06), the day
+	// before runs to the switch and the day itself starts there (#346).
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("no tz database entry for America/Santiago here: %v", err)
+	}
+	setLocal(t, santiago)
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{
+		{time.Date(2026, 9, 5, 12, 0, 0, 0, santiago), "2026-09-05T00:00:00-04:00/2026-09-06T01:00:00-03:00"},
+		{time.Date(2026, 9, 6, 12, 0, 0, 0, santiago), "2026-09-06T01:00:00-03:00/2026-09-07T00:00:00-03:00"},
+	} {
+		if got := daySpan(c.at); got != c.want {
+			t.Errorf("daySpan(%s) = %q, want %q", c.at.Format(time.RFC3339), got, c.want)
+		}
+	}
 }
 
 func keys(m map[string]map[string]cache.DailyHistoryEntry) []string {
