@@ -1,6 +1,8 @@
 package daily
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -199,6 +201,92 @@ func TestDayStartFromInvariants(t *testing.T) {
 		if fmt.Sprint(forward) != fmt.Sprint(c.dates) {
 			t.Errorf("%s: stepping lists %v, want %v", c.zone, forward, c.dates)
 		}
+	}
+}
+
+// ruleOnlyZone is a zone with no transitions of its own, only the TZ rule —
+// what a slim tz database file leaves for the years after its last listed
+// transition — so Go works out every period from the rule.
+func ruleOnlyZone(t *testing.T, name string, offset int32, rule string) *time.Location {
+	t.Helper()
+	var b bytes.Buffer
+	header := func(types, chars uint32) {
+		b.WriteString("TZif2")
+		b.Write(make([]byte, 15))
+		for _, n := range []uint32{0, 0, 0, 0, types, chars} { // ut, std, leap, transition, type, char counts
+			binary.Write(&b, binary.BigEndian, n)
+		}
+	}
+	header(0, 0) // the version 1 data, skipped by version 2 readers
+	header(1, uint32(len(name)+1))
+	binary.Write(&b, binary.BigEndian, offset)
+	b.Write([]byte{0, 0}) // not DST, designation at 0
+	b.WriteString(name + "\x00\n" + rule + "\n")
+	loc, err := time.LoadLocationFromTZData(name, b.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
+}
+
+// Under a zone's TZ rule Go ends each period 365 days into the UTC year, a
+// day short in a leap year, so a period can "end" at or before the instant
+// asked about. Day starts around such a year end still come out right and
+// stepping through it still ends (#346): with a rule-only zone (a slim tz
+// file past its last transition) and, where the tz database has it, the
+// system's America/New_York past its last listed year.
+func TestDayStartFromRuleOnlyZone(t *testing.T) {
+	ny := ruleOnlyZone(t, "EST", -5*60*60, "EST5EDT,M3.2.0,M11.1.0")
+	setLocal(t, ny)
+	got := dayStartsWithin(t, []dayStep{
+		{time.Date(2028, 12, 31, 12, 0, 0, 0, ny), 0},
+		{time.Date(2028, 12, 31, 12, 0, 0, 0, ny), 1},
+		{time.Date(2029, 1, 1, 12, 0, 0, 0, ny), -1},
+		{time.Date(2028, 3, 12, 12, 0, 0, 0, ny), 0}, // the rule's DST start
+		{time.Date(2028, 3, 12, 12, 0, 0, 0, ny), 1},
+	})
+	want := []string{"2028-12-31T00:00:00-05:00", "2029-01-01T00:00:00-05:00", "2028-12-31T00:00:00-05:00", "2028-03-12T00:00:00-05:00", "2028-03-13T00:00:00-04:00"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("rule-only zone: day starts = %v, want %v", got, want)
+	}
+
+	sys, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("no tz database entry for America/New_York here: %v", err)
+	}
+	setLocal(t, sys)
+	got = dayStartsWithin(t, []dayStep{
+		{time.Date(2040, 12, 31, 12, 0, 0, 0, sys), 0},
+		{time.Date(2040, 12, 31, 12, 0, 0, 0, sys), 1},
+	})
+	if want := []string{"2040-12-31T00:00:00-05:00", "2041-01-01T00:00:00-05:00"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("America/New_York: day starts = %v, want %v", got, want)
+	}
+}
+
+type dayStep struct {
+	at   time.Time
+	days int
+}
+
+// dayStartsWithin computes DayStartFrom for each step, failing the test
+// rather than hanging it if the computation never returns.
+func dayStartsWithin(t *testing.T, steps []dayStep) []string {
+	t.Helper()
+	done := make(chan []string, 1)
+	go func() {
+		var got []string
+		for _, s := range steps {
+			got = append(got, DayStartFrom(s.at, s.days).Format(time.RFC3339))
+		}
+		done <- got
+	}()
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(10 * time.Second):
+		t.Fatal("DayStartFrom did not return")
+		return nil
 	}
 }
 

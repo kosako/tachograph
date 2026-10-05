@@ -107,6 +107,13 @@ func dateStart(year int, month time.Month, day int, loc *time.Location) time.Tim
 		l := t.In(loc)
 		_, offset := l.Zone()
 		_, end := l.ZoneBounds()
+		if !end.IsZero() && !end.After(t) {
+			// Past a zone's last listed transition Go follows its TZ rule and
+			// ends that rule's periods 365 days into each UTC year, short of a
+			// leap year's end, so end can come at or before t. The offset holds
+			// until the next UTC year there.
+			end = time.Date(t.UTC().Year()+1, 1, 1, 0, 0, 0, 0, time.UTC)
+		}
 		first := midnight.Add(-time.Duration(offset) * time.Second)
 		if first.Before(t) {
 			first = t
