@@ -149,9 +149,10 @@ func TestNpmLauncherTargetsExtensionlessShim(t *testing.T) {
 	}
 }
 
-// doctor's statusLine check: a command that doesn't resolve, one that runs a
-// different tacho than this one (e.g. left behind in an old Node version's
-// directory), and one that is not tacho at all (a user's own script).
+// doctor's statusLine check: a command that doesn't resolve (missing, or a
+// file without the execute bit — #340), one that runs a different tacho than
+// this one (e.g. left behind in an old Node version's directory), and one that
+// is not tacho at all (a user's own script).
 func TestStatusLineWarning(t *testing.T) {
 	pathTacho, binary := npmLayout(t)
 	stale := filepath.Join(t.TempDir(), "tacho")
@@ -162,12 +163,17 @@ func TestStatusLineWarning(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	unexecutable := filepath.Join(t.TempDir(), "statusline.sh")
+	if err := os.WriteFile(unexecutable, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name, command, want string
 	}{
 		{"this binary", binary + " statusline", ""},
 		{"the npm launcher for this binary", pathTacho + " statusline", ""},
 		{"missing", filepath.Join(t.TempDir(), "gone", "tacho") + " statusline", "does not resolve"},
+		{"not executable", unexecutable, "does not resolve"},
 		{"another tacho", stale + " statusline", "different tacho"},
 		{"not tacho", script, ""},
 	}
