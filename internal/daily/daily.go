@@ -59,49 +59,63 @@ func (t Totals) Schema() *schema.Daily {
 	return d
 }
 
-// DayStart returns the first instant of t's local calendar day. Day windows
-// passed to ClaudeDays / CodexDays are built from it and DayStartFrom, so a
-// window boundary is always where a local day begins.
+// DayStart returns the first instant of t's local calendar day, never later
+// than t. Day windows passed to ClaudeDays / CodexDays are built from it and
+// DayStartFrom, so a window boundary is always where a local day begins.
 func DayStart(t time.Time) time.Time {
 	return DayStartFrom(t, 0)
 }
 
-// DayStartFrom returns the first instant of the local calendar day days
-// after t's (before it when days is negative). Step through days with it
-// rather than AddDate on a day start, which time.Date re-normalizes: a day
-// whose midnight a DST switch skips (America/Santiago) would land on the day
-// before (#346).
+// DayStartFrom returns the first instant of the local day days after t's
+// (before it when days is negative), counting only days that exist: a date a
+// DST switch skips entirely (Pacific/Apia, 2011-12-30) is no day. Step
+// through days with it rather than with AddDate, which time.Date
+// re-normalizes: a day whose midnight a DST switch skips (America/Santiago)
+// would land on the day before (#346).
 func DayStartFrom(t time.Time, days int) time.Time {
-	l := t.Local()
-	return dateStart(l.Year(), l.Month(), l.Day()+days, l.Location())
+	start := dayStart(t.Local())
+	for ; days > 0; days-- {
+		y, m, d := start.Date()
+		start = dateStart(y, m, d+1, start.Location())
+	}
+	for ; days < 0; days++ {
+		start = dayStart(start.Add(-time.Nanosecond)) // the day the instant before belongs to
+	}
+	return start
+}
+
+// dayStart is the first instant of l's calendar date in l's location.
+func dayStart(l time.Time) time.Time {
+	y, m, d := l.Date()
+	return dateStart(y, m, d, l.Location())
 }
 
 // dateStart is the first instant in loc whose local date is the calendar
-// date (normalized as time.Date does: day 32 is the next month's first) or
+// date (day 32 being the next month's first, as time.Date normalizes) or
 // later. That is usually the date's midnight, but a DST switch can skip
 // midnight — time.Date then lands on the day before (America/Santiago) — or
-// the whole date (Pacific/Apia, 2011-12-30), so the instant is bisected to
-// the second, which zone transitions fall on. UTC offsets stay within ±14h,
-// so the date begins within 15h of its UTC midnight.
+// the whole date (Pacific/Apia, 2011-12-30), or come back to the day before
+// just after midnight (America/St_Johns, 2008-11-02), so local dates don't
+// even run in order. Within one zone period (a constant offset) they do, so
+// the periods are walked from a point before the date in every zone, and in
+// the first one that reaches the date, the date begins at its midnight under
+// that offset, or at the period's start if that midnight came earlier.
 func dateStart(year int, month time.Month, day int, loc *time.Location) time.Time {
-	utcMidnight := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
-	date := dateOrdinal(utcMidnight.Date())
-	lo := utcMidnight.Add(-15 * time.Hour).Unix() // before the date in any zone
-	hi := utcMidnight.Add(15 * time.Hour).Unix()  // on the date or later in any zone
-	for hi-lo > 1 {
-		mid := lo + (hi-lo)/2
-		if dateOrdinal(time.Unix(mid, 0).In(loc).Date()) >= date {
-			hi = mid
-		} else {
-			lo = mid
+	midnight := time.Date(year, month, day, 0, 0, 0, 0, time.UTC) // the date's midnight at offset 0
+	t := midnight.Add(-26 * time.Hour)                            // UTC offsets stay well within ±26h
+	for {
+		l := t.In(loc)
+		_, offset := l.Zone()
+		_, end := l.ZoneBounds()
+		first := midnight.Add(-time.Duration(offset) * time.Second)
+		if first.Before(t) {
+			first = t
 		}
+		if end.IsZero() || first.Before(end) {
+			return first.In(loc)
+		}
+		t = end
 	}
-	return time.Unix(hi, 0).In(loc)
-}
-
-// dateOrdinal orders calendar dates: a later date has a larger value.
-func dateOrdinal(y int, m time.Month, d int) int {
-	return y*10000 + int(m)*100 + d
 }
 
 // DayKey is the key ClaudeDays / CodexDays use for t's local calendar day.

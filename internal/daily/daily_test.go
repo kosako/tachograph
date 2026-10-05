@@ -132,21 +132,72 @@ func TestDayStartFrom(t *testing.T) {
 		t.Errorf("stepping across the skipped midnight lists %v, want %v", keys, want)
 	}
 
+	// Offsets shown to the second: Asia/Manila's was -15:56:08 in 1844.
+	const layout = "2006-01-02T15:04:05-07:00:00"
 	for _, c := range []struct {
 		zone       string
-		start      time.Time
+		at         time.Time
 		days       int
 		want, name string
 	}{
-		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 0, "2026-03-08T00:00:00-05:00", "a 2 a.m. switch keeps midnight"},
-		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 1, "2026-03-09T00:00:00-04:00", "the day after a 2 a.m. switch"},
-		{"Pacific/Apia", time.Date(2011, 12, 29, 12, 0, 0, 0, time.UTC), 1, "2011-12-31T00:00:00+14:00", "a skipped date steps to the next one"},
-		{"Asia/Tokyo", time.Date(2026, 7, 31, 3, 0, 0, 0, time.UTC), 1, "2026-08-01T00:00:00+09:00", "month end"},
-		{"Asia/Tokyo", time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC), -1, "2026-02-28T00:00:00+09:00", "back across a non-leap February"},
+		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 0, "2026-03-08T00:00:00-05:00:00", "a 2 a.m. switch keeps midnight"},
+		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 1, "2026-03-09T00:00:00-04:00:00", "the day after a 2 a.m. switch"},
+		// St. John's fell back from 00:01 to 23:01 the day before: the 2nd
+		// begins at its first midnight, the hour after it is the 1st again.
+		{"America/St_Johns", time.Date(2008, 11, 2, 2, 30, 30, 0, time.UTC), 0, "2008-11-02T00:00:00-02:30:00", "the first minute of a day that falls back after midnight"},
+		{"America/St_Johns", time.Date(2008, 11, 2, 3, 0, 0, 0, time.UTC), 0, "2008-11-01T00:00:00-02:30:00", "the hour that is the day before again"},
+		{"America/St_Johns", time.Date(2008, 11, 2, 15, 0, 0, 0, time.UTC), 0, "2008-11-02T00:00:00-02:30:00", "after the second midnight"},
+		{"America/St_Johns", time.Date(2008, 11, 1, 12, 0, 0, 0, time.UTC), 1, "2008-11-02T00:00:00-02:30:00", "the next day is the first midnight"},
+		{"Asia/Manila", time.Date(1844, 1, 3, 4, 0, 0, 0, time.UTC), 0, "1844-01-02T00:00:00-15:56:08", "an offset beyond ±15h"},
+		{"Asia/Manila", time.Date(1844, 1, 3, 4, 0, 0, 0, time.UTC), 1, "1844-01-03T00:00:00-15:56:08", "the next day beyond ±15h"},
+		{"Asia/Manila", time.Date(1844, 12, 31, 4, 0, 0, 0, time.UTC), 1, "1845-01-01T00:00:00+08:03:52", "1844-12-31 was skipped"},
+		{"Pacific/Apia", time.Date(2011, 12, 29, 12, 0, 0, 0, time.UTC), 1, "2011-12-31T00:00:00+14:00:00", "a skipped date steps to the next one"},
+		{"Pacific/Apia", time.Date(2011, 12, 30, 22, 0, 0, 0, time.UTC), -1, "2011-12-29T00:00:00-10:00:00", "and back to the one before"},
+		{"Asia/Tokyo", time.Date(2026, 7, 31, 3, 0, 0, 0, time.UTC), 1, "2026-08-01T00:00:00+09:00:00", "month end"},
+		{"Asia/Tokyo", time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC), -1, "2026-02-28T00:00:00+09:00:00", "back across a non-leap February"},
 	} {
 		setLocal(t, loadLocation(t, c.zone))
-		if got := DayStartFrom(c.start, c.days).Format(time.RFC3339); got != c.want {
+		if got := DayStartFrom(c.at, c.days).Format(layout); got != c.want {
 			t.Errorf("%s (%s): %s, want %s", c.name, c.zone, got, c.want)
+		}
+	}
+}
+
+// Around every kind of switch, a day start is never after the instant it is
+// for and falls on that instant's date, and stepping from it moves strictly
+// forward or back, one existing date at a time — so day loops always end.
+func TestDayStartFromInvariants(t *testing.T) {
+	for _, c := range []struct {
+		zone     string
+		from, to time.Time // UTC span to probe, hour by hour
+		dates    []string  // the dates the span's days step through
+	}{
+		{"America/Santiago", time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC), time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC), []string{"2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07"}},
+		{"America/St_Johns", time.Date(2008, 10, 31, 12, 0, 0, 0, time.UTC), time.Date(2008, 11, 4, 0, 0, 0, 0, time.UTC), []string{"2008-10-31", "2008-11-01", "2008-11-02", "2008-11-03"}},
+		{"Asia/Manila", time.Date(1844, 12, 30, 4, 0, 0, 0, time.UTC), time.Date(1845, 1, 2, 12, 0, 0, 0, time.UTC), []string{"1844-12-29", "1844-12-30", "1845-01-01", "1845-01-02"}},
+		{"Pacific/Apia", time.Date(2011, 12, 28, 12, 0, 0, 0, time.UTC), time.Date(2012, 1, 1, 12, 0, 0, 0, time.UTC), []string{"2011-12-28", "2011-12-29", "2011-12-31", "2012-01-01"}},
+	} {
+		loc := loadLocation(t, c.zone)
+		setLocal(t, loc)
+		for at := c.from; at.Before(c.to); at = at.Add(30 * time.Minute) {
+			if s := DayStart(at); s.After(at) || DayKey(s) != DayKey(at) {
+				t.Errorf("%s: DayStart(%s) = %s, want a start on %s no later than it", c.zone, at.In(loc).Format(time.RFC3339), s.Format(time.RFC3339), DayKey(at))
+			}
+		}
+		var forward []string
+		for d := DayStart(c.from); len(forward) < len(c.dates); {
+			forward = append(forward, DayKey(d))
+			next := DayStartFrom(d, 1)
+			if !next.After(d) {
+				t.Fatalf("%s: DayStartFrom(%s, 1) = %s, not after it", c.zone, d.Format(time.RFC3339), next.Format(time.RFC3339))
+			}
+			if back := DayStartFrom(next, -1); !back.Equal(d) {
+				t.Errorf("%s: DayStartFrom(%s, -1) = %s, want %s", c.zone, next.Format(time.RFC3339), back.Format(time.RFC3339), d.Format(time.RFC3339))
+			}
+			d = next
+		}
+		if fmt.Sprint(forward) != fmt.Sprint(c.dates) {
+			t.Errorf("%s: stepping lists %v, want %v", c.zone, forward, c.dates)
 		}
 	}
 }
