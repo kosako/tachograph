@@ -59,13 +59,70 @@ func (t Totals) Schema() *schema.Daily {
 	return d
 }
 
-// DayStart returns the local midnight that begins t's calendar day. Day
-// windows passed to ClaudeDays / CodexDays are built from it, so a window
-// boundary is always a local midnight (DST-safe: time.Date normalizes the
-// 23h / 25h days).
+// DayStart returns the first instant of t's local calendar day, never later
+// than t. Day windows passed to ClaudeDays / CodexDays are built from it and
+// DayStartFrom, so a window boundary is always where a local day begins.
 func DayStart(t time.Time) time.Time {
-	l := t.Local()
-	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, l.Location())
+	return DayStartFrom(t, 0)
+}
+
+// DayStartFrom returns the first instant of the local day days after t's
+// (before it when days is negative), counting only days that exist: a date a
+// DST switch skips entirely (Pacific/Apia, 2011-12-30) is no day. Step
+// through days with it rather than with AddDate, which time.Date
+// re-normalizes: a day whose midnight a DST switch skips (America/Santiago)
+// would land on the day before (#346).
+func DayStartFrom(t time.Time, days int) time.Time {
+	start := dayStart(t.Local())
+	for ; days > 0; days-- {
+		y, m, d := start.Date()
+		start = dateStart(y, m, d+1, start.Location())
+	}
+	for ; days < 0; days++ {
+		start = dayStart(start.Add(-time.Nanosecond)) // the day the instant before belongs to
+	}
+	return start
+}
+
+// dayStart is the first instant of l's calendar date in l's location.
+func dayStart(l time.Time) time.Time {
+	y, m, d := l.Date()
+	return dateStart(y, m, d, l.Location())
+}
+
+// dateStart is the first instant in loc whose local date is the calendar
+// date (day 32 being the next month's first, as time.Date normalizes) or
+// later. That is usually the date's midnight, but a DST switch can skip
+// midnight — time.Date then lands on the day before (America/Santiago) — or
+// the whole date (Pacific/Apia, 2011-12-30), or come back to the day before
+// just after midnight (America/St_Johns, 2008-11-02), so local dates don't
+// even run in order. Within one zone period (a constant offset) they do, so
+// the periods are walked from a point before the date in every zone, and in
+// the first one that reaches the date, the date begins at its midnight under
+// that offset, or at the period's start if that midnight came earlier.
+func dateStart(year int, month time.Month, day int, loc *time.Location) time.Time {
+	midnight := time.Date(year, month, day, 0, 0, 0, 0, time.UTC) // the date's midnight at offset 0
+	t := midnight.Add(-26 * time.Hour)                            // UTC offsets stay well within ±26h
+	for {
+		l := t.In(loc)
+		_, offset := l.Zone()
+		_, end := l.ZoneBounds()
+		if !end.IsZero() && !end.After(t) {
+			// Past a zone's last listed transition Go follows its TZ rule and
+			// ends that rule's periods 365 days into each UTC year, short of a
+			// leap year's end, so end can come at or before t. The offset holds
+			// until the next UTC year there.
+			end = time.Date(t.UTC().Year()+1, 1, 1, 0, 0, 0, 0, time.UTC)
+		}
+		first := midnight.Add(-time.Duration(offset) * time.Second)
+		if first.Before(t) {
+			first = t
+		}
+		if end.IsZero() || first.Before(end) {
+			return first.In(loc)
+		}
+		t = end
+	}
 }
 
 // DayKey is the key ClaudeDays / CodexDays use for t's local calendar day.
@@ -115,7 +172,7 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 		return schema.Tokens{}, Totals{}, false
 	}
 	from := DayStart(now)
-	to := from.AddDate(0, 0, 1)
+	to := DayStartFrom(from, 1)
 	seenAll := map[uint64]bool{}
 	seenToday := claude.UsageSet{}
 	var cum Totals
@@ -326,7 +383,7 @@ func decodeFileUsage(b []byte) (fileUsage, bool) {
 // ClaudeDays, so today's figure is the same whichever entry point asks.
 func ClaudeTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
 	from := DayStart(now)
-	days, err := ClaudeDays(root, from, from.AddDate(0, 0, 1), prices)
+	days, err := ClaudeDays(root, from, DayStartFrom(from, 1), prices)
 	if err != nil {
 		return Totals{}, err
 	}
@@ -430,7 +487,7 @@ func claudeLineTotals(line claude.TranscriptLine, prices pricing.Table) Totals {
 // entry point asks.
 func CodexTotals(root string, now time.Time, prices pricing.Table) (Totals, error) {
 	from := DayStart(now)
-	days, err := CodexDays(root, from, from.AddDate(0, 0, 1), prices)
+	days, err := CodexDays(root, from, DayStartFrom(from, 1), prices)
 	if err != nil {
 		return Totals{}, err
 	}
@@ -462,7 +519,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	// own directory's day.
 	dayDirs := map[string]time.Time{}
 	window := map[string]bool{} // day keys inside [from, to)
-	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+	for d := from; d.Before(to); d = DayStartFrom(d, 1) {
 		dir := filepath.Join(sessions, d.Format("2006"), d.Format("01"), d.Format("02"))
 		if _, err := os.ReadDir(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
@@ -493,7 +550,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 			if !ok {
 				return
 			}
-			ro.events = []codexTC{{ts: day.AddDate(0, 0, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model}}
+			ro.events = []codexTC{{ts: DayStartFrom(day, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model}}
 		}
 		key, ok := codex.SessionID(filepath.Base(f.path))
 		if !ok {

@@ -479,10 +479,17 @@ func runDaily(args []string) int {
 
 	now := time.Now()
 	cfg := config.Load()
-	to := daily.DayStart(now).AddDate(0, 0, 1)
-	h := core.History(core.Options{Now: now}, to.AddDate(0, 0, -*days), to)
+	from, to := dailyRange(now, *days)
+	h := core.History(core.Options{Now: now}, from, to)
 	fmt.Print(render.DailyTable(h.Days, cfg.Tools, h.Tools))
 	return 0
+}
+
+// dailyRange is the window of the last days local days ending today, from
+// the first one's start to tomorrow's, counted back from today so today is
+// always in it (#346).
+func dailyRange(now time.Time, days int) (from, to time.Time) {
+	return daily.DayStartFrom(now, -(days - 1)), daily.DayStartFrom(now, 1)
 }
 
 func runWatch(args []string) int {

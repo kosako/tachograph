@@ -1,6 +1,8 @@
 package daily
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,13 +49,13 @@ func claudeMsgCacheCreationTotal(ts time.Time, in, totalCC, cc5m, cc1h, cr, out 
 
 // TestDayInLocalBoundary pins the local-day boundary used to slice "today":
 // the first and last instant of the calendar day count, one second either side
-// does not. The window is built from DayStart (time.Date in time.Local, no 24h
-// arithmetic), so this stays correct across DST transitions. Instants are
-// built explicitly in time.Local so the RFC 3339 offset matches what dayIn
-// re-localizes to.
+// does not. The window is built from DayStart / DayStartFrom (local calendar
+// days, no 24h arithmetic), so this stays correct across DST transitions.
+// Instants are built explicitly in time.Local so the RFC 3339 offset matches
+// what dayIn re-localizes to.
 func TestDayInLocalBoundary(t *testing.T) {
 	from := DayStart(time.Date(2026, 6, 28, 12, 0, 0, 0, time.Local))
-	to := from.AddDate(0, 0, 1)
+	to := DayStartFrom(from, 1)
 	cases := []struct {
 		name string
 		ts   time.Time
@@ -76,6 +78,231 @@ func TestDayInLocalBoundary(t *testing.T) {
 	}
 	if _, got := dayIn("not a time", from, to); got {
 		t.Error("dayIn(unparsable) = true, want false")
+	}
+}
+
+// setLocal switches the local timezone for the rest of the test.
+func setLocal(t *testing.T, loc *time.Location) {
+	t.Helper()
+	prev := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = prev })
+}
+
+func loadLocation(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Skipf("no tz database entry for %s here: %v", name, err)
+	}
+	return loc
+}
+
+// A day begins at its first instant: midnight, or — where a DST switch skips
+// midnight (America/Santiago, 2026-09-06) — the switch itself, never the
+// previous evening time.Date would give; stepping day by day lists each date
+// once (#346). A 2 a.m. switch, a fall-back day, a skipped date, and month
+// ends keep plain midnights.
+func TestDayStartFrom(t *testing.T) {
+	santiago := loadLocation(t, "America/Santiago")
+	setLocal(t, santiago)
+	at := func(y int, m time.Month, d, h int) time.Time { return time.Date(y, m, d, h, 0, 0, 0, santiago) }
+	cases := []struct {
+		name string
+		got  time.Time
+		want string
+	}{
+		{"the day before the skipped midnight", DayStart(at(2026, 9, 5, 15)), "2026-09-05T00:00:00-04:00"},
+		{"the day whose midnight is skipped", DayStart(at(2026, 9, 6, 12)), "2026-09-06T01:00:00-03:00"},
+		{"next day into it", DayStartFrom(at(2026, 9, 5, 0), 1), "2026-09-06T01:00:00-03:00"},
+		{"next day out of it", DayStartFrom(at(2026, 9, 6, 12), 1), "2026-09-07T00:00:00-03:00"},
+		{"one day back into it", DayStartFrom(at(2026, 9, 7, 0), -1), "2026-09-06T01:00:00-03:00"},
+		{"two days back across it", DayStartFrom(at(2026, 9, 7, 0), -2), "2026-09-05T00:00:00-04:00"},
+		{"the day after a fall-back (24:00 → 23:00 on the 4th)", DayStart(at(2026, 4, 5, 12)), "2026-04-05T00:00:00-04:00"},
+	}
+	for _, c := range cases {
+		if got := c.got.Format(time.RFC3339); got != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
+	}
+
+	var keys []string
+	for d := DayStart(at(2026, 9, 4, 12)); d.Before(DayStart(at(2026, 9, 8, 12))); d = DayStartFrom(d, 1) {
+		keys = append(keys, DayKey(d))
+	}
+	if want := []string{"2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07"}; fmt.Sprint(keys) != fmt.Sprint(want) {
+		t.Errorf("stepping across the skipped midnight lists %v, want %v", keys, want)
+	}
+
+	// Offsets shown to the second: Asia/Manila's was -15:56:08 in 1844.
+	const layout = "2006-01-02T15:04:05-07:00:00"
+	for _, c := range []struct {
+		zone       string
+		at         time.Time
+		days       int
+		want, name string
+	}{
+		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 0, "2026-03-08T00:00:00-05:00:00", "a 2 a.m. switch keeps midnight"},
+		{"America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), 1, "2026-03-09T00:00:00-04:00:00", "the day after a 2 a.m. switch"},
+		// St. John's fell back from 00:01 to 23:01 the day before: the 2nd
+		// begins at its first midnight, the hour after it is the 1st again.
+		{"America/St_Johns", time.Date(2008, 11, 2, 2, 30, 30, 0, time.UTC), 0, "2008-11-02T00:00:00-02:30:00", "the first minute of a day that falls back after midnight"},
+		{"America/St_Johns", time.Date(2008, 11, 2, 3, 0, 0, 0, time.UTC), 0, "2008-11-01T00:00:00-02:30:00", "the hour that is the day before again"},
+		{"America/St_Johns", time.Date(2008, 11, 2, 15, 0, 0, 0, time.UTC), 0, "2008-11-02T00:00:00-02:30:00", "after the second midnight"},
+		{"America/St_Johns", time.Date(2008, 11, 1, 12, 0, 0, 0, time.UTC), 1, "2008-11-02T00:00:00-02:30:00", "the next day is the first midnight"},
+		{"Asia/Manila", time.Date(1844, 1, 3, 4, 0, 0, 0, time.UTC), 0, "1844-01-02T00:00:00-15:56:08", "an offset beyond ±15h"},
+		{"Asia/Manila", time.Date(1844, 1, 3, 4, 0, 0, 0, time.UTC), 1, "1844-01-03T00:00:00-15:56:08", "the next day beyond ±15h"},
+		{"Asia/Manila", time.Date(1844, 12, 31, 4, 0, 0, 0, time.UTC), 1, "1845-01-01T00:00:00+08:03:52", "1844-12-31 was skipped"},
+		{"Pacific/Apia", time.Date(2011, 12, 29, 12, 0, 0, 0, time.UTC), 1, "2011-12-31T00:00:00+14:00:00", "a skipped date steps to the next one"},
+		{"Pacific/Apia", time.Date(2011, 12, 30, 22, 0, 0, 0, time.UTC), -1, "2011-12-29T00:00:00-10:00:00", "and back to the one before"},
+		{"Asia/Tokyo", time.Date(2026, 7, 31, 3, 0, 0, 0, time.UTC), 1, "2026-08-01T00:00:00+09:00:00", "month end"},
+		{"Asia/Tokyo", time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC), -1, "2026-02-28T00:00:00+09:00:00", "back across a non-leap February"},
+	} {
+		setLocal(t, loadLocation(t, c.zone))
+		if got := DayStartFrom(c.at, c.days).Format(layout); got != c.want {
+			t.Errorf("%s (%s): %s, want %s", c.name, c.zone, got, c.want)
+		}
+	}
+}
+
+// Around every kind of switch, a day start is never after the instant it is
+// for and falls on that instant's date, and stepping from it moves strictly
+// forward or back, one existing date at a time — so day loops always end.
+func TestDayStartFromInvariants(t *testing.T) {
+	for _, c := range []struct {
+		zone     string
+		from, to time.Time // UTC span to probe, hour by hour
+		dates    []string  // the dates the span's days step through
+	}{
+		{"America/Santiago", time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC), time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC), []string{"2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07"}},
+		{"America/St_Johns", time.Date(2008, 10, 31, 12, 0, 0, 0, time.UTC), time.Date(2008, 11, 4, 0, 0, 0, 0, time.UTC), []string{"2008-10-31", "2008-11-01", "2008-11-02", "2008-11-03"}},
+		{"Asia/Manila", time.Date(1844, 12, 30, 4, 0, 0, 0, time.UTC), time.Date(1845, 1, 2, 12, 0, 0, 0, time.UTC), []string{"1844-12-29", "1844-12-30", "1845-01-01", "1845-01-02"}},
+		{"Pacific/Apia", time.Date(2011, 12, 28, 12, 0, 0, 0, time.UTC), time.Date(2012, 1, 1, 12, 0, 0, 0, time.UTC), []string{"2011-12-28", "2011-12-29", "2011-12-31", "2012-01-01"}},
+	} {
+		loc := loadLocation(t, c.zone)
+		setLocal(t, loc)
+		for at := c.from; at.Before(c.to); at = at.Add(30 * time.Minute) {
+			if s := DayStart(at); s.After(at) || DayKey(s) != DayKey(at) {
+				t.Errorf("%s: DayStart(%s) = %s, want a start on %s no later than it", c.zone, at.In(loc).Format(time.RFC3339), s.Format(time.RFC3339), DayKey(at))
+			}
+		}
+		var forward []string
+		for d := DayStart(c.from); len(forward) < len(c.dates); {
+			forward = append(forward, DayKey(d))
+			next := DayStartFrom(d, 1)
+			if !next.After(d) {
+				t.Fatalf("%s: DayStartFrom(%s, 1) = %s, not after it", c.zone, d.Format(time.RFC3339), next.Format(time.RFC3339))
+			}
+			if back := DayStartFrom(next, -1); !back.Equal(d) {
+				t.Errorf("%s: DayStartFrom(%s, -1) = %s, want %s", c.zone, next.Format(time.RFC3339), back.Format(time.RFC3339), d.Format(time.RFC3339))
+			}
+			d = next
+		}
+		if fmt.Sprint(forward) != fmt.Sprint(c.dates) {
+			t.Errorf("%s: stepping lists %v, want %v", c.zone, forward, c.dates)
+		}
+	}
+}
+
+// ruleOnlyZone is a zone with no transitions of its own, only the TZ rule —
+// what a slim tz database file leaves for the years after its last listed
+// transition — so Go works out every period from the rule.
+func ruleOnlyZone(t *testing.T, name string, offset int32, rule string) *time.Location {
+	t.Helper()
+	var b bytes.Buffer
+	header := func(types, chars uint32) {
+		b.WriteString("TZif2")
+		b.Write(make([]byte, 15))
+		for _, n := range []uint32{0, 0, 0, 0, types, chars} { // ut, std, leap, transition, type, char counts
+			binary.Write(&b, binary.BigEndian, n)
+		}
+	}
+	header(0, 0) // the version 1 data, skipped by version 2 readers
+	header(1, uint32(len(name)+1))
+	binary.Write(&b, binary.BigEndian, offset)
+	b.Write([]byte{0, 0}) // not DST, designation at 0
+	b.WriteString(name + "\x00\n" + rule + "\n")
+	loc, err := time.LoadLocationFromTZData(name, b.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
+}
+
+// Under a zone's TZ rule Go ends each period 365 days into the UTC year, a
+// day short in a leap year, so a period can "end" at or before the instant
+// asked about. Day starts around such a year end still come out right and
+// stepping through it still ends (#346): with a rule-only zone (a slim tz
+// file past its last transition) and, where the tz database has it, the
+// system's America/New_York past its last listed year.
+func TestDayStartFromRuleOnlyZone(t *testing.T) {
+	ny := ruleOnlyZone(t, "EST", -5*60*60, "EST5EDT,M3.2.0,M11.1.0")
+	setLocal(t, ny)
+	got := dayStartsWithin(t, []dayStep{
+		{time.Date(2028, 12, 31, 12, 0, 0, 0, ny), 0},
+		{time.Date(2028, 12, 31, 12, 0, 0, 0, ny), 1},
+		{time.Date(2029, 1, 1, 12, 0, 0, 0, ny), -1},
+		{time.Date(2028, 3, 12, 12, 0, 0, 0, ny), 0}, // the rule's DST start
+		{time.Date(2028, 3, 12, 12, 0, 0, 0, ny), 1},
+	})
+	want := []string{"2028-12-31T00:00:00-05:00", "2029-01-01T00:00:00-05:00", "2028-12-31T00:00:00-05:00", "2028-03-12T00:00:00-05:00", "2028-03-13T00:00:00-04:00"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("rule-only zone: day starts = %v, want %v", got, want)
+	}
+
+	sys, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("no tz database entry for America/New_York here: %v", err)
+	}
+	setLocal(t, sys)
+	got = dayStartsWithin(t, []dayStep{
+		{time.Date(2040, 12, 31, 12, 0, 0, 0, sys), 0},
+		{time.Date(2040, 12, 31, 12, 0, 0, 0, sys), 1},
+	})
+	if want := []string{"2040-12-31T00:00:00-05:00", "2041-01-01T00:00:00-05:00"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("America/New_York: day starts = %v, want %v", got, want)
+	}
+}
+
+type dayStep struct {
+	at   time.Time
+	days int
+}
+
+// dayStartsWithin computes DayStartFrom for each step, failing the test
+// rather than hanging it if the computation never returns.
+func dayStartsWithin(t *testing.T, steps []dayStep) []string {
+	t.Helper()
+	done := make(chan []string, 1)
+	go func() {
+		var got []string
+		for _, s := range steps {
+			got = append(got, DayStartFrom(s.at, s.days).Format(time.RFC3339))
+		}
+		done <- got
+	}()
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(10 * time.Second):
+		t.Fatal("DayStartFrom did not return")
+		return nil
+	}
+}
+
+// The day before a skipped midnight runs to the switch: its last hour counts
+// toward today's total rather than falling past a window that time.Date
+// would have closed at 23:00 (#346).
+func TestClaudeTotalsBeforeSkippedMidnight(t *testing.T) {
+	santiago := loadLocation(t, "America/Santiago")
+	setLocal(t, santiago)
+	root := t.TempDir()
+	late := time.Date(2026, 9, 5, 23, 30, 0, 0, santiago)
+	writeFile(t, filepath.Join(root, "projects", "p", "late.jsonl"), claudeMsg(late, 100, 0, 0, 10)+"\n", late)
+
+	got := mustClaudeTotals(t, root, late.Add(10*time.Minute), noPrices)
+	if got.Tokens != 110 {
+		t.Errorf("ClaudeTotals at 23:40 on 2026-09-05 = %d tokens, want 110 (the 23:30 message)", got.Tokens)
 	}
 }
 
