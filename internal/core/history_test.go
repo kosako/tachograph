@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/daily"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -17,21 +18,35 @@ func claudeRootWithDays(t *testing.T, days map[time.Time]int64) string {
 	t.Helper()
 	root := t.TempDir()
 	for day, tokens := range days {
-		ts := day.Add(10 * time.Hour)
-		line := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`+"\n",
-			ts.Format(time.RFC3339), tokens)
-		path := filepath.Join(root, "projects", "p", day.Format("2006-01-02")+".jsonl")
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, ts, ts); err != nil {
-			t.Fatal(err)
-		}
+		writeClaudeMessage(t, root, day.Add(10*time.Hour), tokens)
 	}
 	return root
+}
+
+// writeClaudeMessage writes a transcript under root holding a single priced
+// message of tokens input tokens stamped ts, last modified at ts.
+func writeClaudeMessage(t *testing.T, root string, ts time.Time, tokens int64) {
+	t.Helper()
+	line := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`+"\n",
+		ts.Format(time.RFC3339), tokens)
+	path := filepath.Join(root, "projects", "p", ts.Format("2006-01-02")+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setLocal switches the local timezone for the rest of the test.
+func setLocal(t *testing.T, loc *time.Location) {
+	t.Helper()
+	prev := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = prev })
 }
 
 func historyStatus(todayTokens int64) schema.Status {
@@ -175,6 +190,34 @@ func TestRecentHistoryGraceWindow(t *testing.T) {
 	cached, _ = cache.ReadDailyHistory("v1|")
 	if cached["2026-07-03"] == nil {
 		t.Errorf("cache after grace = %v, want yesterday stored", keys(cached))
+	}
+}
+
+// Across a skipped midnight (America/Santiago, 2026-09-06) both History and
+// RecentHistory list each date once, today's row is today's, and the evening
+// before the skip keeps its last hour (#346).
+func TestHistoryAcrossSkippedMidnight(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("no tz database entry for America/Santiago here: %v", err)
+	}
+	setLocal(t, santiago)
+	root := t.TempDir()
+	writeClaudeMessage(t, root, time.Date(2026, 9, 5, 23, 30, 0, 0, santiago), 100) // the last hour before the skip
+	writeClaudeMessage(t, root, time.Date(2026, 9, 6, 1, 30, 0, 0, santiago), 200)  // just after it
+	opts := Options{ClaudeRoot: root, CodexRoot: t.TempDir(), Now: time.Date(2026, 9, 7, 12, 0, 0, 0, santiago)}
+	wantDays := "[2026-09-05 2026-09-06 2026-09-07]"
+
+	h := History(opts, daily.DayStartFrom(opts.Now, -2), daily.DayStartFrom(opts.Now, 1))
+	if fmt.Sprint(h.Days) != wantDays || claudeTokens(h, 0) != 100 || claudeTokens(h, 1) != 200 {
+		t.Errorf("History: days %v, claude %d / %d, want %s with 100 / 200", h.Days, claudeTokens(h, 0), claudeTokens(h, 1), wantDays)
+	}
+
+	r := RecentHistory(opts, historyStatus(50), 3, "v1")
+	if fmt.Sprint(r.Days) != wantDays || claudeTokens(r, 0) != 100 || claudeTokens(r, 1) != 200 || claudeTokens(r, 2) != 50 {
+		t.Errorf("RecentHistory: days %v, claude %d / %d / %d, want %s with 100 / 200 / today's 50", r.Days, claudeTokens(r, 0), claudeTokens(r, 1), claudeTokens(r, 2), wantDays)
 	}
 }
 

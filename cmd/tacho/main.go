@@ -479,8 +479,8 @@ func runDaily(args []string) int {
 
 	now := time.Now()
 	cfg := config.Load()
-	to := daily.DayStart(now).AddDate(0, 0, 1)
-	h := core.History(core.Options{Now: now}, to.AddDate(0, 0, -*days), to)
+	to := daily.DayStartFrom(now, 1)
+	h := core.History(core.Options{Now: now}, daily.DayStartFrom(to, -*days), to)
 	fmt.Print(render.DailyTable(h.Days, cfg.Tools, h.Tools))
 	return 0
 }

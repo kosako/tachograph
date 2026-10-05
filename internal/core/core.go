@@ -312,7 +312,7 @@ type DailyHistory struct {
 func History(opts Options, from, to time.Time) DailyHistory {
 	prices := pricing.Load()
 	h := DailyHistory{Tools: map[string][]*schema.Daily{}}
-	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+	for d := from; d.Before(to); d = daily.DayStartFrom(d, 1) {
 		h.Days = append(h.Days, daily.DayKey(d))
 	}
 	for _, tool := range historyTools {
@@ -373,15 +373,15 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 		opts.Now = time.Now()
 	}
 	today := daily.DayStart(opts.Now)
-	start := today.AddDate(0, 0, -(n - 1))
-	yesterday := daily.DayKey(today.AddDate(0, 0, -1))
+	start := daily.DayStartFrom(today, -(n - 1))
+	yesterday := daily.DayKey(daily.DayStartFrom(today, -1))
 	inGrace := opts.Now.Sub(today) < closedDayGrace // yesterday may still get late lines
 	key := build + "|" + pricing.OverrideStamp()
 
 	// Cached closed days inside the window; older entries fall off here.
 	cached, _ := cache.ReadDailyHistory(key)
 	closed := map[string]map[string]cache.DailyHistoryEntry{}
-	for d := start; d.Before(today); d = d.AddDate(0, 0, 1) {
+	for d := start; d.Before(today); d = daily.DayStartFrom(d, 1) {
 		if c := cached[daily.DayKey(d)]; c != nil {
 			closed[daily.DayKey(d)] = c
 		}
@@ -394,7 +394,7 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 	store := false
 	for _, tool := range historyTools {
 		var missing time.Time
-		for d := start; d.Before(today); d = d.AddDate(0, 0, 1) {
+		for d := start; d.Before(today); d = daily.DayStartFrom(d, 1) {
 			e, ok := closed[daily.DayKey(d)][tool]
 			if !ok || (e.Daily == nil && retryDue(e.CheckedAt, opts.Now)) {
 				missing = d
@@ -408,7 +408,7 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 			prices = pricing.Load()
 		}
 		totals, err := toolDays(tool, opts, missing, today, prices)
-		for d := missing; d.Before(today); d = d.AddDate(0, 0, 1) {
+		for d := missing; d.Before(today); d = daily.DayStartFrom(d, 1) {
 			day := daily.DayKey(d)
 			e := cache.DailyHistoryEntry{CheckedAt: opts.Now.Format(time.RFC3339)}
 			if err == nil {
@@ -432,7 +432,7 @@ func RecentHistory(opts Options, s schema.Status, n int, build string) DailyHist
 	}
 
 	out := DailyHistory{Tools: map[string][]*schema.Daily{}}
-	for d := start; !d.After(today); d = d.AddDate(0, 0, 1) {
+	for d := start; !d.After(today); d = daily.DayStartFrom(d, 1) {
 		out.Days = append(out.Days, daily.DayKey(d))
 	}
 	for _, tool := range historyTools {
