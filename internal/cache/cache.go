@@ -17,9 +17,11 @@ import (
 const StatusTTL = 30 * time.Second
 
 // SnapshotMaxAge is how long a statusline snapshot is still used. It carries
-// rate limits and context the transcript route can't see, so we keep showing
-// the last-known values (marked stale by age — see StaleAfterMinutes) rather
-// than dropping to "--". Deliberately long: last-known beats no data.
+// rate limits and context the transcript route can't see. Once it goes stale
+// by age (see StaleAfterMinutes), its rate limits keep showing as last-known
+// values (marked stale) rather than dropping to "--", while its context and
+// other session values are cleared: they describe a session it can no longer
+// vouch for (#235). Deliberately long: last-known limits beat no data.
 const SnapshotMaxAge = 30 * 24 * time.Hour
 
 type snapshotFile struct {
