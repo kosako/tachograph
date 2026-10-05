@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -44,11 +45,13 @@ type Event struct {
 // threshold as announced, so a jump from 60% to 5% left says "5%" once
 // rather than once per threshold. A threshold re-arms when the headroom
 // rises back above it or the window's reset time changes. Only the 5h and
-// weekly windows are watched (a collector can report other window sizes);
-// tools that are absent, errored, or stale are skipped and keep their
-// record. thresholds must already be normalized (see
-// config.NormalizeThresholds).
-func Evaluate(s schema.Status, thresholds []int, st State) ([]Event, State) {
+// weekly windows are watched (a collector can report other window sizes).
+// Tools that are absent, errored, or stale are skipped and keep their
+// record, and so is a window observed longer ago than its tool's stale
+// threshold at now — the reading SwiftBar marks ⚠ (core.ObservedStale) — so
+// an old reading neither fires nor re-arms a threshold (#338). thresholds
+// must already be normalized (see config.NormalizeThresholds).
+func Evaluate(s schema.Status, thresholds []int, st State, now time.Time) ([]Event, State) {
 	next := State{}
 	for k, w := range st {
 		next[k] = w
@@ -63,6 +66,9 @@ func Evaluate(s schema.Status, thresholds []int, st State) ([]Event, State) {
 		}
 		for _, l := range t.Limits {
 			if l.UsedPct == nil || (l.Window != schema.WindowFiveHour && l.Window != schema.WindowWeekly) {
+				continue
+			}
+			if core.ObservedStale(t.Tool, l, now) {
 				continue
 			}
 			key := t.Tool + "/" + l.Window
@@ -140,7 +146,7 @@ func Open(u string) error {
 // state to persist. A delivery that fails keeps the window's previous record
 // so it is retried on the next tick instead of being lost.
 func Run(s schema.Status, thresholds []int, st State, plugin string, now time.Time, send func(string) error) State {
-	events, next := Evaluate(s, thresholds, st)
+	events, next := Evaluate(s, thresholds, st, now)
 	for _, ev := range events {
 		if err := send(URL(ev, plugin, now)); err != nil {
 			if prev, ok := st[ev.Key]; ok {
