@@ -399,7 +399,12 @@ func statusLineBinary(command string) string {
 	if bin == "" {
 		return ""
 	}
-	if strings.ContainsAny(bin, "/") {
+	// A name with a slash runs as is, PATH unconsulted. LookPath does the same
+	// and checks the file is executable, so a script missing its execute bit
+	// doesn't pass as resolved (#340). Windows has no execute bit, and LookPath
+	// would demand a PATHEXT extension that a POSIX shell's extensionless
+	// script lacks: there a regular file is enough.
+	if strings.ContainsAny(bin, "/") && runtime.GOOS == "windows" {
 		if info, err := os.Stat(bin); err != nil || info.IsDir() {
 			return ""
 		}
