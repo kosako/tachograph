@@ -1,6 +1,9 @@
 package daily
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -159,6 +162,100 @@ func TestClaudeSessionTreeDedupsOlderFilesAcrossTree(t *testing.T) {
 		if cum, _, _ := ClaudeSessionTree(mainPath, now, noPrices, cache); cum.Total != 135+56+75 {
 			t.Errorf("pass %d: cumulative %d, want %d (the shared response once)", pass, cum.Total, 135+56+75)
 		}
+	}
+}
+
+// withFormat re-tags an encoded fileUsage as another cache format.
+func withFormat(b []byte, format uint64) []byte {
+	_, n := binary.Uvarint(b)
+	return append(binary.AppendUvarint(nil, format), b[n:]...)
+}
+
+// decodeFileUsage reads whatever the session-tree cache hands back, which
+// need not be what this version wrote: anything malformed or of another
+// format must read as a miss, never as usage (#355).
+func TestDecodeFileUsage(t *testing.T) {
+	u := fileUsage{
+		unkeyed: usageRecord{input: 1, cached: 2, outp: 3},
+		keyed: []usageRecord{
+			{key: 7, input: 10, cached: 20, outp: 30},
+			{key: 1 << 40, input: 300, outp: 1 << 33},
+		},
+	}
+	valid := u.encode()
+	got, ok := decodeFileUsage(valid)
+	if !ok || got.unkeyed != u.unkeyed || len(got.keyed) != len(u.keyed) {
+		t.Fatalf("round trip = %+v (ok %v), want %+v", got, ok, u)
+	}
+	for i := range u.keyed {
+		if got.keyed[i] != u.keyed[i] {
+			t.Errorf("round trip keyed[%d] = %+v, want %+v", i, got.keyed[i], u.keyed[i])
+		}
+	}
+
+	// A record count no blob could hold is rejected before it sizes an
+	// allocation.
+	hugeCount := binary.AppendUvarint(nil, fileUsageFormat)
+	for range 3 {
+		hugeCount = binary.AppendUvarint(hugeCount, 1)
+	}
+	hugeCount = binary.AppendUvarint(hugeCount, 1<<62)
+	malformed := map[string][]byte{
+		"empty":                     nil,
+		"another format":            withFormat(valid, fileUsageFormat+1),
+		"bytes left over":           append(append([]byte(nil), valid...), 0),
+		"record count past the end": hugeCount,
+		"varint overflow":           append(binary.AppendUvarint(nil, fileUsageFormat), append(bytes.Repeat([]byte{0x80}, 10), 1)...),
+	}
+	// Cut short anywhere — inside any field, or between them.
+	for i := 1; i < len(valid); i++ {
+		malformed[fmt.Sprintf("cut to %d of %d bytes", i, len(valid))] = valid[:i]
+	}
+	for name, b := range malformed {
+		if got, ok := decodeFileUsage(b); ok {
+			t.Errorf("%s: decoded as %+v, want a miss", name, got)
+		}
+	}
+}
+
+// A cached blob that doesn't decode is neither counted nor kept: the file is
+// read again from its transcript and the entry replaced, so the next call is
+// served from a good blob (#355). Each blob holds other usage than the file,
+// so a decoder that let it through would show in the total.
+func TestClaudeSessionTreeRereadsUndecodableCache(t *testing.T) {
+	now := time.Now()
+	yesterday := DayStart(now).Add(-time.Hour)
+	other := fileUsage{unkeyed: usageRecord{input: 9999}}.encode()
+	for name, blob := range map[string][]byte{
+		"cut short":       other[:len(other)-1],
+		"another format":  withFormat(other, fileUsageFormat+1),
+		"bytes left over": append(append([]byte(nil), other...), 0),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+			writeFile(t, mainPath, claudeMsg(now, 10, 20, 100, 5)+"\n", now) // 135
+			old := filepath.Join(root, "projects", "p", "main", "subagents", "old-agent.jsonl")
+			writeFile(t, old, claudeMsg(yesterday, 1000, 1000, 1000, 1000)+"\n", yesterday) // 4000
+			info, err := os.Stat(old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fc := &memTreeCache{m: map[string]memTreeEntry{old: {info.Size(), info.ModTime(), blob}}}
+
+			if cum, _, _ := ClaudeSessionTree(mainPath, now, noPrices, fc); cum.Total != 135+4000 {
+				t.Fatalf("cumulative %d, want %d (the old file read again)", cum.Total, 135+4000)
+			}
+			if fc.puts != 1 {
+				t.Fatalf("puts = %d, want 1 (the entry replaced)", fc.puts)
+			}
+			if _, ok := decodeFileUsage(fc.m[old].data); !ok {
+				t.Fatal("the replaced entry does not decode")
+			}
+			if cum, _, _ := ClaudeSessionTree(mainPath, now, noPrices, fc); cum.Total != 135+4000 || fc.puts != 1 {
+				t.Errorf("second pass: cumulative %d / puts %d, want %d / 1 (served from the replaced entry)", cum.Total, fc.puts, 135+4000)
+			}
+		})
 	}
 }
 
