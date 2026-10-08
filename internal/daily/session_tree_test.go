@@ -19,7 +19,7 @@ import (
 func TestClaudeSessionTree(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 	shared := claudeMsgID(now, "msg_shared", "req_shared", 10, 20, 100, 5) // 135, main and a subagent
 
 	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
@@ -78,6 +78,13 @@ func TestClaudeSessionTreeUnknownMain(t *testing.T) {
 	}
 }
 
+// yesterdayOf is an instant on the local day before now's: an hour before now's
+// day starts. Not now minus 24 hours, which late on a 25-hour day (summer time
+// ending) is still now's day (#354).
+func yesterdayOf(now time.Time) time.Time {
+	return DayStart(now).Add(-time.Hour)
+}
+
 type memTreeCache struct {
 	m    map[string]memTreeEntry
 	puts int
@@ -109,7 +116,7 @@ func (c *memTreeCache) Put(path string, size int64, mtime time.Time, data []byte
 func TestClaudeSessionTreeCachesOlderFiles(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
 	writeFile(t, mainPath, claudeMsg(now, 10, 20, 100, 5)+"\n", now) // 135
 	old := filepath.Join(root, "projects", "p", "main", "subagents", "old-agent.jsonl")
@@ -143,6 +150,32 @@ func TestClaudeSessionTreeCachesOlderFiles(t *testing.T) {
 	}
 }
 
+// Late on a 25-hour day (America/New_York, 2026-11-01, summer time ending),
+// the day runs an hour past 24: a file written the evening before is still
+// older and cached, and only today's lines count as today (#354).
+func TestClaudeSessionTreeCachesOlderFilesOnLongDay(t *testing.T) {
+	setLocal(t, loadLocation(t, "America/New_York"))
+	now := time.Date(2026, 11, 1, 23, 30, 0, 0, time.Local)
+	if !DayStart(now.Add(-24 * time.Hour)).Equal(DayStart(now)) {
+		t.Fatal("precondition: 24 hours before now should still be now's day")
+	}
+	root := t.TempDir()
+	yesterday := yesterdayOf(now)
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath, claudeMsg(yesterday, 10, 10, 10, 10)+"\n"+claudeMsg(now, 10, 20, 100, 5)+"\n", now) // 40 yesterday + 135 today
+	writeFile(t, filepath.Join(root, "projects", "p", "main", "subagents", "old-agent.jsonl"),
+		claudeMsg(yesterday, 1000, 1000, 1000, 1000)+"\n", yesterday) // 4000, the evening before
+
+	fc := &memTreeCache{m: map[string]memTreeEntry{}}
+	cum, today, _ := ClaudeSessionTree(mainPath, now, noPrices, fc)
+	if cum.Total != 40+135+4000 || today.Tokens != 135 {
+		t.Errorf("cumulative %d / today %d, want %d / %d", cum.Total, today.Tokens, 40+135+4000, 135)
+	}
+	if fc.puts != 1 {
+		t.Errorf("puts = %d, want 1 (the evening-before file cached)", fc.puts)
+	}
+}
+
 // Codex review (#262): an older nested file must be deduplicated against the
 // rest of the tree too. A response present in both the main transcript and a
 // child counts once — on the day it happened and on every later day, when the
@@ -150,7 +183,7 @@ func TestClaudeSessionTreeCachesOlderFiles(t *testing.T) {
 func TestClaudeSessionTreeDedupsOlderFilesAcrossTree(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 	shared := claudeMsgID(yesterday, "msg_shared", "req_shared", 10, 20, 100, 5) // 135
 	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
 	writeFile(t, mainPath, shared+"\n"+claudeMsg(now, 1, 2, 50, 3)+"\n", now) // 135 + 56
@@ -224,7 +257,7 @@ func TestDecodeFileUsage(t *testing.T) {
 // so a decoder that let it through would show in the total.
 func TestClaudeSessionTreeRereadsUndecodableCache(t *testing.T) {
 	now := time.Now()
-	yesterday := DayStart(now).Add(-time.Hour)
+	yesterday := yesterdayOf(now)
 	other := fileUsage{unkeyed: usageRecord{input: 9999}}.encode()
 	for name, blob := range map[string][]byte{
 		"cut short":       other[:len(other)-1],

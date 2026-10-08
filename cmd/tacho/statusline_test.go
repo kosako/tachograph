@@ -18,9 +18,7 @@ import (
 )
 
 func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	dailyCost := 1.2
@@ -72,8 +70,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 // transcript plus the subagent transcripts nested under it — like
 // session_today and the cost Claude Code reports (#262).
 func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	subscriptionStatuslineEnv(t)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:05:00+09:00")
 
 	fixture := filepath.Join("..", "..", "internal", "collector", "claude", "testdata")
@@ -117,9 +114,7 @@ func TestRunStatuslineCountsSubagentsInSessionTokens(t *testing.T) {
 }
 
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 	t.Setenv("HOME", t.TempDir())
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -143,9 +138,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyInput(t *testing.T) {
 }
 
 func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -168,9 +161,7 @@ func TestRunStatuslineDoesNotOverwriteSnapshotWithEmptyJSON(t *testing.T) {
 }
 
 func TestRunStatuslinePreservesSnapshotLimitsWhenLivePayloadOmitsThem(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimit(t, now, 42)
@@ -260,9 +251,7 @@ func window(name string, minutes int, usedPct float64, resetsAt time.Time) schem
 // is dropped rather than re-saved under a fresh collected_at, where it would
 // read (and notify) as the current window (#318).
 func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
@@ -289,9 +278,7 @@ func TestRunStatuslineDoesNotPreserveResetLimits(t *testing.T) {
 // Mixed windows: the one that reset is dropped and the one still running is
 // kept, with the limits' original observation time (#186) intact.
 func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-3 * time.Hour)
@@ -320,9 +307,7 @@ func TestRunStatuslinePreservesOnlyRunningLimits(t *testing.T) {
 // A window without a reset time can't be shown to be running and isn't
 // preserved either, as on the transcript route (#263).
 func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	writeClaudeSnapshotWithLimits(t, now, now.Add(-2*time.Minute),
@@ -347,9 +332,7 @@ func TestRunStatuslineDoesNotPreserveLimitsWithoutReset(t *testing.T) {
 // snapshot: bedrock/api/vertex keep limits null by the collector contract,
 // and the rewritten snapshot must not carry them either (#186).
 func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
@@ -377,9 +360,7 @@ func TestRunStatuslineDoesNotPreserveLimitsAcrossBackends(t *testing.T) {
 // snapshot, so a stream of limit-less payloads can't re-stamp them fresh
 // forever (#186).
 func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-29 * 24 * time.Hour)
@@ -408,9 +389,7 @@ func TestRunStatuslinePreservedLimitsKeepOriginalObservation(t *testing.T) {
 // even when the snapshot file itself was rewritten recently (#186: the
 // laundering case this change closes).
 func TestRunStatuslineDropsPreservedLimitsPastMaxAge(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	observed := now.Add(-cache.SnapshotMaxAge - time.Hour)
@@ -434,9 +413,7 @@ func TestRunStatuslineDropsPreservedLimitsPastMaxAge(t *testing.T) {
 // The written snapshot records the config root it was observed from, so a
 // tacho run against another root does not pick it up (#321).
 func TestRunStatuslineSnapshotRecordsRoot(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
+	root := subscriptionStatuslineEnv(t)
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	input := `{"session_id":"session-1","model":{"id":"claude-test","display_name":"Claude Test"}}`
@@ -458,16 +435,7 @@ func TestRunStatuslineSnapshotRecordsRoot(t *testing.T) {
 // the observation is older than the stale threshold the figures go null with
 // reason stale (#295).
 func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
-	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
-	root := isolateClaudeRoot(t)
-	// The limit-less payloads must still read as subscription for the carry
-	// to happen, whatever the runner's environment says; and the Codex side
-	// of core.Status must not scan the real ~/.codex.
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY"} {
-		t.Setenv(k, "")
-	}
-	t.Setenv("CODEX_HOME", t.TempDir())
+	root := subscriptionStatuslineEnv(t)
 
 	t0, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	resets := t0.Add(4 * time.Hour) // observed 60 min into the 5h window
@@ -520,9 +488,13 @@ func TestRunStatuslinePreservedLimitsKeepObservedAtAndReproject(t *testing.T) {
 	}
 }
 
-// subscriptionStatuslineEnv isolates a statusline run that must read as a
-// subscription payload whatever the runner's environment says, without
-// core.Status scanning the real ~/.codex.
+// subscriptionStatuslineEnv isolates a statusline run from the runner's
+// environment: the cache, the config, both agents' roots (core.Status scans
+// no real ~/.claude or ~/.codex), and the backend variables, cleared so a
+// payload reads as subscription unless the test sets one after this. Every
+// test that runs the statusline uses it (#354): an ANTHROPIC_API_KEY left in
+// a developer's shell would turn a limit-less payload into api and stop the
+// snapshot carry the tests expect.
 func subscriptionStatuslineEnv(t *testing.T) string {
 	t.Helper()
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
