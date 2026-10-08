@@ -437,19 +437,23 @@ even when the key extends a built-in one (`claude-fable-5-2` does not inherit
 `claude-fable`'s rates). Keys match model ids by prefix (`claude-fable` matches
 `claude-fable-5`), and the **longest matching key wins**: to override a tier
 that has its own built-in entry (`claude-fable-5-1`, `claude-mythos-5-1`,
-`claude-opus-5-5`, `claude-sonnet-5`, …), use that exact key — an override on
-`claude-fable` does not reach `claude-fable-5-1`. A Bedrock-style id such as
-`us.anthropic.claude-…` that matches no key as written is retried without its
-`[region.]anthropic.` / `openai.` prefix, so a key that keeps the prefix, e.g.
+`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-haiku-5-5`,
+…), use that exact key — an override on `claude-fable` does not reach
+`claude-fable-5-1`. A Bedrock-style id such as `us.anthropic.claude-…` that
+matches no key as written is retried without its `[region.]anthropic.` /
+`openai.` prefix, so a key that keeps the prefix, e.g.
 `us.anthropic.claude-fable-5`, applies only to Bedrock ids starting with it —
 it is a new key with no built-in defaults, so set all four rates. When a Claude
 transcript records 1-hour cache writes, they are priced at 2x the input rate
-(`cache_write` is the 5-minute rate and does not apply to them). Models not in
-the price table still count toward the token total, but are excluded from the
-cost calculation and the cost total (if no priced model ran that day, cost
-shows as unknown, `--`). If `pricing.json` can't be parsed (bad JSON, or a
-value of the wrong type), the whole file is ignored and the built-in prices
-stand; `tacho doctor` flags both syntax errors and wrongly typed values.
+(`cache_write` is the 5-minute rate and does not apply to them). Long-prompt
+premiums are not modeled: Claude Haiku 5.5, for example, bills every category
+at 5x for prompts over 100K tokens, but tacho counts them at the standard rate,
+so those come out low. Models not in the price table still count toward the
+token total, but are excluded from the cost calculation and the cost total (if
+no priced model ran that day, cost shows as unknown, `--`). If `pricing.json`
+can't be parsed (bad JSON, or a value of the wrong type), the whole file is
+ignored and the built-in prices stand; `tacho doctor` flags both syntax errors
+and wrongly typed values.
 
 ### Per-day cost / tokens (`tacho daily`)
 
