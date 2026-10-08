@@ -88,7 +88,17 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-sonnet-4-6", Rate{3, 15, 0.3, 3.75}},
 		{"claude-sonnet-5", Rate{2, 10, 0.2, 2.5}},          // launch price made permanent, no 2026-09-01 increase (#200)
 		{"claude-sonnet-5-20260401", Rate{2, 10, 0.2, 2.5}}, // dated id → sonnet-5 key, not shadowed by claude-sonnet
+		// Sonnet 5.5 keeps $2/$10 but bills cache hits at 0.05x input, so it
+		// needs its own key rather than falling to claude-sonnet-5's 0.1x (#359).
+		{"claude-sonnet-5-5", Rate{2, 10, 0.1, 2.5}},
+		{"anthropic.claude-sonnet-5-5", Rate{2, 10, 0.1, 2.5}}, // Bedrock form of the same
+		{"claude-sonnet-5-5[1m]", Rate{2, 10, 0.1, 2.5}},       // 1M-context suffix → 5.5 key
 		{"claude-haiku-4-5", Rate{1, 5, 0.1, 1.25}},
+		{"claude-haiku-4-5-20251001", Rate{1, 5, 0.1, 1.25}}, // dated 4.5 id stays on claude-haiku
+		// Haiku 5.5 (2026-10-07) at its rate for prompts up to 100K tokens;
+		// without its own key it fell to claude-haiku, 10x its price (#359).
+		{"claude-haiku-5-5", Rate{0.1, 0.5, 0.01, 0.125}},
+		{"anthropic.claude-haiku-5-5", Rate{0.1, 0.5, 0.01, 0.125}}, // Bedrock form of the same
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
 		// 5.1 prices cache hits at 0.025x input, so it needs its own key rather
 		// than falling to claude-fable's 0.1x (#225).

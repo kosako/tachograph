@@ -24,13 +24,15 @@ type Rate struct {
 // defaults are approximate first-party API prices (USD per million tokens),
 // matched by model-id prefix. Cache rates follow each provider's convention:
 // Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / Mythos 5.1 and 0.05x
-// on Opus 5.5, the documented exceptions), write (5-min ephemeral) = 1.25x input;
-// OpenAI uses its published cached-input price for reads. For cache writes,
-// gpt-5.5 and earlier are modeled at the input rate (OpenAI didn't bill writes
-// separately), while gpt-5.6 and later publish a 1.25x-input write price.
-// Long-context premiums (the GPT-5.4/5.5/5.6 and GPT-6 >272K rates) are not modeled —
-// this is a flat table. Claude 4.6+ has no such premium: the full 1M window
-// bills at standard rates. Override or extend via the pricing.json file.
+// on Opus 5.5 / Sonnet 5.5, the documented exceptions), write (5-min ephemeral)
+// = 1.25x input; OpenAI uses its published cached-input price for reads. For
+// cache writes, gpt-5.5 and earlier are modeled at the input rate (OpenAI
+// didn't bill writes separately), while gpt-5.6 and later publish a 1.25x-input
+// write price. Long-prompt premiums (the GPT-5.4/5.5/5.6 and GPT-6 >272K rates,
+// and Claude Haiku 5.5's 5x for prompts over 100K tokens) are not modeled —
+// this is a flat table, so such prompts come out low. Other Claude 4.6+ models
+// have no such premium: the full 1M window bills at standard rates. Override or
+// extend via the pricing.json file.
 var defaults = map[string]Rate{
 	// Opus 4.5+ — Opus 5 kept the same $5/$25, so claude-opus-5 intentionally
 	// resolves here by prefix; no dedicated entry needed (unlike Sonnet 5).
@@ -46,9 +48,18 @@ var defaults = map[string]Rate{
 	// 2026-09-01 was cancelled (#200). The bare "sonnet" alias below can't
 	// tell versions apart and keeps the older tiers' standard rate.
 	"claude-sonnet-5": {In: 2, Out: 10, CacheRead: 0.2, CacheWrite: 2.5},
-	"claude-haiku":    {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25}, // Haiku 4.5
-	"claude-fable":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Fable 5
-	"claude-mythos":   {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Mythos 5
+	// Sonnet 5.5 (2026-09-28) keeps Sonnet 5's $2/$10 but bills cache hits at
+	// 0.05x input ($0.10), like Opus 5.5; without this key it would resolve to
+	// claude-sonnet-5 and bill cache reads at 2x (#359).
+	"claude-sonnet-5-5": {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	"claude-haiku":      {In: 1, Out: 5, CacheRead: 0.1, CacheWrite: 1.25}, // Haiku 4.5
+	// Haiku 5.5 (2026-10-07) at its rate for prompts up to 100K tokens. Prompts
+	// over that bill every category at 5x ($0.50/$2.50), which this flat table
+	// doesn't model, so they come out low. Without this key it would resolve to
+	// claude-haiku (Haiku 4.5) and be billed at about 10x (#359).
+	"claude-haiku-5-5": {In: 0.1, Out: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
+	"claude-fable":     {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Fable 5
+	"claude-mythos":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Mythos 5
 	// Fable 5.1 / Mythos 5.1 match the 5 series everywhere except cache hits,
 	// which Anthropic prices at 0.025x input ($0.25) instead of the usual 0.1x
 	// — the only models with that multiplier. Without these keys the 5.1 ids
