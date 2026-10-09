@@ -372,6 +372,35 @@ func TestFirstTokenWindowsBackslash(t *testing.T) {
 	}
 }
 
+// On Windows a name off the PATH may still be a PowerShell cmdlet, function,
+// or alias, or in a directory Git Bash adds to the PATH, so it's unknown
+// rather than unresolvable; a path that doesn't exist still doesn't resolve,
+// including the quoted C:\…\tacho.exe setup writes there (#362). PATH is
+// emptied so that nothing resolves by name.
+func TestStatusLineBinaryWindowsNames(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	script := filepath.ToSlash(filepath.Join(t.TempDir(), "statusline.sh"))
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		command, goos, bin string
+		checked            bool
+	}{
+		{"Get-Date -Format HH:mm", "windows", "", false},
+		{"missing-statusline", "windows", "", false},
+		{"C:/no/such/statusline.exe", "windows", "", true},
+		{`"C:\no\such\tacho.exe" statusline`, "windows", "", true},
+		{"'" + script + "'", "windows", script, true},
+		{"Get-Date -Format HH:mm", "linux", "", true},
+	}
+	for _, c := range cases {
+		if bin, checked := statusLineBinaryFor(c.command, c.goos); bin != c.bin || checked != c.checked {
+			t.Errorf("statusLineBinaryFor(%q, %s) = %q, %v, want %q, %v", c.command, c.goos, bin, checked, c.bin, c.checked)
+		}
+	}
+}
+
 // doctor accepts a statusLine that runs a script by ~/ or a quoted path, still
 // warns when that script is missing, and only notes, without the warning and
 // its advice to re-run setup, a command it can't follow to a program (#362):

@@ -395,10 +395,17 @@ func statusLineResolves(command string) bool {
 
 // statusLineBinary resolves the executable a statusLine command runs, or ""
 // when it doesn't resolve. checked is false when tacho can't tell which
-// program the command runs (see firstToken), or when its first word, not on
-// the PATH, is one the shell runs itself, so whether it resolves is unknown.
+// program the command runs (see firstToken), or when its first word, a name
+// not on the PATH, may still be one the shell runs: a bash builtin or, on
+// Windows, any name, since PowerShell (the shell there without Git Bash) has
+// cmdlets, functions, and aliases off the PATH (Get-Date), and Git Bash adds
+// its own directories to the PATH. Whether it resolves is unknown then.
 func statusLineBinary(command string) (bin string, checked bool) {
-	bin, ok := firstToken(command)
+	return statusLineBinaryFor(command, runtime.GOOS)
+}
+
+func statusLineBinaryFor(command, goos string) (bin string, checked bool) {
+	bin, ok := firstTokenFor(command, goos)
 	if !ok {
 		return "", false
 	}
@@ -410,7 +417,7 @@ func statusLineBinary(command string) (bin string, checked bool) {
 	// doesn't pass as resolved (#340). Windows has no execute bit, and LookPath
 	// would demand a PATHEXT extension that a POSIX shell's extensionless
 	// script lacks: there a regular file is enough.
-	if strings.ContainsAny(bin, "/") && runtime.GOOS == "windows" {
+	if strings.ContainsAny(bin, "/") && goos == "windows" {
 		if info, err := os.Stat(bin); err != nil || info.IsDir() {
 			return "", true
 		}
@@ -418,7 +425,8 @@ func statusLineBinary(command string) (bin string, checked bool) {
 	}
 	p, err := exec.LookPath(bin)
 	if err != nil {
-		return "", !shellBuiltins[bin]
+		name := !strings.ContainsAny(bin, `/\:`) // not a path, C:\…\tacho.exe included
+		return "", !shellBuiltins[bin] && !(goos == "windows" && name)
 	}
 	return p, true
 }
