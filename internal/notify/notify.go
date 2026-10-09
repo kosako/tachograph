@@ -49,8 +49,10 @@ type Event struct {
 // Tools that are absent, errored, or stale are skipped and keep their
 // record, and so is a window observed longer ago than its tool's stale
 // threshold at now — the reading SwiftBar marks ⚠ (core.ObservedStale) — so
-// an old reading neither fires nor re-arms a threshold (#338). thresholds
-// must already be normalized (see config.NormalizeThresholds).
+// an old reading neither fires nor re-arms a threshold (#338). So is a window
+// whose reset time has passed by now (resetPassed), however fresh the
+// reading: its cycle is over (#363). thresholds must already be normalized
+// (see config.NormalizeThresholds).
 func Evaluate(s schema.Status, thresholds []int, st State, now time.Time) ([]Event, State) {
 	next := State{}
 	for k, w := range st {
@@ -68,7 +70,7 @@ func Evaluate(s schema.Status, thresholds []int, st State, now time.Time) ([]Eve
 			if l.UsedPct == nil || (l.Window != schema.WindowFiveHour && l.Window != schema.WindowWeekly) {
 				continue
 			}
-			if core.ObservedStale(t.Tool, l, now) {
+			if core.ObservedStale(t.Tool, l, now) || resetPassed(l, now) {
 				continue
 			}
 			key := t.Tool + "/" + l.Window
@@ -109,6 +111,19 @@ func Evaluate(s schema.Status, thresholds []int, st State, now time.Time) ([]Eve
 		}
 	}
 	return events, next
+}
+
+// resetPassed reports whether l's reset time, when readable, is not after
+// now: the window it describes has ended, and its use says nothing about the
+// current one. The snapshot still serves such a window while its observation
+// is fresh (#363). A limit without a readable reset time isn't reported
+// passed — when it ends is unknown.
+func resetPassed(l schema.Limit, now time.Time) bool {
+	if l.ResetsAt == nil {
+		return false
+	}
+	resets, err := time.Parse(time.RFC3339, *l.ResetsAt)
+	return err == nil && !resets.After(now)
 }
 
 // Body is the notification text for an event, e.g.
