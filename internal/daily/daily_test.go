@@ -608,9 +608,12 @@ func TestClaudeTotalsZeroWhenProjectsMissing(t *testing.T) {
 }
 
 func TestClaudeTotalsErrorWhenProjectsUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
 	root := t.TempDir()
 	// projects as a regular file makes os.ReadDir fail with a non-NotExist
-	// error on every platform — the "unknown, keep daily null" case.
+	// error on macOS and Linux — the "unknown, keep daily null" case.
 	if err := os.WriteFile(filepath.Join(root, "projects"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -620,6 +623,9 @@ func TestClaudeTotalsErrorWhenProjectsUnreadable(t *testing.T) {
 }
 
 func TestCodexTotalsErrorWhenDayDirUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
 	root := t.TempDir()
 	now := time.Now()
 	monthDir := filepath.Join(root, "sessions", now.Format("2006"), now.Format("01"))
