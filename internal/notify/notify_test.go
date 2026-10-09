@@ -502,3 +502,29 @@ func TestNotifyHoldsTheLock(t *testing.T) {
 		}
 	}
 }
+
+// The lock covers the whole pass: the record is read only once the lock is
+// had, so what another profile's pass saved while this one waited is kept,
+// and saved before the lock is released, so the next pass reads this one's
+// announcements (#364).
+func TestNotifyReadsAndSavesUnderTheLock(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	mine := keyOf(schema.ToolClaudeCode, schema.WindowFiveHour)
+	other := Key(schema.ToolClaudeCode, schema.WindowFiveHour, filepath.Join(string(filepath.Separator), "profiles", "other"))
+	lock := func() (func(), error) {
+		// Another profile's pass saves just before this one gets the lock.
+		if err := SaveState(State{other: {ResetsAt: "r", Notified: []int{30}}}); err != nil {
+			t.Fatal(err)
+		}
+		return func() {
+			if got := LoadState(); len(got[mine].Notified) != 1 {
+				t.Errorf("record when the lock is released = %+v, want this pass's announcement saved", got)
+			}
+		}, nil
+	}
+	Notify(status(limitsTool(schema.ToolClaudeCode, false, 80, 0, "")), []int{50}, testRoots, "tacho.30s.sh", testNow, lock, func(string) error { return nil })
+	got := LoadState()
+	if len(got[other].Notified) != 1 || len(got[mine].Notified) != 1 {
+		t.Errorf("record after the pass = %+v, want both the other profile's and this one's", got)
+	}
+}
