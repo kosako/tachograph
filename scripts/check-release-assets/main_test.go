@@ -298,10 +298,24 @@ func TestCheckBinaryOnATaggedBuild(t *testing.T) {
 	if err != nil {
 		t.Skip("git not found")
 	}
+	// A caller's git environment (a hook running the tests sets GIT_DIR and
+	// GIT_INDEX_FILE) must not reach the temporary repository: every GIT_
+	// variable is dropped. These traps would catch one that leaked through.
+	trap := filepath.Join(t.TempDir(), "trap")
+	t.Setenv("GIT_DIR", filepath.Join(trap, "git-dir"))
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(trap, "index"))
+	t.Setenv("GIT_WORK_TREE", trap)
+
 	repo := t.TempDir()
-	env := append(os.Environ(),
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env,
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
-		"GOFLAGS=-buildvcs=true", "GOWORK=off", "CGO_ENABLED=0")
+		"GOENV=off", "GOFLAGS=-buildvcs=true", "GOWORK=off", "CGO_ENABLED=0")
 	run := func(name string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(name, args...)
@@ -348,5 +362,8 @@ func TestCheckBinaryOnATaggedBuild(t *testing.T) {
 	}
 	if err := checkBinary("host", data, "v9.9.9", runtime.GOOS, runtime.GOARCH); err == nil {
 		t.Error("checkBinary took the -X main.version (kept out of the build information by -trimpath) for the module version")
+	}
+	if _, err := os.Stat(trap); !os.IsNotExist(err) {
+		t.Errorf("the caller's git environment reached the build: %s exists (%v)", trap, err)
 	}
 }
