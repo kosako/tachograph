@@ -406,12 +406,12 @@ func statusLineResolves(command string) bool {
 //   - on Windows, a path from a drive letter (C:\… or C:/…, as setup writes
 //     it) that is missing even with an executable extension added.
 //
-// A relative path, and a name off the PATH when the PATH has a relative
-// entry, are unknown: Claude Code resolves them from its own working
-// directory, not doctor's. So are, on Windows, a name off the PATH — PowerShell, the shell
-// there without Git Bash, has cmdlets, functions, and aliases off it
-// (Get-Date), and Git Bash adds its own directories to it — and a path not
-// from a drive letter (/c/… is Git Bash's).
+// A relative path, and a name off the PATH when the shell's lookup may differ
+// (see pathMayDiffer), are unknown: Claude Code resolves them from its own
+// working directory, not doctor's. So are, on Windows, a name off the PATH —
+// PowerShell, the shell there without Git Bash, has cmdlets, functions, and
+// aliases off it (Get-Date), and Git Bash adds its own directories to it —
+// and a path not from a drive letter (/c/… is Git Bash's).
 func statusLineBinary(command string) (bin string, checked bool) {
 	return statusLineBinaryFor(command, runtime.GOOS)
 }
@@ -451,17 +451,23 @@ func statusLineBinaryFor(command, goos string) (bin string, checked bool) {
 	switch {
 	case err == nil:
 		return p, true
-	case errors.Is(err, exec.ErrDot), pathHasRelativeEntry(), shellBuiltins[bin], shellMayDefine(bin):
+	case errors.Is(err, exec.ErrDot), pathMayDiffer(), shellBuiltins[bin], shellMayDefine(bin):
 		return "", false
 	}
 	return "", true
 }
 
-// pathHasRelativeEntry reports whether the PATH has a relative entry (an
-// empty one is the current directory), where a name may be found from Claude
-// Code's working directory though not from doctor's.
-func pathHasRelativeEntry() bool {
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+// pathMayDiffer reports whether the shell's PATH lookup may find a name that
+// doctor's doesn't: the PATH has a relative entry (an empty one is the
+// current directory), found from Claude Code's working directory, not
+// doctor's, or is empty, which bash reads as the current directory, or as its
+// own default path when unset.
+func pathMayDiffer() bool {
+	path := os.Getenv("PATH")
+	if path == "" {
+		return true
+	}
+	for _, dir := range filepath.SplitList(path) {
 		if !filepath.IsAbs(dir) {
 			return true
 		}
@@ -683,9 +689,11 @@ func joinLineContinuations(s string) string {
 }
 
 // commandFollows reports whether rest, what follows a command's first word,
-// holds another command after a control operator (; & | or a newline) outside
-// quotes. A trailing operator (tacho statusline;), a redirection's & or |
-// (2>&1, &>file, >|file), and a comment don't count.
+// holds another command: one after a control operator (; & | or a newline)
+// outside quotes, or a command substitution or subshell ($(…), `…`, (…)),
+// whose nested quoting the scan doesn't follow (a quote inside could hide an
+// operator after it). A trailing operator (tacho statusline;), a
+// redirection's & or | (2>&1, &>file, >|file), and a comment don't count.
 func commandFollows(rest string) bool {
 	afterOp, wordStart := false, true
 	for i := 0; i < len(rest); i++ {
@@ -713,6 +721,8 @@ func commandFollows(rest string) bool {
 		switch c {
 		case '\\':
 			i++
+		case '`', '(':
+			return true // a command substitution or subshell, nested quotes and all
 		case '\'':
 			j := strings.IndexByte(rest[i+1:], '\'')
 			if j < 0 {
@@ -721,8 +731,11 @@ func commandFollows(rest string) bool {
 			i += j + 1
 		case '"':
 			for i++; i < len(rest) && rest[i] != '"'; i++ {
-				if rest[i] == '\\' {
+				switch {
+				case rest[i] == '\\':
 					i++
+				case rest[i] == '`', rest[i] == '$' && i+1 < len(rest) && rest[i+1] == '(':
+					return true
 				}
 			}
 		}

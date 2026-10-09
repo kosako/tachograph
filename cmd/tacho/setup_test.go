@@ -324,6 +324,14 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{"tacho statusline # note\necho", "", false},
 		{"cd ~/.claude && ./statusline.sh", "", false},
 		{"if true; then tacho statusline; fi", "", false},
+		// A command substitution or subshell in the arguments: another
+		// command, whose nested quotes could hide an operator after it.
+		{`my-statusline "$(jq .model.display_name | tr -d '"')" || printf 'Claude Code'`, "", false},
+		{"tacho statusline $(date)", "", false},
+		{`tacho statusline "a$(date)"`, "", false},
+		{"tacho statusline `date`", "", false},
+		{"tacho statusline <(cat)", "", false},
+		{`tacho statusline '$(date)' "\$(date)"`, "tacho", true},
 		// Syntax tacho doesn't evaluate.
 		{"$HOME/.claude/statusline.sh", "", false},
 		{`"$HOME"/.claude/statusline.sh`, "", false},
@@ -438,9 +446,9 @@ func TestWindowsExecutable(t *testing.T) {
 // Outside Windows a name off the PATH still doesn't resolve, but the shell
 // may run what tacho doesn't find, so these are unknown (#362): a relative
 // path, or any name off the PATH when the PATH has a relative entry, found
-// there or not (both resolved from Claude Code's working directory, not
-// doctor's), a function exported with export -f (either environment format),
-// and any name when BASH_ENV may define functions.
+// there or not, or is empty (both resolved from Claude Code's working
+// directory, not doctor's), a function exported with export -f (either
+// environment format), and any name when BASH_ENV may define functions.
 func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("relies on the execute bit and a POSIX PATH")
@@ -474,6 +482,8 @@ func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
 	check("missing, with a relative PATH entry", "missing-statusline", false)
 	t.Setenv("PATH", abs+string(os.PathListSeparator))
 	check("missing, with an empty PATH entry", "missing-statusline", false)
+	t.Setenv("PATH", "")
+	check("missing, with an empty PATH", "missing-statusline", false)
 	t.Setenv("PATH", abs)
 	t.Setenv("BASH_FUNC_my_statusline%%", "() {  echo ready\n}")
 	check("exported function", "my_statusline", false)
@@ -524,6 +534,7 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},
 		{"fallback after a missing command", "missing-statusline || ~/.claude/statusline.sh", "", "not checked"},
 		{"command after a comment's backslash", "missing-statusline # old command \\\n~/.claude/statusline.sh", "", "not checked"},
+		{"fallback after a command substitution", `missing-statusline "$(jq .model.display_name | tr -d '"')" || printf 'Claude Code'`, "", "not checked"},
 		{"builtin", "builtin printf ready", "", "not checked"},
 		{"another builtin", "read -r line", "", "not checked"},
 	}
