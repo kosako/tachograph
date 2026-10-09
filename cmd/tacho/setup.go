@@ -406,9 +406,9 @@ func statusLineResolves(command string) bool {
 //   - on Windows, a path from a drive letter (C:\… or C:/…, as setup writes
 //     it) that is missing even with an executable extension added.
 //
-// A relative path, and a name the PATH finds through a relative entry, are
-// unknown: Claude Code resolves them from its own working directory, not
-// doctor's. So are, on Windows, a name off the PATH — PowerShell, the shell
+// A relative path, and a name off the PATH when the PATH has a relative
+// entry, are unknown: Claude Code resolves them from its own working
+// directory, not doctor's. So are, on Windows, a name off the PATH — PowerShell, the shell
 // there without Git Bash, has cmdlets, functions, and aliases off it
 // (Get-Date), and Git Bash adds its own directories to it — and a path not
 // from a drive letter (/c/… is Git Bash's).
@@ -451,10 +451,22 @@ func statusLineBinaryFor(command, goos string) (bin string, checked bool) {
 	switch {
 	case err == nil:
 		return p, true
-	case errors.Is(err, exec.ErrDot), shellBuiltins[bin], shellMayDefine(bin):
+	case errors.Is(err, exec.ErrDot), pathHasRelativeEntry(), shellBuiltins[bin], shellMayDefine(bin):
 		return "", false
 	}
 	return "", true
+}
+
+// pathHasRelativeEntry reports whether the PATH has a relative entry (an
+// empty one is the current directory), where a name may be found from Claude
+// Code's working directory though not from doctor's.
+func pathHasRelativeEntry() bool {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if !filepath.IsAbs(dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // isDrivePath reports whether s is a Windows path from a drive letter.
@@ -465,9 +477,10 @@ func isDrivePath(s string) bool {
 // windowsExecutable returns the file a Windows path runs, or "" when there's
 // none: the path itself when it's a regular file (Windows has no execute bit,
 // and a POSIX shell's script has no extension), else the path with an
-// extension the shell adds — .exe for Git Bash, PATHEXT's for PowerShell.
+// extension the shell adds — .exe for Git Bash, .ps1 and PATHEXT's for
+// PowerShell.
 func windowsExecutable(path string) string {
-	for _, ext := range append([]string{"", ".exe"}, strings.Split(os.Getenv("PATHEXT"), ";")...) {
+	for _, ext := range append([]string{"", ".exe", ".ps1"}, strings.Split(os.Getenv("PATHEXT"), ";")...) {
 		if info, err := os.Stat(path + ext); err == nil && !info.IsDir() {
 			return path + ext
 		}

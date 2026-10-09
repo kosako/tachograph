@@ -383,6 +383,7 @@ func TestFirstTokenWindowsBackslash(t *testing.T) {
 // PATH is emptied so that nothing resolves by name.
 func TestStatusLineBinaryWindows(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_ENV", "") // the linux case would turn unknown
 	cases := []struct {
 		command, goos string
 		checked       bool
@@ -409,12 +410,12 @@ func TestStatusLineBinaryWindows(t *testing.T) {
 
 // A Windows path runs a regular file as is (no execute bit there, and a POSIX
 // shell's script has no extension) or with the extension the shell adds: .exe
-// (Git Bash) or one of PATHEXT (PowerShell), so ./bin/tacho runs tacho.exe
-// (#362).
+// (Git Bash), or .ps1 or one of PATHEXT (PowerShell; .ps1 is usually not in
+// PATHEXT), so C:\…\bin\tacho runs tacho.exe (#362).
 func TestWindowsExecutable(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATHEXT", ".COM;.CMD")
-	for _, name := range []string{"tacho.exe", "statusline.sh", "run.CMD"} {
+	for _, name := range []string{"tacho.exe", "statusline.sh", "run.CMD", "status.ps1"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -423,6 +424,7 @@ func TestWindowsExecutable(t *testing.T) {
 		filepath.Join(dir, "tacho"):         filepath.Join(dir, "tacho.exe"),
 		filepath.Join(dir, "statusline.sh"): filepath.Join(dir, "statusline.sh"),
 		filepath.Join(dir, "run"):           filepath.Join(dir, "run.CMD"),
+		filepath.Join(dir, "status"):        filepath.Join(dir, "status.ps1"),
 		filepath.Join(dir, "missing"):       "",
 		dir:                                 "",
 	}
@@ -435,9 +437,10 @@ func TestWindowsExecutable(t *testing.T) {
 
 // Outside Windows a name off the PATH still doesn't resolve, but the shell
 // may run what tacho doesn't find, so these are unknown (#362): a relative
-// path or a name found through a relative PATH entry (both resolved from
-// Claude Code's working directory, not doctor's), a function exported with
-// export -f, and any name when BASH_ENV may define functions.
+// path, or any name off the PATH when the PATH has a relative entry, found
+// there or not (both resolved from Claude Code's working directory, not
+// doctor's), a function exported with export -f (either environment format),
+// and any name when BASH_ENV may define functions.
 func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("relies on the execute bit and a POSIX PATH")
@@ -464,11 +467,18 @@ func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
 	check("missing absolute path", filepath.Join(dir, "gone.sh"), true)
 	check("relative path", "./statusline.sh", false)
 	check("relative path below", "bin/statusline", false)
+	abs := t.TempDir()
 	t.Setenv("PATH", "bin")
 	check("found through a relative PATH entry", "statusline", false)
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", "node_modules/.bin"+string(os.PathListSeparator)+abs)
+	check("missing, with a relative PATH entry", "missing-statusline", false)
+	t.Setenv("PATH", abs+string(os.PathListSeparator))
+	check("missing, with an empty PATH entry", "missing-statusline", false)
+	t.Setenv("PATH", abs)
 	t.Setenv("BASH_FUNC_my_statusline%%", "() {  echo ready\n}")
 	check("exported function", "my_statusline", false)
+	t.Setenv("BASH_FUNC_old_statusline()", "() {  echo ready\n}")
+	check("exported function, older format", "old_statusline", false)
 	t.Setenv("BASH_ENV", filepath.Join(dir, "env.sh"))
 	check("BASH_ENV", "missing-statusline", false)
 }
