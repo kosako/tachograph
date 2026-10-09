@@ -690,9 +690,10 @@ func joinLineContinuations(s string) string {
 
 // commandFollows reports whether rest, what follows a command's first word,
 // holds another command: one after a control operator (; & | or a newline)
-// outside quotes, or a command substitution or subshell ($(…), `…`, (…)),
-// whose nested quoting the scan doesn't follow (a quote inside could hide an
-// operator after it). A trailing operator (tacho statusline;), a
+// outside quotes. A command substitution or subshell ($(…), `…`, (…)), or an
+// expansion or quote of bash's with quoting of its own (${…}, $'…', $"…"),
+// counts too: the scan doesn't follow their nested quoting, where a quote
+// could hide an operator after it. A trailing operator (tacho statusline;), a
 // redirection's & or | (2>&1, &>file, >|file), and a comment don't count.
 func commandFollows(rest string) bool {
 	afterOp, wordStart := false, true
@@ -723,6 +724,10 @@ func commandFollows(rest string) bool {
 			i++
 		case '`', '(':
 			return true // a command substitution or subshell, nested quotes and all
+		case '$':
+			if i+1 < len(rest) && strings.IndexByte("'\"{(", rest[i+1]) >= 0 {
+				return true // $'…', $"…", ${…}, $(…): quoting of their own
+			}
 		case '\'':
 			j := strings.IndexByte(rest[i+1:], '\'')
 			if j < 0 {
@@ -734,7 +739,7 @@ func commandFollows(rest string) bool {
 				switch {
 				case rest[i] == '\\':
 					i++
-				case rest[i] == '`', rest[i] == '$' && i+1 < len(rest) && rest[i+1] == '(':
+				case rest[i] == '`', rest[i] == '$' && i+1 < len(rest) && (rest[i+1] == '(' || rest[i+1] == '{'):
 					return true
 				}
 			}

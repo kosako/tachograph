@@ -332,6 +332,12 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{"tacho statusline `date`", "", false},
 		{"tacho statusline <(cat)", "", false},
 		{`tacho statusline '$(date)' "\$(date)"`, "tacho", true},
+		// So does bash's quoting of its own: $'…' (\' inside), $"…", ${…}.
+		{`my-statusline --label $'\e[36mClaude\'s session\e[0m' || printf 'Claude Code'`, "", false},
+		{`my-statusline --label "${STATUS_LABEL:-"Claude #1"}" || printf 'Claude Code'`, "", false},
+		{`tacho statusline ${LABEL}`, "", false},
+		{`tacho statusline $"label"`, "", false},
+		{`tacho statusline $HOME "$HOME"`, "tacho", true},
 		// Syntax tacho doesn't evaluate.
 		{"$HOME/.claude/statusline.sh", "", false},
 		{`"$HOME"/.claude/statusline.sh`, "", false},
@@ -535,6 +541,7 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		{"fallback after a missing command", "missing-statusline || ~/.claude/statusline.sh", "", "not checked"},
 		{"command after a comment's backslash", "missing-statusline # old command \\\n~/.claude/statusline.sh", "", "not checked"},
 		{"fallback after a command substitution", `missing-statusline "$(jq .model.display_name | tr -d '"')" || printf 'Claude Code'`, "", "not checked"},
+		{"fallback after an ANSI-C quote", `missing-statusline --label $'\e[36mClaude\'s session\e[0m' || printf 'Claude Code'`, "", "not checked"},
 		{"builtin", "builtin printf ready", "", "not checked"},
 		{"another builtin", "read -r line", "", "not checked"},
 	}
