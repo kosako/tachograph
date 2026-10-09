@@ -271,11 +271,12 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 }
 
 // firstToken reads the first word the way the shell Claude Code runs the
-// command in does (#362): a leading ~ is the home directory and quotes and
-// escapes come off, so the form Claude Code's own docs use
-// (~/.claude/statusline.sh) and a single-quoted name are what they run. Syntax
-// tacho doesn't evaluate is reported as such (ok false) rather than as a name
-// that doesn't resolve.
+// command in does (#362): line continuations are joined first, a leading ~ is
+// the home directory, and quotes and escapes come off, so the form Claude
+// Code's own docs use (~/.claude/statusline.sh) and a single-quoted name are
+// what they run. Syntax tacho doesn't evaluate, and a command another one
+// follows, are reported as such (ok false) rather than as a name that doesn't
+// resolve.
 func TestFirstTokenShellWords(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -291,13 +292,33 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{`"/opt/my dir/tacho" statusline`, "/opt/my dir/tacho", true},
 		{`/opt/my\ dir/tacho statusline`, "/opt/my dir/tacho", true},
 		{" \ttacho\tstatusline", "tacho", true},
-		{"tacho;echo", "tacho", true},
-		{"tacho|cat", "tacho", true},
 		{"/opt/a#b/tacho", "/opt/a#b/tacho", true},
 		{"/opt/a~b/tacho", "/opt/a~b/tacho", true},
+		{"exec tacho statusline", "exec", true}, // a builtin: statusLineBinary decides
 		{"", "", true},
 		{"'tacho statusline", "", true}, // unterminated: the shell won't run it
 		{`"tacho statusline`, "", true},
+		// Line continuations go before the words are read.
+		{"\\\n~/.claude/statusline.sh", home + "/.claude/statusline.sh", true},
+		{"\\\n  tacho statusline", "tacho", true},
+		{"/opt/a\\\nb/tacho", "/opt/ab/tacho", true},
+		{"\"/opt/a\\\nb/tacho\"", "/opt/ab/tacho", true},
+		{"'/opt/a\\\nb/tacho'", "/opt/a\\\nb/tacho", true},
+		// What follows the first word: only a further command makes it unknown.
+		{"tacho statusline;", "tacho", true},
+		{"tacho statusline\n", "tacho", true},
+		{"tacho statusline 2>&1", "tacho", true},
+		{"tacho statusline &>/dev/null", "tacho", true},
+		{"tacho statusline >|/tmp/out", "tacho", true},
+		{"tacho statusline 'a;b' \"c|d\" e\\;f", "tacho", true},
+		{"tacho statusline # a; b", "tacho", true},
+		{"missing || ~/.claude/statusline.sh", "", false},
+		{"tacho statusline | head -1", "", false},
+		{"tacho;echo", "", false},
+		{"tacho statusline # note\necho", "", false},
+		{"cd ~/.claude && ./statusline.sh", "", false},
+		{"if true; then tacho statusline; fi", "", false},
+		// Syntax tacho doesn't evaluate.
 		{"$HOME/.claude/statusline.sh", "", false},
 		{`"$HOME"/.claude/statusline.sh`, "", false},
 		{"${HOME}/.claude/statusline.sh", "", false},
@@ -307,9 +328,6 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{"FOO=1 tacho statusline", "", false},
 		{"(tacho statusline)", "", false},
 		{"{ tacho statusline; }", "", false},
-		{"if true; then tacho statusline; fi", "", false},
-		{"cd ~/.claude && ./statusline.sh", "", false},
-		{"exec tacho statusline", "", false},
 		{"/opt/*/tacho statusline", "", false},
 		{"2>/dev/null tacho statusline", "", false},
 		{"# tacho statusline", "", false},
@@ -323,11 +341,14 @@ func TestFirstTokenShellWords(t *testing.T) {
 
 // doctor accepts a statusLine that runs a script by ~/ or a quoted path, still
 // warns when that script is missing, and only notes, without the warning and
-// its advice to re-run setup, a command it can't follow to a program (#362).
+// its advice to re-run setup, a command it can't follow to a program (#362):
+// shell syntax it doesn't evaluate, a command another one follows, or a
+// builtin. PATH is emptied so that no builtin also resolves as a program.
 func TestStatusLineWarningShellForms(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("PATH", t.TempDir())
 	for _, p := range []string{
 		filepath.Join(home, ".claude", "statusline.sh"),
 		filepath.Join(home, "my dir", "statusline.sh"),
@@ -346,8 +367,12 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		{"~/ path", "~/.claude/statusline.sh", "", ""},
 		{"single-quoted path", quoted, "", ""},
 		{"missing ~/ path", "~/.claude/gone.sh", "does not resolve", ""},
+		{"missing name", "missing-statusline", "does not resolve", ""},
 		{"expansion", "$HOME/.claude/statusline.sh", "", "not checked"},
 		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},
+		{"fallback after a missing command", "missing-statusline || ~/.claude/statusline.sh", "", "not checked"},
+		{"builtin", "builtin printf ready", "", "not checked"},
+		{"another builtin", "read -r line", "", "not checked"},
 	}
 	for _, c := range cases {
 		warning, note := statusLineWarning(c.command, "")
@@ -356,6 +381,26 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		}
 		if (c.note == "") != (note == "") || !strings.Contains(note, c.note) {
 			t.Errorf("%s: note = %q, want containing %q", c.name, note, c.note)
+		}
+	}
+}
+
+// A leading ~ is HOME, as the shell reads it; on Windows Git Bash fills an
+// unset HOME from USERPROFILE, which os.UserHomeDir reads even when HOME
+// differs (#362).
+func TestShellHomeFor(t *testing.T) {
+	cases := []struct {
+		goos, home, profile, want string
+	}{
+		{"darwin", "/Users/a", "", "/Users/a"},
+		{"linux", "", "/home/b", ""},
+		{"windows", `D:\home\a`, `C:\Users\a`, `D:\home\a`},
+		{"windows", "", `C:\Users\a`, `C:\Users\a`},
+		{"windows", "", "", ""},
+	}
+	for _, c := range cases {
+		if got := shellHomeFor(c.goos, c.home, c.profile); got != c.want {
+			t.Errorf("shellHomeFor(%q, %q, %q) = %q, want %q", c.goos, c.home, c.profile, got, c.want)
 		}
 	}
 }

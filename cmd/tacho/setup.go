@@ -394,9 +394,9 @@ func statusLineResolves(command string) bool {
 }
 
 // statusLineBinary resolves the executable a statusLine command runs, or ""
-// when it doesn't resolve. checked is false when the command's first word is
-// shell syntax tacho doesn't evaluate (see firstToken), so whether it
-// resolves is unknown.
+// when it doesn't resolve. checked is false when tacho can't tell which
+// program the command runs (see firstToken), or when its first word, not on
+// the PATH, is one the shell runs itself, so whether it resolves is unknown.
 func statusLineBinary(command string) (bin string, checked bool) {
 	bin, ok := firstToken(command)
 	if !ok {
@@ -418,7 +418,7 @@ func statusLineBinary(command string) (bin string, checked bool) {
 	}
 	p, err := exec.LookPath(bin)
 	if err != nil {
-		return "", true
+		return "", !shellBuiltins[bin]
 	}
 	return p, true
 }
@@ -458,24 +458,25 @@ func isTachoExecutable(path string) bool {
 
 // firstToken returns the first word of a statusLine command as a POSIX shell
 // reads it — Claude Code runs the command in one (Git Bash on Windows, when
-// installed): quotes and backslash escapes removed, which also undoes the
-// double quoting setup.Command applies (#194 L-01), and a leading ~ expanded
-// to the home directory (#362). ok is false when the word is shell syntax
-// tacho doesn't evaluate, so the program it runs can't be told from the text:
-// an expansion, a glob or brace pattern, ~user, a variable assignment, a
-// redirection or subshell, a comment, or a word the shell handles itself
-// (shellBuiltins). An unterminated quote is a syntax error the shell won't
-// run, so it yields "", which doesn't resolve.
+// installed): line continuations joined, quotes and backslash escapes
+// removed, which also undoes the double quoting setup.Command applies
+// (#194 L-01), and a leading ~ expanded to the home directory (#362). ok is
+// false when the program the command runs can't be told from the text: the
+// word holds an expansion, a glob or brace pattern, ~user, a variable
+// assignment, a redirection, a subshell, or a comment, or another command
+// follows a control operator (missing || ~/.claude/statusline.sh runs the
+// script when the first command fails). An unterminated quote is a syntax
+// error the shell won't run, so it yields "", which doesn't resolve.
 func firstToken(command string) (string, bool) {
-	command = strings.TrimLeft(command, " \t\n")
+	command = strings.TrimLeft(joinLineContinuations(command), " \t\n")
 	var b strings.Builder
 	i, n := 0, len(command)
 	if n > 0 && command[0] == '~' {
 		if n > 1 && command[1] != '/' && !endsShellWord(command[1]) {
 			return "", false // ~user, ~+, ~-
 		}
-		home, err := os.UserHomeDir()
-		if err != nil {
+		home := shellHome()
+		if home == "" {
 			return "", false
 		}
 		b.WriteString(home)
@@ -495,11 +496,8 @@ word:
 			return "", false // an assignment before the command
 		case c == '\\':
 			if i+1 < n {
-				if command[i+1] != '\n' { // backslash-newline continues the line
-					b.WriteByte(command[i+1])
-				}
-				i += 2
-				continue
+				i++
+				c = command[i]
 			}
 			b.WriteByte(c)
 		case c == '\'':
@@ -508,11 +506,10 @@ word:
 				return "", true
 			}
 			b.WriteString(command[i+1 : i+1+j])
-			i += j + 2
-			continue
+			i += j + 1
 		case c == '"':
-			// Inside double quotes a backslash escapes only " $ ` \ and a
-			// newline; $ and ` still expand.
+			// Inside double quotes a backslash escapes only " $ ` and \, and
+			// $ and ` still expand.
 			for i++; ; i++ {
 				if i >= n {
 					return "", true
@@ -524,11 +521,8 @@ word:
 				if d == '$' || d == '`' {
 					return "", false
 				}
-				if d == '\\' && i+1 < n && strings.IndexByte("\"$`\\\n", command[i+1]) >= 0 {
+				if d == '\\' && i+1 < n && strings.IndexByte("\"$`\\", command[i+1]) >= 0 {
 					i++
-					if command[i] == '\n' {
-						continue
-					}
 					d = command[i]
 				}
 				b.WriteByte(d)
@@ -538,16 +532,109 @@ word:
 		}
 		i++
 	}
-	if w := b.String(); !shellBuiltins[w] {
-		return w, true
+	if commandFollows(command[i:]) {
+		return "", false
 	}
-	return "", false
+	return b.String(), true
+}
+
+// joinLineContinuations removes each backslash-newline outside single quotes,
+// as a shell does before it splits the command into words.
+func joinLineContinuations(s string) string {
+	if !strings.Contains(s, "\\\n") {
+		return s
+	}
+	var b strings.Builder
+	single, double := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case single:
+			single = c != '\''
+		case c == '\\' && i+1 < len(s):
+			if s[i+1] == '\n' {
+				i++
+				continue
+			}
+			b.WriteByte(c)
+			i++
+			c = s[i]
+		case c == '\'' && !double:
+			single = true
+		case c == '"':
+			double = !double
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// commandFollows reports whether rest, what follows a command's first word,
+// holds another command after a control operator (; & | or a newline) outside
+// quotes. A trailing operator (tacho statusline;), a redirection's & or |
+// (2>&1, &>file, >|file), and a comment don't count.
+func commandFollows(rest string) bool {
+	afterOp, wordStart := false, true
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		switch {
+		case c == ' ' || c == '\t':
+			wordStart = true
+			continue
+		case c == '\n', c == ';',
+			c == '&' && !(i > 0 && strings.IndexByte("<>", rest[i-1]) >= 0) && !(i+1 < len(rest) && rest[i+1] == '>'),
+			c == '|' && !(i > 0 && rest[i-1] == '>'):
+			afterOp, wordStart = true, true
+			continue
+		case c == '#' && wordStart:
+			if j := strings.IndexByte(rest[i:], '\n'); j >= 0 {
+				i += j - 1 // the newline ending the comment is an operator
+				continue
+			}
+			return false
+		}
+		if afterOp {
+			return true
+		}
+		wordStart = false
+		switch c {
+		case '\\':
+			i++
+		case '\'':
+			j := strings.IndexByte(rest[i+1:], '\'')
+			if j < 0 {
+				return false
+			}
+			i += j + 1
+		case '"':
+			for i++; i < len(rest) && rest[i] != '"'; i++ {
+				if rest[i] == '\\' {
+					i++
+				}
+			}
+		}
+	}
+	return false
 }
 
 // endsShellWord reports whether c ends an unquoted shell word: a blank or a
 // command separator.
 func endsShellWord(c byte) bool {
 	return strings.IndexByte(" \t\n;&|", c) >= 0
+}
+
+// shellHome is the directory a leading ~ expands to: HOME, as in a POSIX
+// shell. On Windows, Git Bash sets HOME from USERPROFILE when it's unset, so
+// there USERPROFILE stands in. "" when it can't be told.
+func shellHome() string {
+	return shellHomeFor(runtime.GOOS, os.Getenv("HOME"), os.Getenv("USERPROFILE"))
+}
+
+func shellHomeFor(goos, home, profile string) string {
+	if home == "" && goos == "windows" {
+		return profile
+	}
+	return home
 }
 
 // isShellName reports whether s is a shell variable name.
@@ -564,18 +651,22 @@ func isShellName(s string) bool {
 	return true
 }
 
-// shellBuiltins are the words the shell handles itself rather than running a
-// program found on the PATH: the reserved words that open a compound command,
-// POSIX's special builtins, and the builtins that change the directory or
-// read a file before what comes next (cd ~/x && ./statusline.sh).
-var shellBuiltins = map[string]bool{
-	"!": true, "{": true, "}": true, "case": true, "do": true, "done": true,
-	"elif": true, "else": true, "esac": true, "fi": true, "for": true,
-	"function": true, "if": true, "in": true, "select": true, "then": true,
-	"time": true, "until": true, "while": true,
-	":": true, ".": true, "break": true, "continue": true, "eval": true,
-	"exec": true, "exit": true, "export": true, "readonly": true,
-	"return": true, "set": true, "shift": true, "times": true,
-	"trap": true, "unset": true,
-	"cd": true, "command": true, "source": true,
-}
+// shellBuiltins are the words bash (Git Bash, and /bin/sh on macOS) handles
+// itself rather than running a program found on the PATH: its reserved words
+// (compgen -k) and builtins (compgen -b) as of bash 5.3. The other POSIX
+// shells' builtins are among them.
+var shellBuiltins = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`
+		! [[ ]] { } case coproc do done elif else esac fi for function if in
+		select then time until while
+		. : [ alias bg bind break builtin caller cd command compgen complete
+		compopt continue declare dirs disown echo enable eval exec exit export
+		false fc fg getopts hash help history jobs kill let local logout
+		mapfile popd printf pushd pwd read readarray readonly return set shift
+		shopt source suspend test times trap true type typeset ulimit umask
+		unalias unset wait`) {
+		m[w] = true
+	}
+	return m
+}()
