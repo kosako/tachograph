@@ -49,7 +49,8 @@
     and applies the Claude Code statusLine config and the SwiftBar plugin.
   - `cmd/tacho` owns CLI wiring, including `tacho doctor`.
   - `scripts/check-release-assets` checks a release's archives (checksums,
-    the binary's place, platform, and version) for the release workflow.
+    the binary's place, platform, and version) for the release workflow,
+    and a GoReleaser snapshot's (version aside) for CI on every PR.
 - Do not add tracked local paths, secrets, private URLs, or user-specific
   machine data.
 
@@ -85,7 +86,9 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run
   GitHub Release: an install through the npm wrapper on ubuntu / macOS /
   Windows (`npm-install-smoke.yml`) and a static check of all six archives
   (`scripts/check-release-assets`). GoReleaser is pinned (`v2.18.3`) in both
-  workflows; raise it on purpose.
+  workflows; raise it on purpose. CI builds a GoReleaser snapshot on every PR
+  and runs the same archive check (`-skip-version`), and runs `go test ./...`
+  on Windows too.
 - When a release run fails: never move or reuse a published tag (the Go
   module proxy caches it); re-run the failed jobs for a transient network
   error; for a broken asset, delete the GitHub Release, keep the tag, fix,

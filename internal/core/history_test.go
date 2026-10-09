@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -153,6 +154,9 @@ func TestRecentHistoryCachesClosedDays(t *testing.T) {
 // recomputes; an unknown tool is shown as nil, not cached, and filled in on
 // the next call once its logs are readable again.
 func TestRecentHistoryRekeysAndRetriesUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)

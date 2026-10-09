@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,9 @@ func TestAddCodexSessionCostPreservesExistingEstimate(t *testing.T) {
 // History lays each tool's per-day totals along the window, oldest first,
 // with zero days present and an unreadable tool left nil for every day.
 func TestHistoryAlignsDaysAndMarksUnknownTools(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
 	from, to := today.AddDate(0, 0, -2), today.AddDate(0, 0, 1)

@@ -52,6 +52,9 @@ func requirePerm(t *testing.T, path string, want os.FileMode) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "windows" {
+		return // no Unix permission bits there, only the read-only attribute
+	}
 	if got := info.Mode().Perm(); got != want {
 		t.Fatalf("%s mode = %v, want %v", path, got, want)
 	}
@@ -166,6 +169,7 @@ func isolateSwiftBar(t *testing.T) (home string, setting *string) {
 	t.Helper()
 	home = t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // the home os.UserHomeDir reads on Windows
 	t.Setenv("SWIFTBAR_PLUGINS_PATH", "")
 	t.Setenv("SWIFTBAR_PLUGIN_PATH", "")
 	setting = new(string)
@@ -253,7 +257,11 @@ func TestSetupRefusesUnresolvableBinary(t *testing.T) {
 // misdiagnosing a working setup (#194 L-01 / PR #208 review should).
 func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, `my"quoted $HOME`+"`bin`", "tacho")
+	name := `my"quoted $HOME` + "`bin`"
+	if runtime.GOOS == "windows" {
+		name = `my quoted $HOME` + "`bin`" // a file name can't hold " there
+	}
+	bin := filepath.Join(dir, name, "tacho")
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		t.Fatal(err)
 	}

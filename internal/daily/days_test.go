@@ -2,6 +2,7 @@ package daily
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -181,6 +182,9 @@ func TestCodexDaysTimestampLessRolloutUsesDirectoryDay(t *testing.T) {
 // An unreadable day directory inside the window makes the whole result
 // unknown (#180), even when it isn't today's.
 func TestCodexDaysErrorWhenWindowDayDirUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
 	root := t.TempDir()
 	now, today := daysClock()
 	writeFile(t, filepath.Join(codexDayDir(root, now, 0), "s1.jsonl"), codexSession(100), now)
