@@ -408,8 +408,10 @@ tacho config set notify.thresholds ""         # off (the default)
   Dropping past several thresholds at once fires only the deepest one.
 - Stale values never fire — not only when the whole tool is stale but also
   for a 5h / weekly window whose observation is old (the ones SwiftBar marks
-  with ⚠), and such a reading leaves the announcement record as it is. A
-  notification that fails to send is retried on the next refresh.
+  with ⚠), and such a reading leaves the announcement record as it is. The
+  same goes for a window whose reset time has passed (a reading from a cycle
+  that is over), however recent the observation. A notification that fails
+  to send is retried on the next refresh.
 - What has been announced is kept in `notify-state.json` in the cache
   directory; deleting it only means one more notification.
 

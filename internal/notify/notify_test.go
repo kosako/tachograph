@@ -182,6 +182,75 @@ func TestEvaluateSkipsOldObservations(t *testing.T) {
 	}
 }
 
+// A window whose reset time is not after now belongs to a cycle that is
+// over: its headroom says nothing about the current one, so it neither fires
+// nor touches its record, even when the reading is fresh; the same reading
+// with its reset ahead fires (#363). A reset time that can't be read, or none,
+// leaves the window judged as before.
+func TestEvaluateSkipsPassedResets(t *testing.T) {
+	th := []int{50}
+	at := func(d time.Duration) string { return testNow.Add(d).Format(time.RFC3339) }
+	for _, c := range []struct {
+		name, resets string
+		fires        bool
+	}{
+		{"reset a minute ago", at(-time.Minute), false},
+		{"reset now", at(0), false},
+		{"reset a second ahead", at(time.Second), true},
+		{"reset unreadable", "soon", true},
+		{"no reset time", "", true},
+	} {
+		for _, name := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
+			key := name + "/5h"
+			tool := observedAgo(limitsTool(name, false, 95, 0, c.resets), 10*time.Minute)
+			ev, st := Evaluate(status(tool), th, State{}, testNow)
+			_, recorded := st[key]
+			if c.fires && (len(ev) != 1 || ev[0].Key != key || !recorded) {
+				t.Errorf("%s, %s: events = %+v, state = %+v, want the 5h window to fire", name, c.name, ev, st)
+			}
+			if !c.fires && (len(ev) != 0 || recorded) {
+				t.Errorf("%s, %s: events = %+v, state = %+v, want none and no 5h record", name, c.name, ev, st)
+			}
+		}
+	}
+
+	// The windows of one tool are judged one by one: next to a running
+	// window, a passed one stays silent and keeps its record (which would
+	// otherwise start a new cycle, its reset time differing), and the running
+	// one fires.
+	mixed := func(resets5h, resetsWk string) schema.Tool {
+		tool := observedAgo(limitsTool(schema.ToolClaudeCode, false, 80, 80, resets5h), 10*time.Minute)
+		tool.Limits[1].ResetsAt = &resetsWk
+		return tool
+	}
+	kept := Window{ResetsAt: at(-6 * time.Hour)}
+	for _, c := range []struct {
+		name         string
+		tool         schema.Tool
+		fires, ended string
+	}{
+		{"passed 5h, running weekly", mixed(at(-time.Minute), at(24*time.Hour)), "claude-code/weekly", "claude-code/5h"},
+		{"running 5h, passed weekly", mixed(at(time.Hour), at(-time.Minute)), "claude-code/5h", "claude-code/weekly"},
+	} {
+		ev, next := Evaluate(status(c.tool), th, State{c.ended: kept}, testNow)
+		if len(ev) != 1 || ev[0].Key != c.fires {
+			t.Errorf("%s: events = %+v, want %s only", c.name, ev, c.fires)
+		}
+		if got := next[c.ended]; got.ResetsAt != kept.ResetsAt || len(got.Notified) != 0 {
+			t.Errorf("%s: record of the passed window = %+v, want %+v kept", c.name, got, kept)
+		}
+	}
+
+	// A passed window keeps the record as it was: its headroom back above
+	// 50% doesn't re-arm the threshold announced in that cycle.
+	r := at(-time.Minute)
+	st := State{"claude-code/5h": {ResetsAt: r, Notified: []int{50}}}
+	passed := observedAgo(limitsTool(schema.ToolClaudeCode, false, 10, 0, r), 10*time.Minute)
+	if _, next := Evaluate(status(passed), th, st, testNow); len(next["claude-code/5h"].Notified) != 1 {
+		t.Errorf("record after a passed window = %+v, want 50 still announced", next["claude-code/5h"])
+	}
+}
+
 func TestBodyAndURL(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-09-19T10:00:00+09:00")
 	resets := "2026-09-19T14:30:00+09:00"
