@@ -134,41 +134,68 @@ func checkAsset(dir, tag, goos, goarch string, sums map[string]string) error {
 }
 
 // extract returns the content of the archive's top-level file named binary.
+// It reads the whole archive — every entry, and a tar.gz to its gzip trailer
+// — so damage anywhere fails here as it would fail npm/install.js, which
+// extracts it all, even when the binary itself reads fine.
 func extract(data []byte, name, binary string) ([]byte, error) {
+	var bin []byte
+	found := false
 	if strings.HasSuffix(name, ".zip") {
 		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 		if err != nil {
 			return nil, err
 		}
 		for _, f := range zr.File {
+			content, err := readZipFile(f) // checks the entry's CRC-32
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Name, err)
+			}
 			if f.Name == binary && !f.FileInfo().IsDir() {
-				rc, err := f.Open()
-				if err != nil {
-					return nil, err
-				}
-				defer rc.Close()
-				return io.ReadAll(rc)
+				bin, found = content, true
 			}
 		}
-		return nil, fmt.Errorf("no %s at the archive's top level", binary)
-	}
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("no %s at the archive's top level", binary)
-		}
+	} else {
+		gz, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Name == binary && hdr.Typeflag == tar.TypeReg {
-			return io.ReadAll(tr)
+		tr := tar.NewReader(gz)
+		for {
+			hdr, err := tr.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			content, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", hdr.Name, err)
+			}
+			if hdr.Name == binary && hdr.Typeflag == tar.TypeReg {
+				bin, found = content, true
+			}
+		}
+		// The tar ends before the gzip stream does; reading the rest checks
+		// the gzip trailer's CRC-32 and size.
+		if _, err := io.Copy(io.Discard, gz); err != nil {
+			return nil, err
 		}
 	}
+	if !found {
+		return nil, fmt.Errorf("no %s at the archive's top level", binary)
+	}
+	return bin, nil
+}
+
+// readZipFile reads a zip entry fully, which checks its CRC-32.
+func readZipFile(f *zip.File) ([]byte, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
 }
 
 // checkBinary checks the binary's embedded build information: GOOS and

@@ -207,37 +207,146 @@ func TestCheckReportsBadArchives(t *testing.T) {
 	}
 }
 
-// The real build information, through debug/buildinfo rather than the stub:
-// a binary built here with GoReleaser's flags (-trimpath, which keeps
-// -ldflags out of it) reads back as this platform and its main module
-// version. Without VCS stamping that version is "(devel)"; a release build
-// from the tagged checkout carries the tag instead.
-func TestCheckBinaryReadsRealBuildInfo(t *testing.T) {
+// rewriteAsset replaces a release archive's content and its checksums.txt
+// line, as a release whose archive was damaged before its checksum was taken.
+func rewriteAsset(t *testing.T, dir, name string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "checksums.txt")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if strings.HasSuffix(line, "  "+name) {
+			line = fmt.Sprintf("%x  %s", sha256.Sum256(data), name)
+		}
+		lines = append(lines, line)
+	}
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The whole archive is read, as npm/install.js extracts it all: damage after
+// the binary — a later entry, or the gzip trailer — fails the check even
+// though the binary itself reads fine and the checksum matches.
+func TestCheckReadsTheWholeArchive(t *testing.T) {
+	stubBuildInfo(t)
+
+	dir := t.TempDir()
+	writeRelease(t, dir, "v1.2.3", nil)
+	name := assetName("linux", "arm64")
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[len(data)-8] ^= 0xff // the gzip trailer's CRC-32
+	rewriteAsset(t, dir, name, data)
+	if errs := check(dir, "v1.2.3"); len(errs) != 1 || !strings.Contains(errs[0].Error(), name) {
+		t.Errorf("damaged gzip trailer: check = %v, want one problem naming %s", errs, name)
+	}
+
+	// A zip whose LICENSE, stored after the binary, is damaged.
+	dir = t.TempDir()
+	writeRelease(t, dir, "v1.2.3", nil)
+	name = assetName("windows", "amd64")
+	payload := []byte("LICENSE-PAYLOAD-0123456789")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range []struct {
+		name    string
+		content []byte
+	}{
+		{"tacho.exe", fakeBinary("windows", "amd64", "v1.2.3")},
+		{"LICENSE", payload},
+	} {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: f.name, Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write(f.content)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zipped := buf.Bytes()
+	i := bytes.Index(zipped, payload)
+	if i < 0 {
+		t.Fatal("stored LICENSE not found in the zip")
+	}
+	zipped[i] ^= 0xff
+	rewriteAsset(t, dir, name, zipped)
+	if errs := check(dir, "v1.2.3"); len(errs) != 1 || !strings.Contains(errs[0].Error(), name+": LICENSE") {
+		t.Errorf("damaged later zip entry: check = %v, want one problem naming %s: LICENSE", errs, name)
+	}
+}
+
+// The premise of the version check, through debug/buildinfo rather than the
+// stub: a binary built as GoReleaser builds it — from a clean checkout with
+// the tag on HEAD, with -trimpath (which keeps -ldflags, and so the -X
+// main.version, out of the build information) — carries the tag as its main
+// module version, and its own platform.
+func TestCheckBinaryOnATaggedBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary")
 	}
-	gobin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	bin := filepath.Join(t.TempDir(), "tacho")
-	cmd := exec.Command(gobin, "build", "-trimpath", "-buildvcs=false", "-ldflags", "-s -w -X main.version=v9.9.9", "-o", bin, ".")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found")
 	}
+	repo := t.TempDir()
+	env := append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GOFLAGS=-buildvcs=true", "GOWORK=off", "CGO_ENABLED=0")
+	run := func(name string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir, cmd.Env = repo, env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+		}
+	}
+	files := map[string]string{
+		"go.mod":  "module example.com/tagged\n\ngo 1.24\n",
+		"main.go": "package main\n\nvar version string\n\nfunc main() { println(version) }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		t.Helper()
+		run(gitBin, append([]string{"-c", "user.name=test", "-c", "user.email=test@example.invalid",
+			"-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)...)
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-q", "-m", "initial")
+	git("tag", "v1.2.3")
+
+	bin := filepath.Join(t.TempDir(), "tacho")
+	run(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-trimpath",
+		"-ldflags", "-s -w -X main.version=v9.9.9", "-o", bin, ".")
 	data, err := os.ReadFile(bin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkBinary("host", data, "(devel)", runtime.GOOS, runtime.GOARCH); err != nil {
-		t.Errorf("checkBinary on a real binary = %v", err)
+	if err := checkBinary("host", data, "v1.2.3", runtime.GOOS, runtime.GOARCH); err != nil {
+		t.Errorf("checkBinary on the tagged build = %v", err)
 	}
 	other := "amd64"
 	if runtime.GOARCH == "amd64" {
 		other = "arm64"
 	}
-	if err := checkBinary("host", data, "(devel)", runtime.GOOS, other); err == nil {
+	if err := checkBinary("host", data, "v1.2.3", runtime.GOOS, other); err == nil {
 		t.Errorf("checkBinary accepted a %s binary as %s", runtime.GOARCH, other)
 	}
 	if err := checkBinary("host", data, "v9.9.9", runtime.GOOS, runtime.GOARCH); err == nil {
-		t.Error("checkBinary took the -X main.version (not in the build information under -trimpath) for the module version")
+		t.Error("checkBinary took the -X main.version (kept out of the build information by -trimpath) for the module version")
 	}
 }
