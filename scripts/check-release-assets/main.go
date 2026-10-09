@@ -19,6 +19,7 @@ import (
 	"debug/buildinfo"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -56,18 +57,36 @@ func binaryName(goos string) string {
 var readBuildInfo = buildinfo.ReadFile
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: check-release-assets <dir> <tag>")
+	// A GoReleaser snapshot (CI's per-PR build, #353) isn't built from a
+	// tag, so its binaries carry a pseudo-version: everything but the
+	// version is checked then.
+	skipVersion := flag.Bool("skip-version", false, "don't check the binaries' version (a snapshot, built off any tag)")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: check-release-assets <dir> <tag>\n       check-release-assets -skip-version <dir>")
+	}
+	flag.Parse()
+	args := flag.Args()
+	var dir, tag string
+	switch {
+	case *skipVersion && len(args) == 1:
+		dir = args[0]
+	case !*skipVersion && len(args) == 2:
+		dir, tag = args[0], normalizeTag(args[1])
+	default:
+		flag.Usage()
 		os.Exit(2)
 	}
-	tag := normalizeTag(os.Args[2])
-	if errs := check(os.Args[1], tag); len(errs) > 0 {
+	if errs := check(dir, tag); len(errs) > 0 {
 		for _, err := range errs {
 			fmt.Fprintln(os.Stderr, "check-release-assets:", err)
 		}
 		os.Exit(1)
 	}
-	fmt.Printf("check-release-assets: %d archives OK for %s\n", len(platforms), tag)
+	what := tag
+	if tag == "" {
+		what = "a snapshot (version not checked)"
+	}
+	fmt.Printf("check-release-assets: %d archives OK for %s\n", len(platforms), what)
 }
 
 // normalizeTag is the release tag for a version, v-prefixed (as npm/asset.js
@@ -79,7 +98,8 @@ func normalizeTag(v string) string {
 	return "v" + v
 }
 
-// check returns every problem found in dir's archives for tag, or none.
+// check returns every problem found in dir's archives for tag, or none. An
+// empty tag leaves the binaries' version unchecked (a snapshot).
 func check(dir, tag string) []error {
 	sums, err := readChecksums(filepath.Join(dir, "checksums.txt"))
 	if err != nil {
@@ -228,7 +248,7 @@ func checkBinary(name string, bin []byte, tag, goos, goarch string) error {
 	if settings["GOOS"] != goos || settings["GOARCH"] != goarch {
 		return fmt.Errorf("%s: binary built for %s/%s, want %s/%s", name, settings["GOOS"], settings["GOARCH"], goos, goarch)
 	}
-	if info.Main.Version != tag {
+	if tag != "" && info.Main.Version != tag {
 		return fmt.Errorf("%s: binary built from module version %q, want %s", name, info.Main.Version, tag)
 	}
 	return nil

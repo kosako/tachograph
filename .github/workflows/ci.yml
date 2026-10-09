@@ -41,9 +41,11 @@ jobs:
           version: v2.18.3
           args: check
 
-  # The snapshot lock has its own Windows implementation (LockFileEx), which
-  # the ubuntu test job can't exercise: run the lock tests on Windows (#330).
-  lock-windows:
+  # The whole suite on Windows (#353): the snapshot lock has its own Windows
+  # implementation (LockFileEx, #330), and setup / doctor read paths, the
+  # PATH, and the npm shims the Windows way, none of which the ubuntu job
+  # exercises.
+  test-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -52,7 +54,29 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - run: go test ./internal/cache/ -run LockFile
+      - run: go test ./...
+
+  # Builds every release target as the release does — GoReleaser pinned as in
+  # release.yml, its build flags and archives — and checks the archives the
+  # npm wrapper would download (#353), so a change to .goreleaser.yaml, the
+  # GoReleaser pin, or a platform-specific compile fails on the PR instead of
+  # at the tag. A snapshot isn't built from a tag, so the binaries' version
+  # isn't checked.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # GoReleaser describes the snapshot from the latest tag
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          version: v2.18.3
+          args: release --snapshot --clean --skip=publish
+      - run: go run ./scripts/check-release-assets -skip-version dist
 
   # Exercise the real npm install path on every supported OS (see
   # npm-install-smoke.yml) against the release matching npm/package.json's

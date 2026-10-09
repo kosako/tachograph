@@ -207,6 +207,33 @@ func TestCheckReportsBadArchives(t *testing.T) {
 	}
 }
 
+// A snapshot (an empty tag, -skip-version) is checked for everything but the
+// binaries' version: its binaries carry a pseudo-version, not a tag (#353).
+// A wrong platform or a missing archive still fails.
+func TestCheckSnapshotSkipsOnlyTheVersion(t *testing.T) {
+	stubBuildInfo(t)
+	dir := t.TempDir()
+	writeRelease(t, dir, "v0.10.5-0.20261010000000-0123456789ab", nil)
+	if errs := check(dir, ""); len(errs) != 0 {
+		t.Errorf("snapshot: check = %v, want no problems", errs)
+	}
+	if errs := check(dir, "v0.10.5"); len(errs) != len(platforms) {
+		t.Errorf("snapshot checked against a tag: check = %v, want every archive's version rejected", errs)
+	}
+
+	dir = t.TempDir()
+	writeRelease(t, dir, "v0.0.0-snapshot", func(goos, goarch string, files map[string][]byte) {
+		if goos == "linux" && goarch == "arm64" {
+			files["tacho"] = fakeBinary("linux", "amd64", "v0.0.0-snapshot")
+		}
+	})
+	os.Remove(filepath.Join(dir, assetName("darwin", "amd64")))
+	errs := check(dir, "")
+	if len(errs) != 2 || !strings.Contains(fmt.Sprint(errs), "want linux/arm64") || !strings.Contains(fmt.Sprint(errs), assetName("darwin", "amd64")) {
+		t.Errorf("snapshot with a wrong platform and a missing archive: check = %v, want both reported", errs)
+	}
+}
+
 // rewriteAsset replaces a release archive's content and its checksums.txt
 // line, as a release whose archive was damaged before its checksum was taken.
 func rewriteAsset(t *testing.T, dir, name string, data []byte) {
