@@ -292,6 +292,8 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{`"/opt/my dir/tacho" statusline`, "/opt/my dir/tacho", true},
 		{`/opt/my\ dir/tacho statusline`, "/opt/my dir/tacho", true},
 		{" \ttacho\tstatusline", "tacho", true},
+		{"tacho statusline\r\n", "tacho", true},
+		{"/opt/statusline.sh\r\n", "/opt/statusline.sh", true},
 		{"/opt/a#b/tacho", "/opt/a#b/tacho", true},
 		{"/opt/a~b/tacho", "/opt/a~b/tacho", true},
 		{"exec tacho statusline", "exec", true}, // a builtin: statusLineBinary decides
@@ -360,6 +362,7 @@ func TestFirstTokenWindowsBackslash(t *testing.T) {
 		{`'C:\Users\a\tacho.exe' statusline`, `C:\Users\a\tacho.exe`, true},
 		{`"C:\Users\a\tacho.exe" statusline`, `C:\Users\a\tacho.exe`, true},
 		{"C:/Users/a/tacho.exe statusline", "C:/Users/a/tacho.exe", true},
+		{"./statusline.ps1\r\n", "./statusline.ps1", true},
 	}
 	for _, c := range cases {
 		if got, ok := firstTokenFor(c.command, "windows"); got != c.want || ok != c.ok {
@@ -372,33 +375,102 @@ func TestFirstTokenWindowsBackslash(t *testing.T) {
 	}
 }
 
-// On Windows a name off the PATH may still be a PowerShell cmdlet, function,
-// or alias, or in a directory Git Bash adds to the PATH, so it's unknown
-// rather than unresolvable; a path that doesn't exist still doesn't resolve,
-// including the quoted C:\…\tacho.exe setup writes there (#362). PATH is
-// emptied so that nothing resolves by name.
-func TestStatusLineBinaryWindowsNames(t *testing.T) {
+// On Windows only a path from a drive letter is checked, so a missing one
+// doesn't resolve, including the quoted C:\…\tacho.exe setup writes there.
+// A name off the PATH may be a PowerShell cmdlet, function, or alias, or in a
+// directory Git Bash adds to the PATH; a relative path depends on Claude
+// Code's working directory; /c/… is a Git Bash path: all unknown (#362).
+// PATH is emptied so that nothing resolves by name.
+func TestStatusLineBinaryWindows(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	script := filepath.ToSlash(filepath.Join(t.TempDir(), "statusline.sh"))
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	cases := []struct {
-		command, goos, bin string
-		checked            bool
+		command, goos string
+		checked       bool
 	}{
-		{"Get-Date -Format HH:mm", "windows", "", false},
-		{"missing-statusline", "windows", "", false},
-		{"C:/no/such/statusline.exe", "windows", "", true},
-		{`"C:\no\such\tacho.exe" statusline`, "windows", "", true},
-		{"'" + script + "'", "windows", script, true},
-		{"Get-Date -Format HH:mm", "linux", "", true},
+		{"C:/no/such/statusline.exe", "windows", true},
+		{`"C:\no\such\tacho.exe" statusline`, "windows", true},
+		{"Get-Date -Format HH:mm", "windows", false},
+		{"missing-statusline", "windows", false},
+		{"./statusline.ps1", "windows", false},
+		{"/c/Users/a/statusline.sh", "windows", false},
+		{"Get-Date -Format HH:mm", "linux", true},
 	}
 	for _, c := range cases {
-		if bin, checked := statusLineBinaryFor(c.command, c.goos); bin != c.bin || checked != c.checked {
-			t.Errorf("statusLineBinaryFor(%q, %s) = %q, %v, want %q, %v", c.command, c.goos, bin, checked, c.bin, c.checked)
+		if bin, checked := statusLineBinaryFor(c.command, c.goos); bin != "" || checked != c.checked {
+			t.Errorf("statusLineBinaryFor(%q, %s) = %q, %v, want \"\", %v", c.command, c.goos, bin, checked, c.checked)
 		}
 	}
+	for s, want := range map[string]bool{`C:\x`: true, "c:/x": true, "C:x": false, "/c/x": false, "1:/x": false, "C:": false} {
+		if got := isDrivePath(s); got != want {
+			t.Errorf("isDrivePath(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// A Windows path runs a regular file as is (no execute bit there, and a POSIX
+// shell's script has no extension) or with the extension the shell adds: .exe
+// (Git Bash) or one of PATHEXT (PowerShell), so ./bin/tacho runs tacho.exe
+// (#362).
+func TestWindowsExecutable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATHEXT", ".COM;.CMD")
+	for _, name := range []string{"tacho.exe", "statusline.sh", "run.CMD"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := map[string]string{
+		filepath.Join(dir, "tacho"):         filepath.Join(dir, "tacho.exe"),
+		filepath.Join(dir, "statusline.sh"): filepath.Join(dir, "statusline.sh"),
+		filepath.Join(dir, "run"):           filepath.Join(dir, "run.CMD"),
+		filepath.Join(dir, "missing"):       "",
+		dir:                                 "",
+	}
+	for path, want := range cases {
+		if got := windowsExecutable(path); got != want {
+			t.Errorf("windowsExecutable(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// Outside Windows a name off the PATH still doesn't resolve, but the shell
+// may run what tacho doesn't find, so these are unknown (#362): a relative
+// path or a name found through a relative PATH entry (both resolved from
+// Claude Code's working directory, not doctor's), a function exported with
+// export -f, and any name when BASH_ENV may define functions.
+func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on the execute bit and a POSIX PATH")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(dir, "statusline.sh"), filepath.Join(dir, "bin", "statusline")} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+	t.Setenv("BASH_ENV", "")
+	t.Setenv("PATH", t.TempDir())
+	check := func(name, command string, want bool) {
+		t.Helper()
+		if bin, checked := statusLineBinaryFor(command, "linux"); bin != "" || checked != want {
+			t.Errorf("%s: statusLineBinaryFor(%q) = %q, %v, want \"\", %v", name, command, bin, checked, want)
+		}
+	}
+	check("missing name", "missing-statusline", true)
+	check("missing absolute path", filepath.Join(dir, "gone.sh"), true)
+	check("relative path", "./statusline.sh", false)
+	check("relative path below", "bin/statusline", false)
+	t.Setenv("PATH", "bin")
+	check("found through a relative PATH entry", "statusline", false)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_FUNC_my_statusline%%", "() {  echo ready\n}")
+	check("exported function", "my_statusline", false)
+	t.Setenv("BASH_ENV", filepath.Join(dir, "env.sh"))
+	check("BASH_ENV", "missing-statusline", false)
 }
 
 // doctor accepts a statusLine that runs a script by ~/ or a quoted path, still
@@ -411,6 +483,7 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_ENV", "")
 	for _, p := range []string{
 		filepath.Join(home, ".claude", "statusline.sh"),
 		filepath.Join(home, "my dir", "statusline.sh"),
@@ -423,13 +496,19 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		}
 	}
 	quoted := "'" + filepath.ToSlash(filepath.Join(home, "my dir", "statusline.sh")) + "'"
+	// A name off the PATH doesn't resolve, except on Windows, where it may be
+	// a PowerShell command (see TestStatusLineBinaryWindows).
+	missingWarning, missingNote := "does not resolve", ""
+	if runtime.GOOS == "windows" {
+		missingWarning, missingNote = "", "not checked"
+	}
 	cases := []struct {
 		name, command, warning, note string
 	}{
 		{"~/ path", "~/.claude/statusline.sh", "", ""},
 		{"single-quoted path", quoted, "", ""},
 		{"missing ~/ path", "~/.claude/gone.sh", "does not resolve", ""},
-		{"missing name", "missing-statusline", "does not resolve", ""},
+		{"missing name", "missing-statusline", missingWarning, missingNote},
 		{"expansion", "$HOME/.claude/statusline.sh", "", "not checked"},
 		{"appending assignment", "PATH+=:node_modules/.bin tacho statusline", "", "not checked"},
 		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},

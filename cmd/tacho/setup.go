@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -394,12 +395,23 @@ func statusLineResolves(command string) bool {
 }
 
 // statusLineBinary resolves the executable a statusLine command runs, or ""
-// when it doesn't resolve. checked is false when tacho can't tell which
-// program the command runs (see firstToken), or when its first word, a name
-// not on the PATH, may still be one the shell runs: a bash builtin or, on
-// Windows, any name, since PowerShell (the shell there without Git Bash) has
-// cmdlets, functions, and aliases off the PATH (Get-Date), and Git Bash adds
-// its own directories to the PATH. Whether it resolves is unknown then.
+// when it doesn't resolve. checked is false when whether it resolves is
+// unknown: tacho can't tell which program the command runs (see firstToken),
+// or the shell may still run what tacho doesn't find. "Doesn't resolve" is
+// left to what tacho can tell for sure (#362):
+//
+//   - outside Windows, an absolute path (~ expanded) that is missing or not
+//     executable (#340), or a name off the PATH that isn't a bash builtin or a
+//     function the shell inherits (see shellMayDefine);
+//   - on Windows, a path from a drive letter (C:\… or C:/…, as setup writes
+//     it) that is missing even with an executable extension added.
+//
+// A relative path, and a name the PATH finds through a relative entry, are
+// unknown: Claude Code resolves them from its own working directory, not
+// doctor's. So are, on Windows, a name off the PATH — PowerShell, the shell
+// there without Git Bash, has cmdlets, functions, and aliases off it
+// (Get-Date), and Git Bash adds its own directories to it — and a path not
+// from a drive letter (/c/… is Git Bash's).
 func statusLineBinary(command string) (bin string, checked bool) {
 	return statusLineBinaryFor(command, runtime.GOOS)
 }
@@ -412,23 +424,70 @@ func statusLineBinaryFor(command, goos string) (bin string, checked bool) {
 	if bin == "" {
 		return "", true
 	}
-	// A name with a slash runs as is, PATH unconsulted. LookPath does the same
-	// and checks the file is executable, so a script missing its execute bit
-	// doesn't pass as resolved (#340). Windows has no execute bit, and LookPath
-	// would demand a PATHEXT extension that a POSIX shell's extensionless
-	// script lacks: there a regular file is enough.
-	if strings.ContainsAny(bin, "/") && goos == "windows" {
-		if info, err := os.Stat(bin); err != nil || info.IsDir() {
-			return "", true
+	if goos == "windows" {
+		switch {
+		case isDrivePath(bin):
+			return windowsExecutable(bin), true
+		case strings.ContainsAny(bin, `/\:`):
+			return "", false
 		}
-		return bin, true
+		if p, err := exec.LookPath(bin); err == nil {
+			return p, true
+		}
+		return "", false
+	}
+	if strings.Contains(bin, "/") {
+		if !strings.HasPrefix(bin, "/") {
+			return "", false
+		}
+		// LookPath runs a path as is and checks the file is executable, so a
+		// script missing its execute bit doesn't pass as resolved (#340).
+		if p, err := exec.LookPath(bin); err == nil {
+			return p, true
+		}
+		return "", true
 	}
 	p, err := exec.LookPath(bin)
-	if err != nil {
-		name := !strings.ContainsAny(bin, `/\:`) // not a path, C:\…\tacho.exe included
-		return "", !shellBuiltins[bin] && !(goos == "windows" && name)
+	switch {
+	case err == nil:
+		return p, true
+	case errors.Is(err, exec.ErrDot), shellBuiltins[bin], shellMayDefine(bin):
+		return "", false
 	}
-	return p, true
+	return "", true
+}
+
+// isDrivePath reports whether s is a Windows path from a drive letter.
+func isDrivePath(s string) bool {
+	return len(s) >= 3 && (s[0]|0x20 >= 'a' && s[0]|0x20 <= 'z') && s[1] == ':' && (s[2] == '\\' || s[2] == '/')
+}
+
+// windowsExecutable returns the file a Windows path runs, or "" when there's
+// none: the path itself when it's a regular file (Windows has no execute bit,
+// and a POSIX shell's script has no extension), else the path with an
+// extension the shell adds — .exe for Git Bash, PATHEXT's for PowerShell.
+func windowsExecutable(path string) string {
+	for _, ext := range append([]string{"", ".exe"}, strings.Split(os.Getenv("PATHEXT"), ";")...) {
+		if info, err := os.Stat(path + ext); err == nil && !info.IsDir() {
+			return path + ext
+		}
+	}
+	return ""
+}
+
+// shellMayDefine reports whether bash may run name as a function its
+// environment gives it: one exported with export -f, or anything the BASH_ENV
+// file defines.
+func shellMayDefine(name string) bool {
+	if os.Getenv("BASH_ENV") != "" {
+		return true
+	}
+	for _, k := range []string{"BASH_FUNC_" + name + "%%", "BASH_FUNC_" + name + "()"} {
+		if _, ok := os.LookupEnv(k); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // statusLineWarning is doctor's diagnosis of the configured statusLine
@@ -489,7 +548,7 @@ func firstTokenFor(command, goos string) (string, bool) {
 	if goos != "windows" {
 		command = joinLineContinuations(command)
 	}
-	command = strings.TrimLeft(command, " \t\n")
+	command = strings.TrimSpace(command)
 	var b strings.Builder
 	i, n := 0, len(command)
 	if n > 0 && command[0] == '~' {
