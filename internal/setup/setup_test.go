@@ -167,8 +167,14 @@ func TestSwiftBarPlugin(t *testing.T) {
 		}
 		return strings.Join(keep, "\n")
 	}
-	// A Windows checkout may turn the file's line endings into CRLF.
-	want := strip(strings.ReplaceAll(string(contrib), "\r\n", "\n"), "# SwiftBar may not see your shell's PATH")
+	// A Windows checkout may turn the file's line endings into CRLF. Elsewhere
+	// a CR stays a failure: the script runs as is, and a CR in the shebang
+	// breaks it.
+	script := string(contrib)
+	if runtime.GOOS == "windows" {
+		script = strings.ReplaceAll(script, "\r\n", "\n")
+	}
+	want := strip(script, "# SwiftBar may not see your shell's PATH")
 	if rest := strip(got, "# Written by `tacho setup swiftbar`"); rest != want {
 		t.Errorf("plugin differs from contrib/tacho.30s.sh beyond the PATH note and exec line:\n%s\n--- want ---\n%s", rest, want)
 	}
