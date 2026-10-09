@@ -97,7 +97,7 @@ func WriteStatus(s *schema.Status, roots map[string]string) error {
 // root is the config root the payload was observed from (#321).
 func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
 	f := snapshotFile{SchemaVersion: schema.Version, Tool: t}
-	f.Root, _ = normalizeRoot(root) // unresolvable roots are stored as none
+	f.Root, _ = NormalizeRoot(root) // unresolvable roots are stored as none
 	if len(t.Limits) > 0 && !limitsObserved.IsZero() {
 		s := limitsObserved.Local().Format(time.RFC3339)
 		f.LimitsCollectedAt = &s
@@ -149,13 +149,13 @@ func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root s
 	return snap.Limits, snap.Backend, observed, true
 }
 
-// normalizeRoot is the form config roots are stored and compared in: the
+// NormalizeRoot is the form config roots are stored and compared in: the
 // absolute, cleaned path, resolved against the current directory at the time
 // (a relative CLAUDE_CONFIG_DIR names a different directory from a different
 // cwd). ok is false for an empty root and for one that can't be made
 // absolute (the current directory is gone): such a root is neither stored
 // nor matched, so it can't be mistaken for another reader's.
-func normalizeRoot(root string) (string, bool) {
+func NormalizeRoot(root string) (string, bool) {
 	if root == "" {
 		return "", false
 	}
@@ -171,8 +171,8 @@ func normalizeRoot(root string) (string, bool) {
 // was recorded carries none, as does a run whose root couldn't be resolved,
 // and neither may be taken for a given profile's (#321).
 func sameRoot(a, b string) bool {
-	na, okA := normalizeRoot(a)
-	nb, okB := normalizeRoot(b)
+	na, okA := NormalizeRoot(a)
+	nb, okB := NormalizeRoot(b)
 	return okA && okB && na == nb
 }
 
@@ -181,7 +181,7 @@ func sameRoot(a, b string) bool {
 func storedRoots(roots map[string]string) map[string]string {
 	stored := map[string]string{}
 	for tool, root := range roots {
-		stored[tool], _ = normalizeRoot(root) // unresolvable roots are stored as none
+		stored[tool], _ = NormalizeRoot(root) // unresolvable roots are stored as none
 	}
 	return stored
 }

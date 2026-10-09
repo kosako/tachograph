@@ -413,7 +413,10 @@ tacho config set notify.thresholds ""         # off (the default)
   that is over), however recent the observation. A notification that fails
   to send is retried on the next refresh.
 - What has been announced is kept in `notify-state.json` in the cache
-  directory; deleting it only means one more notification.
+  directory; deleting it only means one more notification. The record is
+  kept per config directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`), so
+  switching config directories, or running a plugin per config directory
+  over the same cache directory, keeps each one's record.
 
 ### Cost price table (approximate, overridable)
 
