@@ -48,6 +48,8 @@
   - `internal/notify` raises macOS notifications; `internal/setup` generates
     and applies the Claude Code statusLine config and the SwiftBar plugin.
   - `cmd/tacho` owns CLI wiring, including `tacho doctor`.
+  - `scripts/check-release-assets` checks a release's archives (checksums,
+    the binary's place, platform, and version) for the release workflow.
 - Do not add tracked local paths, secrets, private URLs, or user-specific
   machine data.
 
@@ -79,3 +81,14 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run
 - GoReleaser builds the GitHub Release changelog from commit subjects and
   drops those starting with exactly `docs:` / `test:` / `chore:`; scoped
   prefixes such as `chore(pricing):` are kept.
+- `release.yml` publishes to npm only after two gates pass on the published
+  GitHub Release: an install through the npm wrapper on ubuntu / macOS /
+  Windows (`npm-install-smoke.yml`) and a static check of all six archives
+  (`scripts/check-release-assets`). GoReleaser is pinned (`v2.18.3`) in both
+  workflows; raise it on purpose.
+- When a release run fails: never move or reuse a published tag (the Go
+  module proxy caches it); re-run the failed jobs for a transient network
+  error; for a broken asset, delete the GitHub Release, keep the tag, fix,
+  and release the next patch; if only npm publish failed, re-run that job.
+  Once the gates pass, never delete or replace that version's assets — the
+  published npm version downloads them on every install.

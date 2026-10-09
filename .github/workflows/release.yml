@@ -1,5 +1,23 @@
 name: release
 
+# On a v* tag push, goreleaser builds and publishes the GitHub Release, then
+# two gates check its assets before the npm wrapper is published (#351):
+# verify-npm-install installs through the wrapper on ubuntu / macOS / Windows
+# (npm-install-smoke.yml, failing when the release is missing), and
+# verify-assets checks all six archives statically. npm-publish runs only
+# when both pass, so a broken GitHub Release may be public for a few minutes,
+# but npm is not published from it.
+#
+# When a run fails (also in AGENTS.md, "Release Notes"):
+# - Never move or reuse a published tag: the Go module proxy caches a tag's
+#   content, and moving it breaks `go install ...@vX.Y.Z`.
+# - A gate failing on a transient network error: re-run the failed jobs.
+# - A broken asset: delete the GitHub Release (keep the tag), fix it, and
+#   release the next patch.
+# - The gates passed but npm publish failed: re-run npm-publish only.
+# - Once the gates pass, never delete or replace that version's assets: the
+#   published npm version downloads them on every install.
+
 on:
   push:
     tags:
@@ -37,23 +55,59 @@ jobs:
       - run: go test ./...
       - run: node test.js
         working-directory: npm
+      # GoReleaser is pinned (#351), as in ci.yml's check: a floating version
+      # could change the archives at release time. Raise it on purpose — when
+      # working on the release pipeline, or when a sweep flags it as old.
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
-          version: "~> v2"
+          version: v2.18.3
           args: check
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
-          version: "~> v2"
+          version: v2.18.3
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Publishes the npm wrapper via trusted publishing (OIDC), so no npm token
-  # exists anywhere. Must run after goreleaser: install.js downloads binaries
-  # from the GitHub Release, so publishing first would make every `npm i` 404
-  # until the release assets exist.
-  npm-publish:
+  # Installs the new release through the npm wrapper on every OS the CI smoke
+  # covers, as CI does on every PR, except that a missing release fails.
+  verify-npm-install:
     needs: goreleaser
+    permissions:
+      contents: read
+    uses: ./.github/workflows/npm-install-smoke.yml
+    with:
+      require-release: true
+
+  # Checks every archive the wrapper can download, the three the install
+  # can't run on included (macOS x64, Linux arm64, Windows arm64): listed in
+  # checksums.txt with a matching SHA-256, the binary at the archive's top
+  # level, built for its platform from this tag.
+  verify-assets:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Download the release's archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/assets" --pattern 'tachograph_*' --pattern checksums.txt
+      - run: go run ./scripts/check-release-assets "$RUNNER_TEMP/assets" "$GITHUB_REF_NAME"
+
+  # Publishes the npm wrapper via trusted publishing (OIDC), so no npm token
+  # exists anywhere. Runs only after both gates pass on the published GitHub
+  # Release: install.js downloads binaries from it, so publishing first would
+  # make every `npm i` 404 until the assets exist, and publishing over broken
+  # assets would ship a wrapper that can't install.
+  npm-publish:
+    needs: [verify-npm-install, verify-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: read
