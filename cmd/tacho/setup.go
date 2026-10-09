@@ -467,15 +467,28 @@ func isTachoExecutable(path string) bool {
 // follows a control operator (missing || ~/.claude/statusline.sh runs the
 // script when the first command fails). An unterminated quote is a syntax
 // error the shell won't run, so it yields "", which doesn't resolve.
+//
+// On Windows the shell is Git Bash or, without it, PowerShell, and a word
+// they read differently is unknown too: an unquoted backslash, a path
+// separator to PowerShell (.\tools\statusline.exe) but an escape to Git Bash,
+// which is also why line continuations are left alone there; and a ~ when
+// HOME and USERPROFILE disagree (see shellHomeFor).
 func firstToken(command string) (string, bool) {
-	command = strings.TrimLeft(joinLineContinuations(command), " \t\n")
+	return firstTokenFor(command, runtime.GOOS)
+}
+
+func firstTokenFor(command, goos string) (string, bool) {
+	if goos != "windows" {
+		command = joinLineContinuations(command)
+	}
+	command = strings.TrimLeft(command, " \t\n")
 	var b strings.Builder
 	i, n := 0, len(command)
 	if n > 0 && command[0] == '~' {
 		if n > 1 && command[1] != '/' && !endsShellWord(command[1]) {
 			return "", false // ~user, ~+, ~-
 		}
-		home := shellHome()
+		home := shellHomeFor(goos, os.Getenv("HOME"), os.Getenv("USERPROFILE"))
 		if home == "" {
 			return "", false
 		}
@@ -495,6 +508,9 @@ word:
 		case c == '=' && isShellName(command[:i]):
 			return "", false // an assignment before the command
 		case c == '\\':
+			if goos == "windows" {
+				return "", false
+			}
 			if i+1 < n {
 				i++
 				c = command[i]
@@ -538,31 +554,48 @@ word:
 	return b.String(), true
 }
 
-// joinLineContinuations removes each backslash-newline outside single quotes,
-// as a shell does before it splits the command into words.
+// joinLineContinuations removes each backslash-newline outside single quotes
+// and comments, as a shell does before it splits the command into words. A
+// comment runs to the newline, so a backslash ending it doesn't pull the next
+// line in.
 func joinLineContinuations(s string) string {
 	if !strings.Contains(s, "\\\n") {
 		return s
 	}
 	var b strings.Builder
-	single, double := false, false
+	single, double, wordStart := false, false, true
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		start := wordStart
+		wordStart = false
 		switch {
 		case single:
 			single = c != '\''
 		case c == '\\' && i+1 < len(s):
 			if s[i+1] == '\n' {
 				i++
+				wordStart = start
 				continue
 			}
 			b.WriteByte(c)
 			i++
 			c = s[i]
-		case c == '\'' && !double:
+		case double:
+			double = c != '"'
+		case c == '\'':
 			single = true
 		case c == '"':
-			double = !double
+			double = true
+		case c == '#' && start:
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				j = len(s) - i
+			}
+			b.WriteString(s[i : i+j])
+			i += j - 1
+			continue
+		case strings.IndexByte(" \t\n;&|()<>", c) >= 0:
+			wordStart = true
 		}
 		b.WriteByte(c)
 	}
@@ -623,18 +656,18 @@ func endsShellWord(c byte) bool {
 	return strings.IndexByte(" \t\n;&|", c) >= 0
 }
 
-// shellHome is the directory a leading ~ expands to: HOME, as in a POSIX
-// shell. On Windows, Git Bash sets HOME from USERPROFILE when it's unset, so
-// there USERPROFILE stands in. "" when it can't be told.
-func shellHome() string {
-	return shellHomeFor(runtime.GOOS, os.Getenv("HOME"), os.Getenv("USERPROFILE"))
-}
-
+// shellHomeFor is the directory a leading ~ expands to, or "" when it can't
+// be told: HOME, as in a POSIX shell. On Windows Git Bash reads HOME, set from
+// USERPROFILE when it's unset, while PowerShell reads USERPROFILE, so there
+// it's USERPROFILE unless a HOME that differs leaves it to the shell.
 func shellHomeFor(goos, home, profile string) string {
-	if home == "" && goos == "windows" {
-		return profile
+	if goos != "windows" {
+		return home
 	}
-	return home
+	if home != "" && !strings.EqualFold(home, profile) {
+		return ""
+	}
+	return profile
 }
 
 // isShellName reports whether s is a shell variable name.

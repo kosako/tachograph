@@ -304,6 +304,10 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{"/opt/a\\\nb/tacho", "/opt/ab/tacho", true},
 		{"\"/opt/a\\\nb/tacho\"", "/opt/ab/tacho", true},
 		{"'/opt/a\\\nb/tacho'", "/opt/a\\\nb/tacho", true},
+		{"/opt/a\\\n#b/tacho", "/opt/a#b/tacho", true},
+		// A comment ends at the newline even after a backslash.
+		{"missing # old command \\\n~/.claude/statusline.sh", "", false},
+		{"tacho statusline # old \\", "tacho", true},
 		// What follows the first word: only a further command makes it unknown.
 		{"tacho statusline;", "tacho", true},
 		{"tacho statusline\n", "tacho", true},
@@ -333,9 +337,36 @@ func TestFirstTokenShellWords(t *testing.T) {
 		{"# tacho statusline", "", false},
 	}
 	for _, c := range cases {
-		if got, ok := firstToken(c.command); got != c.want || ok != c.ok {
-			t.Errorf("firstToken(%q) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
+		if got, ok := firstTokenFor(c.command, "linux"); got != c.want || ok != c.ok {
+			t.Errorf("firstTokenFor(%q, linux) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
 		}
+	}
+}
+
+// On Windows the command runs in Git Bash or, without it, PowerShell, which
+// read an unquoted backslash differently (an escape, a path separator), so a
+// first word with one is unknown rather than mangled into a path that doesn't
+// resolve; quoted backslashes mean the same to both (#362).
+func TestFirstTokenWindowsBackslash(t *testing.T) {
+	cases := []struct {
+		command, want string
+		ok            bool
+	}{
+		{`.\tools\statusline.exe`, "", false},
+		{`C:\Users\a\tacho.exe statusline`, "", false},
+		{"\\\ntacho statusline", "", false},
+		{`'C:\Users\a\tacho.exe' statusline`, `C:\Users\a\tacho.exe`, true},
+		{`"C:\Users\a\tacho.exe" statusline`, `C:\Users\a\tacho.exe`, true},
+		{"C:/Users/a/tacho.exe statusline", "C:/Users/a/tacho.exe", true},
+	}
+	for _, c := range cases {
+		if got, ok := firstTokenFor(c.command, "windows"); got != c.want || ok != c.ok {
+			t.Errorf("firstTokenFor(%q, windows) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
+		}
+	}
+	// Elsewhere the shell is a POSIX one, where the backslash is an escape.
+	if got, ok := firstTokenFor(`.\tools\statusline.exe`, "darwin"); got != ".toolsstatusline.exe" || !ok {
+		t.Errorf("firstTokenFor on darwin = %q, %v, want the escapes removed", got, ok)
 	}
 }
 
@@ -371,6 +402,7 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 		{"expansion", "$HOME/.claude/statusline.sh", "", "not checked"},
 		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},
 		{"fallback after a missing command", "missing-statusline || ~/.claude/statusline.sh", "", "not checked"},
+		{"command after a comment's backslash", "missing-statusline # old command \\\n~/.claude/statusline.sh", "", "not checked"},
 		{"builtin", "builtin printf ready", "", "not checked"},
 		{"another builtin", "read -r line", "", "not checked"},
 	}
@@ -385,17 +417,18 @@ func TestStatusLineWarningShellForms(t *testing.T) {
 	}
 }
 
-// A leading ~ is HOME, as the shell reads it; on Windows Git Bash fills an
-// unset HOME from USERPROFILE, which os.UserHomeDir reads even when HOME
-// differs (#362).
+// A leading ~ is HOME, as the shell reads it. On Windows Git Bash fills an
+// unset HOME from USERPROFILE and PowerShell reads only USERPROFILE (as does
+// os.UserHomeDir), so a HOME that differs leaves ~ unknown (#362).
 func TestShellHomeFor(t *testing.T) {
 	cases := []struct {
 		goos, home, profile, want string
 	}{
 		{"darwin", "/Users/a", "", "/Users/a"},
 		{"linux", "", "/home/b", ""},
-		{"windows", `D:\home\a`, `C:\Users\a`, `D:\home\a`},
 		{"windows", "", `C:\Users\a`, `C:\Users\a`},
+		{"windows", `c:\users\a`, `C:\Users\a`, `C:\Users\a`},
+		{"windows", `D:\home\a`, `C:\Users\a`, ""},
 		{"windows", "", "", ""},
 	}
 	for _, c := range cases {
