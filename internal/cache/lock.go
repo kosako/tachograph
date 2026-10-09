@@ -16,3 +16,16 @@ const snapshotLockWait = time.Second
 func LockSnapshot(tool string) (unlock func(), err error) {
 	return lockFile("snapshot-"+tool+".lock", snapshotLockWait)
 }
+
+// notifyStateLockWait bounds the wait for another plugin's notification
+// pass, which takes about as long as one `open`.
+const notifyStateLockWait = time.Second
+
+// LockNotifyState holds the notification record across processes for one
+// read-evaluate-send-write pass: SwiftBar plugins for different profiles
+// share the record, and a pass read before another's write would save over
+// it, losing that profile's announcements (#364). unlock and err as for
+// LockSnapshot.
+func LockNotifyState() (unlock func(), err error) {
+	return lockFile("notify-state.lock", notifyStateLockWait)
+}
