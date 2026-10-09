@@ -262,11 +262,318 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 	}
 
 	command := setup.Command(false, bin)
-	if got := firstToken(command); got != bin {
-		t.Errorf("firstToken(%q) = %q, want %q", command, got, bin)
+	if got, ok := firstToken(command); got != bin || !ok {
+		t.Errorf("firstToken(%q) = %q, %v, want %q, true", command, got, ok, bin)
 	}
 	if !statusLineResolves(command) {
 		t.Errorf("statusLineResolves(%q) = false, want true (binary exists)", command)
+	}
+}
+
+// firstToken reads the first word the way the shell Claude Code runs the
+// command in does (#362): line continuations are joined first, a leading ~ is
+// the home directory, and quotes and escapes come off, so the form Claude
+// Code's own docs use (~/.claude/statusline.sh) and a single-quoted name are
+// what they run. Syntax tacho doesn't evaluate, and a command another one
+// follows, are reported as such (ok false) rather than as a name that doesn't
+// resolve.
+func TestFirstTokenShellWords(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cases := []struct {
+		command, want string
+		ok            bool
+	}{
+		{"~/.claude/statusline.sh", home + "/.claude/statusline.sh", true},
+		{"~", home, true},
+		{"'tacho' statusline", "tacho", true},
+		{"'/opt/my dir'/tacho statusline", "/opt/my dir/tacho", true},
+		{`"/opt/my dir/tacho" statusline`, "/opt/my dir/tacho", true},
+		{`/opt/my\ dir/tacho statusline`, "/opt/my dir/tacho", true},
+		{" \ttacho\tstatusline", "tacho", true},
+		{"tacho statusline\r\n", "tacho", true},
+		{"/opt/statusline.sh\r\n", "/opt/statusline.sh", true},
+		{"/opt/a#b/tacho", "/opt/a#b/tacho", true},
+		{"/opt/a~b/tacho", "/opt/a~b/tacho", true},
+		{"exec tacho statusline", "exec", true}, // a builtin: statusLineBinary decides
+		{"", "", true},
+		{"'tacho statusline", "", true}, // unterminated: the shell won't run it
+		{`"tacho statusline`, "", true},
+		// Line continuations go before the words are read.
+		{"\\\n~/.claude/statusline.sh", home + "/.claude/statusline.sh", true},
+		{"\\\n  tacho statusline", "tacho", true},
+		{"/opt/a\\\nb/tacho", "/opt/ab/tacho", true},
+		{"\"/opt/a\\\nb/tacho\"", "/opt/ab/tacho", true},
+		{"'/opt/a\\\nb/tacho'", "/opt/a\\\nb/tacho", true},
+		{"/opt/a\\\n#b/tacho", "/opt/a#b/tacho", true},
+		// A comment ends at the newline even after a backslash.
+		{"missing # old command \\\n~/.claude/statusline.sh", "", false},
+		{"tacho statusline # old \\", "tacho", true},
+		// What follows the first word: only a further command makes it unknown.
+		{"tacho statusline;", "tacho", true},
+		{"tacho statusline\n", "tacho", true},
+		{"tacho statusline 2>&1", "tacho", true},
+		{"tacho statusline &>/dev/null", "tacho", true},
+		{"tacho statusline >|/tmp/out", "tacho", true},
+		{"tacho statusline 'a;b' \"c|d\" e\\;f", "tacho", true},
+		{"tacho statusline # a; b", "tacho", true},
+		{"missing || ~/.claude/statusline.sh", "", false},
+		{"tacho statusline | head -1", "", false},
+		{"tacho;echo", "", false},
+		{"tacho statusline # note\necho", "", false},
+		{"cd ~/.claude && ./statusline.sh", "", false},
+		{"if true; then tacho statusline; fi", "", false},
+		// A command substitution or subshell in the arguments: another
+		// command, whose nested quotes could hide an operator after it.
+		{`my-statusline "$(jq .model.display_name | tr -d '"')" || printf 'Claude Code'`, "", false},
+		{"tacho statusline $(date)", "", false},
+		{`tacho statusline "a$(date)"`, "", false},
+		{"tacho statusline `date`", "", false},
+		{"tacho statusline <(cat)", "", false},
+		{`tacho statusline '$(date)' "\$(date)"`, "tacho", true},
+		// So does bash's quoting of its own: $'…' (\' inside), $"…", ${…}.
+		{`my-statusline --label $'\e[36mClaude\'s session\e[0m' || printf 'Claude Code'`, "", false},
+		{`my-statusline --label "${STATUS_LABEL:-"Claude #1"}" || printf 'Claude Code'`, "", false},
+		{`tacho statusline ${LABEL}`, "", false},
+		{`tacho statusline $"label"`, "", false},
+		{`tacho statusline $HOME "$HOME"`, "tacho", true},
+		// Syntax tacho doesn't evaluate.
+		{"$HOME/.claude/statusline.sh", "", false},
+		{`"$HOME"/.claude/statusline.sh`, "", false},
+		{"${HOME}/.claude/statusline.sh", "", false},
+		{"$(which tacho) statusline", "", false},
+		{"`which tacho` statusline", "", false},
+		{"~other/statusline.sh", "", false},
+		{"FOO=1 tacho statusline", "", false},
+		{"PATH+=:node_modules/.bin tacho statusline", "", false},
+		{"/opt/a+=b/tacho", "/opt/a+=b/tacho", true},
+		{"(tacho statusline)", "", false},
+		{"{ tacho statusline; }", "", false},
+		{"/opt/*/tacho statusline", "", false},
+		{"2>/dev/null tacho statusline", "", false},
+		{"# tacho statusline", "", false},
+	}
+	for _, c := range cases {
+		if got, ok := firstTokenFor(c.command, "linux"); got != c.want || ok != c.ok {
+			t.Errorf("firstTokenFor(%q, linux) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// On Windows the command runs in Git Bash or, without it, PowerShell, which
+// read an unquoted backslash differently (an escape, a path separator), so a
+// first word with one is unknown rather than mangled into a path that doesn't
+// resolve; quoted backslashes mean the same to both (#362).
+func TestFirstTokenWindowsBackslash(t *testing.T) {
+	cases := []struct {
+		command, want string
+		ok            bool
+	}{
+		{`.\tools\statusline.exe`, "", false},
+		{`C:\Users\a\tacho.exe statusline`, "", false},
+		{"\\\ntacho statusline", "", false},
+		{`'C:\Users\a\tacho.exe' statusline`, `C:\Users\a\tacho.exe`, true},
+		{`"C:\Users\a\tacho.exe" statusline`, `C:\Users\a\tacho.exe`, true},
+		{"C:/Users/a/tacho.exe statusline", "C:/Users/a/tacho.exe", true},
+		{"./statusline.ps1\r\n", "./statusline.ps1", true},
+	}
+	for _, c := range cases {
+		if got, ok := firstTokenFor(c.command, "windows"); got != c.want || ok != c.ok {
+			t.Errorf("firstTokenFor(%q, windows) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
+		}
+	}
+	// Elsewhere the shell is a POSIX one, where the backslash is an escape.
+	if got, ok := firstTokenFor(`.\tools\statusline.exe`, "darwin"); got != ".toolsstatusline.exe" || !ok {
+		t.Errorf("firstTokenFor on darwin = %q, %v, want the escapes removed", got, ok)
+	}
+}
+
+// On Windows only a path from a drive letter is checked, so a missing one
+// doesn't resolve, including the quoted C:\…\tacho.exe setup writes there.
+// A name off the PATH may be a PowerShell cmdlet, function, or alias, or in a
+// directory Git Bash adds to the PATH; a relative path depends on Claude
+// Code's working directory; /c/… is a Git Bash path: all unknown (#362).
+// PATH is emptied so that nothing resolves by name.
+func TestStatusLineBinaryWindows(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_ENV", "") // the linux case would turn unknown
+	cases := []struct {
+		command, goos string
+		checked       bool
+	}{
+		{"C:/no/such/statusline.exe", "windows", true},
+		{`"C:\no\such\tacho.exe" statusline`, "windows", true},
+		{"Get-Date -Format HH:mm", "windows", false},
+		{"missing-statusline", "windows", false},
+		{"./statusline.ps1", "windows", false},
+		{"/c/Users/a/statusline.sh", "windows", false},
+		{"Get-Date -Format HH:mm", "linux", true},
+	}
+	for _, c := range cases {
+		if bin, checked := statusLineBinaryFor(c.command, c.goos); bin != "" || checked != c.checked {
+			t.Errorf("statusLineBinaryFor(%q, %s) = %q, %v, want \"\", %v", c.command, c.goos, bin, checked, c.checked)
+		}
+	}
+	for s, want := range map[string]bool{`C:\x`: true, "c:/x": true, "C:x": false, "/c/x": false, "1:/x": false, "C:": false} {
+		if got := isDrivePath(s); got != want {
+			t.Errorf("isDrivePath(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// A Windows path runs a regular file as is (no execute bit there, and a POSIX
+// shell's script has no extension) or with the extension the shell adds: .exe
+// (Git Bash), or .ps1 or one of PATHEXT (PowerShell; .ps1 is usually not in
+// PATHEXT), so C:\…\bin\tacho runs tacho.exe (#362).
+func TestWindowsExecutable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATHEXT", ".COM;.CMD")
+	for _, name := range []string{"tacho.exe", "statusline.sh", "run.CMD", "status.ps1"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := map[string]string{
+		filepath.Join(dir, "tacho"):         filepath.Join(dir, "tacho.exe"),
+		filepath.Join(dir, "statusline.sh"): filepath.Join(dir, "statusline.sh"),
+		filepath.Join(dir, "run"):           filepath.Join(dir, "run.CMD"),
+		filepath.Join(dir, "status"):        filepath.Join(dir, "status.ps1"),
+		filepath.Join(dir, "missing"):       "",
+		dir:                                 "",
+	}
+	for path, want := range cases {
+		if got := windowsExecutable(path); got != want {
+			t.Errorf("windowsExecutable(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// Outside Windows a name off the PATH still doesn't resolve, but the shell
+// may run what tacho doesn't find, so these are unknown (#362): a relative
+// path, or any name off the PATH when the PATH has a relative entry, found
+// there or not, or is empty (both resolved from Claude Code's working
+// directory, not doctor's), a function exported with export -f (either
+// environment format), and any name when BASH_ENV may define functions.
+func TestStatusLineBinaryPOSIXUnknowns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on the execute bit and a POSIX PATH")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(dir, "statusline.sh"), filepath.Join(dir, "bin", "statusline")} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+	t.Setenv("BASH_ENV", "")
+	t.Setenv("PATH", t.TempDir())
+	check := func(name, command string, want bool) {
+		t.Helper()
+		if bin, checked := statusLineBinaryFor(command, "linux"); bin != "" || checked != want {
+			t.Errorf("%s: statusLineBinaryFor(%q) = %q, %v, want \"\", %v", name, command, bin, checked, want)
+		}
+	}
+	check("missing name", "missing-statusline", true)
+	check("missing absolute path", filepath.Join(dir, "gone.sh"), true)
+	check("relative path", "./statusline.sh", false)
+	check("relative path below", "bin/statusline", false)
+	abs := t.TempDir()
+	t.Setenv("PATH", "bin")
+	check("found through a relative PATH entry", "statusline", false)
+	t.Setenv("PATH", "node_modules/.bin"+string(os.PathListSeparator)+abs)
+	check("missing, with a relative PATH entry", "missing-statusline", false)
+	t.Setenv("PATH", abs+string(os.PathListSeparator))
+	check("missing, with an empty PATH entry", "missing-statusline", false)
+	t.Setenv("PATH", "")
+	check("missing, with an empty PATH", "missing-statusline", false)
+	t.Setenv("PATH", abs)
+	t.Setenv("BASH_FUNC_my_statusline%%", "() {  echo ready\n}")
+	check("exported function", "my_statusline", false)
+	t.Setenv("BASH_FUNC_old_statusline()", "() {  echo ready\n}")
+	check("exported function, older format", "old_statusline", false)
+	t.Setenv("BASH_ENV", filepath.Join(dir, "env.sh"))
+	check("BASH_ENV", "missing-statusline", false)
+}
+
+// doctor accepts a statusLine that runs a script by ~/ or a quoted path, still
+// warns when that script is missing, and only notes, without the warning and
+// its advice to re-run setup, a command it can't follow to a program (#362):
+// shell syntax it doesn't evaluate, a command another one follows, or a
+// builtin. PATH is emptied so that no builtin also resolves as a program.
+func TestStatusLineWarningShellForms(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_ENV", "")
+	for _, p := range []string{
+		filepath.Join(home, ".claude", "statusline.sh"),
+		filepath.Join(home, "my dir", "statusline.sh"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quoted := "'" + filepath.ToSlash(filepath.Join(home, "my dir", "statusline.sh")) + "'"
+	// A name off the PATH doesn't resolve, except on Windows, where it may be
+	// a PowerShell command (see TestStatusLineBinaryWindows).
+	missingWarning, missingNote := "does not resolve", ""
+	if runtime.GOOS == "windows" {
+		missingWarning, missingNote = "", "not checked"
+	}
+	cases := []struct {
+		name, command, warning, note string
+	}{
+		{"~/ path", "~/.claude/statusline.sh", "", ""},
+		{"single-quoted path", quoted, "", ""},
+		{"missing ~/ path", "~/.claude/gone.sh", "does not resolve", ""},
+		{"missing name", "missing-statusline", missingWarning, missingNote},
+		{"expansion", "$HOME/.claude/statusline.sh", "", "not checked"},
+		{"appending assignment", "PATH+=:node_modules/.bin tacho statusline", "", "not checked"},
+		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},
+		{"fallback after a missing command", "missing-statusline || ~/.claude/statusline.sh", "", "not checked"},
+		{"command after a comment's backslash", "missing-statusline # old command \\\n~/.claude/statusline.sh", "", "not checked"},
+		{"fallback after a command substitution", `missing-statusline "$(jq .model.display_name | tr -d '"')" || printf 'Claude Code'`, "", "not checked"},
+		{"fallback after an ANSI-C quote", `missing-statusline --label $'\e[36mClaude\'s session\e[0m' || printf 'Claude Code'`, "", "not checked"},
+		{"builtin", "builtin printf ready", "", "not checked"},
+		{"another builtin", "read -r line", "", "not checked"},
+	}
+	for _, c := range cases {
+		warning, note := statusLineWarning(c.command, "")
+		if (c.warning == "") != (warning == "") || !strings.Contains(warning, c.warning) {
+			t.Errorf("%s: warning = %q, want containing %q", c.name, warning, c.warning)
+		}
+		if (c.note == "") != (note == "") || !strings.Contains(note, c.note) {
+			t.Errorf("%s: note = %q, want containing %q", c.name, note, c.note)
+		}
+	}
+}
+
+// A leading ~ is HOME, as the shell reads it. On Windows Git Bash fills an
+// unset HOME from USERPROFILE and PowerShell reads only USERPROFILE (as does
+// os.UserHomeDir), so a HOME that differs leaves ~ unknown (#362).
+func TestShellHomeFor(t *testing.T) {
+	cases := []struct {
+		goos, home, profile, want string
+	}{
+		{"darwin", "/Users/a", "", "/Users/a"},
+		{"linux", "", "/home/b", ""},
+		{"windows", "", `C:\Users\a`, `C:\Users\a`},
+		{"windows", `c:\users\a`, `C:\Users\a`, `C:\Users\a`},
+		{"windows", `D:\home\a`, `C:\Users\a`, ""},
+		{"windows", "", "", ""},
+	}
+	for _, c := range cases {
+		if got := shellHomeFor(c.goos, c.home, c.profile); got != c.want {
+			t.Errorf("shellHomeFor(%q, %q, %q) = %q, want %q", c.goos, c.home, c.profile, got, c.want)
+		}
 	}
 }
 

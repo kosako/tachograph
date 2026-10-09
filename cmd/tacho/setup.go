@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -389,49 +390,146 @@ func claudeStatusLineCommand(path string) string {
 // statusLineResolves checks that the first token of the command exists as an
 // executable (either an absolute/relative path or a PATH lookup).
 func statusLineResolves(command string) bool {
-	return statusLineBinary(command) != ""
+	bin, _ := statusLineBinary(command)
+	return bin != ""
 }
 
 // statusLineBinary resolves the executable a statusLine command runs, or ""
-// when it doesn't resolve.
-func statusLineBinary(command string) string {
-	bin := firstToken(command)
-	if bin == "" {
-		return ""
+// when it doesn't resolve. checked is false when whether it resolves is
+// unknown: tacho can't tell which program the command runs (see firstToken),
+// or the shell may still run what tacho doesn't find. "Doesn't resolve" is
+// left to what tacho can tell for sure (#362):
+//
+//   - outside Windows, an absolute path (~ expanded) that is missing or not
+//     executable (#340), or a name off the PATH that isn't a bash builtin or a
+//     function the shell inherits (see shellMayDefine);
+//   - on Windows, a path from a drive letter (C:\… or C:/…, as setup writes
+//     it) that is missing even with an executable extension added.
+//
+// A relative path, and a name off the PATH when the shell's lookup may differ
+// (see pathMayDiffer), are unknown: Claude Code resolves them from its own
+// working directory, not doctor's. So are, on Windows, a name off the PATH —
+// PowerShell, the shell there without Git Bash, has cmdlets, functions, and
+// aliases off it (Get-Date), and Git Bash adds its own directories to it —
+// and a path not from a drive letter (/c/… is Git Bash's).
+func statusLineBinary(command string) (bin string, checked bool) {
+	return statusLineBinaryFor(command, runtime.GOOS)
+}
+
+func statusLineBinaryFor(command, goos string) (bin string, checked bool) {
+	bin, ok := firstTokenFor(command, goos)
+	if !ok {
+		return "", false
 	}
-	// A name with a slash runs as is, PATH unconsulted. LookPath does the same
-	// and checks the file is executable, so a script missing its execute bit
-	// doesn't pass as resolved (#340). Windows has no execute bit, and LookPath
-	// would demand a PATHEXT extension that a POSIX shell's extensionless
-	// script lacks: there a regular file is enough.
-	if strings.ContainsAny(bin, "/") && runtime.GOOS == "windows" {
-		if info, err := os.Stat(bin); err != nil || info.IsDir() {
-			return ""
+	if bin == "" {
+		return "", true
+	}
+	if goos == "windows" {
+		switch {
+		case isDrivePath(bin):
+			return windowsExecutable(bin), true
+		case strings.ContainsAny(bin, `/\:`):
+			return "", false
 		}
-		return bin
+		if p, err := exec.LookPath(bin); err == nil {
+			return p, true
+		}
+		return "", false
+	}
+	if strings.Contains(bin, "/") {
+		if !strings.HasPrefix(bin, "/") {
+			return "", false
+		}
+		// LookPath runs a path as is and checks the file is executable, so a
+		// script missing its execute bit doesn't pass as resolved (#340).
+		if p, err := exec.LookPath(bin); err == nil {
+			return p, true
+		}
+		return "", true
 	}
 	p, err := exec.LookPath(bin)
-	if err != nil {
-		return ""
+	switch {
+	case err == nil:
+		return p, true
+	case errors.Is(err, exec.ErrDot), pathMayDiffer(), shellBuiltins[bin], shellMayDefine(bin):
+		return "", false
 	}
-	return p
+	return "", true
+}
+
+// pathMayDiffer reports whether the shell's PATH lookup may find a name that
+// doctor's doesn't: the PATH has a relative entry (an empty one is the
+// current directory), found from Claude Code's working directory, not
+// doctor's, or is empty, which bash reads as the current directory, or as its
+// own default path when unset.
+func pathMayDiffer() bool {
+	path := os.Getenv("PATH")
+	if path == "" {
+		return true
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if !filepath.IsAbs(dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDrivePath reports whether s is a Windows path from a drive letter.
+func isDrivePath(s string) bool {
+	return len(s) >= 3 && (s[0]|0x20 >= 'a' && s[0]|0x20 <= 'z') && s[1] == ':' && (s[2] == '\\' || s[2] == '/')
+}
+
+// windowsExecutable returns the file a Windows path runs, or "" when there's
+// none: the path itself when it's a regular file (Windows has no execute bit,
+// and a POSIX shell's script has no extension), else the path with an
+// extension the shell adds — .exe for Git Bash, .ps1 and PATHEXT's for
+// PowerShell.
+func windowsExecutable(path string) string {
+	for _, ext := range append([]string{"", ".exe", ".ps1"}, strings.Split(os.Getenv("PATHEXT"), ";")...) {
+		if info, err := os.Stat(path + ext); err == nil && !info.IsDir() {
+			return path + ext
+		}
+	}
+	return ""
+}
+
+// shellMayDefine reports whether bash may run name as a function its
+// environment gives it: one exported with export -f, or anything the BASH_ENV
+// file defines.
+func shellMayDefine(name string) bool {
+	if os.Getenv("BASH_ENV") != "" {
+		return true
+	}
+	for _, k := range []string{"BASH_FUNC_" + name + "%%", "BASH_FUNC_" + name + "()"} {
+		if _, ok := os.LookupEnv(k); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // statusLineWarning is doctor's diagnosis of the configured statusLine
-// command ("" when fine). Besides a command that no longer resolves, it flags
-// one that runs a different tacho than this binary — e.g. an npm install's
-// absolute path left pointing into an old Node version's directory, which
-// keeps running that old tacho (#259). Commands that aren't tacho itself (a
-// user's own script) are not second-guessed.
-func statusLineWarning(command, exe string) string {
-	bin := statusLineBinary(command)
+// command (both "" when fine). Besides a command that no longer resolves, it
+// warns about one that runs a different tacho than this binary — e.g. an npm
+// install's absolute path left pointing into an old Node version's directory,
+// which keeps running that old tacho (#259). Commands that aren't tacho itself
+// (a user's own script) are not second-guessed. A command whose program tacho
+// can't tell from the text gets a note instead of a warning (#362): a warning
+// would be a guess, and its advice to re-run setup would replace the user's
+// own statusLine.
+func statusLineWarning(command, exe string) (warning, note string) {
+	bin, checked := statusLineBinary(command)
+	if !checked {
+		return "", "not checked — tacho can't tell which program this shell command runs"
+	}
 	if bin == "" {
-		return "that command does not resolve — re-run `tacho setup claude --write`"
+		return "that command does not resolve — re-run `tacho setup claude --write`", ""
 	}
 	if exe == "" || !isTachoExecutable(bin) || sameInstall(bin, exe) {
-		return ""
+		return "", ""
 	}
-	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here"
+	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here", ""
 }
 
 // isTachoExecutable reports whether path names tacho itself or its npm
@@ -444,35 +542,262 @@ func isTachoExecutable(path string) bool {
 	return false
 }
 
-// firstToken returns the first whitespace- or quote-delimited token of a shell
-// command, enough to identify the binary.
-func firstToken(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
+// firstToken returns the first word of a statusLine command as a POSIX shell
+// reads it — Claude Code runs the command in one (Git Bash on Windows, when
+// installed): line continuations joined, quotes and backslash escapes
+// removed, which also undoes the double quoting setup.Command applies
+// (#194 L-01), and a leading ~ expanded to the home directory (#362). ok is
+// false when the program the command runs can't be told from the text: the
+// word holds an expansion, a glob or brace pattern, ~user, a variable
+// assignment, a redirection, a subshell, or a comment, or another command
+// follows a control operator (missing || ~/.claude/statusline.sh runs the
+// script when the first command fails). An unterminated quote is a syntax
+// error the shell won't run, so it yields "", which doesn't resolve.
+//
+// On Windows the shell is Git Bash or, without it, PowerShell, and a word
+// they read differently is unknown too: an unquoted backslash, a path
+// separator to PowerShell (.\tools\statusline.exe) but an escape to Git Bash,
+// which is also why line continuations are left alone there; and a ~ when
+// HOME and USERPROFILE disagree (see shellHomeFor).
+func firstToken(command string) (string, bool) {
+	return firstTokenFor(command, runtime.GOOS)
+}
+
+func firstTokenFor(command, goos string) (string, bool) {
+	if goos != "windows" {
+		command = joinLineContinuations(command)
 	}
-	if command[0] == '"' {
-		// Undo the double-quote escaping setup.Command applies (\" \$ \` \\),
-		// so a quoted path round-trips into the real binary path (#194 L-01).
-		var b strings.Builder
-		for i := 1; i < len(command); i++ {
-			c := command[i]
-			if c == '\\' && i+1 < len(command) {
-				if n := command[i+1]; n == '"' || n == '$' || n == '`' || n == '\\' {
-					b.WriteByte(n)
-					i++
-					continue
-				}
+	command = strings.TrimSpace(command)
+	var b strings.Builder
+	i, n := 0, len(command)
+	if n > 0 && command[0] == '~' {
+		if n > 1 && command[1] != '/' && !endsShellWord(command[1]) {
+			return "", false // ~user, ~+, ~-
+		}
+		home := shellHomeFor(goos, os.Getenv("HOME"), os.Getenv("USERPROFILE"))
+		if home == "" {
+			return "", false
+		}
+		b.WriteString(home)
+		i++
+	}
+word:
+	for i < n {
+		c := command[i]
+		switch {
+		case endsShellWord(c):
+			break word
+		case c == '#' && i == 0:
+			return "", false // a comment, not a command
+		case strings.IndexByte("$`*?[{<>()", c) >= 0:
+			return "", false
+		case c == '=' && isShellName(strings.TrimSuffix(command[:i], "+")):
+			return "", false // an assignment before the command (bash also has NAME+=)
+		case c == '\\':
+			if goos == "windows" {
+				return "", false
 			}
-			if c == '"' {
-				return b.String()
+			if i+1 < n {
+				i++
+				c = command[i]
 			}
 			b.WriteByte(c)
+		case c == '\'':
+			j := strings.IndexByte(command[i+1:], '\'')
+			if j < 0 {
+				return "", true
+			}
+			b.WriteString(command[i+1 : i+1+j])
+			i += j + 1
+		case c == '"':
+			// Inside double quotes a backslash escapes only " $ ` and \, and
+			// $ and ` still expand.
+			for i++; ; i++ {
+				if i >= n {
+					return "", true
+				}
+				d := command[i]
+				if d == '"' {
+					break
+				}
+				if d == '$' || d == '`' {
+					return "", false
+				}
+				if d == '\\' && i+1 < n && strings.IndexByte("\"$`\\", command[i+1]) >= 0 {
+					i++
+					d = command[i]
+				}
+				b.WriteByte(d)
+			}
+		default:
+			b.WriteByte(c)
 		}
-		return b.String() // unterminated quote: best effort
+		i++
 	}
-	if i := strings.IndexAny(command, " \t"); i >= 0 {
-		return command[:i]
+	if commandFollows(command[i:]) {
+		return "", false
 	}
-	return command
+	return b.String(), true
 }
+
+// joinLineContinuations removes each backslash-newline outside single quotes
+// and comments, as a shell does before it splits the command into words. A
+// comment runs to the newline, so a backslash ending it doesn't pull the next
+// line in.
+func joinLineContinuations(s string) string {
+	if !strings.Contains(s, "\\\n") {
+		return s
+	}
+	var b strings.Builder
+	single, double, wordStart := false, false, true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		start := wordStart
+		wordStart = false
+		switch {
+		case single:
+			single = c != '\''
+		case c == '\\' && i+1 < len(s):
+			if s[i+1] == '\n' {
+				i++
+				wordStart = start
+				continue
+			}
+			b.WriteByte(c)
+			i++
+			c = s[i]
+		case double:
+			double = c != '"'
+		case c == '\'':
+			single = true
+		case c == '"':
+			double = true
+		case c == '#' && start:
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				j = len(s) - i
+			}
+			b.WriteString(s[i : i+j])
+			i += j - 1
+			continue
+		case strings.IndexByte(" \t\n;&|()<>", c) >= 0:
+			wordStart = true
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// commandFollows reports whether rest, what follows a command's first word,
+// holds another command: one after a control operator (; & | or a newline)
+// outside quotes. A command substitution or subshell ($(…), `…`, (…)), or an
+// expansion or quote of bash's with quoting of its own (${…}, $'…', $"…"),
+// counts too: the scan doesn't follow their nested quoting, where a quote
+// could hide an operator after it. A trailing operator (tacho statusline;), a
+// redirection's & or | (2>&1, &>file, >|file), and a comment don't count.
+func commandFollows(rest string) bool {
+	afterOp, wordStart := false, true
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		switch {
+		case c == ' ' || c == '\t':
+			wordStart = true
+			continue
+		case c == '\n', c == ';',
+			c == '&' && !(i > 0 && strings.IndexByte("<>", rest[i-1]) >= 0) && !(i+1 < len(rest) && rest[i+1] == '>'),
+			c == '|' && !(i > 0 && rest[i-1] == '>'):
+			afterOp, wordStart = true, true
+			continue
+		case c == '#' && wordStart:
+			if j := strings.IndexByte(rest[i:], '\n'); j >= 0 {
+				i += j - 1 // the newline ending the comment is an operator
+				continue
+			}
+			return false
+		}
+		if afterOp {
+			return true
+		}
+		wordStart = false
+		switch c {
+		case '\\':
+			i++
+		case '`', '(':
+			return true // a command substitution or subshell, nested quotes and all
+		case '$':
+			if i+1 < len(rest) && strings.IndexByte("'\"{(", rest[i+1]) >= 0 {
+				return true // $'…', $"…", ${…}, $(…): quoting of their own
+			}
+		case '\'':
+			j := strings.IndexByte(rest[i+1:], '\'')
+			if j < 0 {
+				return false
+			}
+			i += j + 1
+		case '"':
+			for i++; i < len(rest) && rest[i] != '"'; i++ {
+				switch {
+				case rest[i] == '\\':
+					i++
+				case rest[i] == '`', rest[i] == '$' && i+1 < len(rest) && (rest[i+1] == '(' || rest[i+1] == '{'):
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// endsShellWord reports whether c ends an unquoted shell word: a blank or a
+// command separator.
+func endsShellWord(c byte) bool {
+	return strings.IndexByte(" \t\n;&|", c) >= 0
+}
+
+// shellHomeFor is the directory a leading ~ expands to, or "" when it can't
+// be told: HOME, as in a POSIX shell. On Windows Git Bash reads HOME, set from
+// USERPROFILE when it's unset, while PowerShell reads USERPROFILE, so there
+// it's USERPROFILE unless a HOME that differs leaves it to the shell.
+func shellHomeFor(goos, home, profile string) string {
+	if goos != "windows" {
+		return home
+	}
+	if home != "" && !strings.EqualFold(home, profile) {
+		return ""
+	}
+	return profile
+}
+
+// isShellName reports whether s is a shell variable name.
+func isShellName(s string) bool {
+	if s == "" || s[0] >= '0' && s[0] <= '9' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// shellBuiltins are the words bash (Git Bash, and /bin/sh on macOS) handles
+// itself rather than running a program found on the PATH: its reserved words
+// (compgen -k) and builtins (compgen -b) as of bash 5.3. The other POSIX
+// shells' builtins are among them.
+var shellBuiltins = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`
+		! [[ ]] { } case coproc do done elif else esac fi for function if in
+		select then time until while
+		. : [ alias bg bind break builtin caller cd command compgen complete
+		compopt continue declare dirs disown echo enable eval exec exit export
+		false fc fg getopts hash help history jobs kill let local logout
+		mapfile popd printf pushd pwd read readarray readonly return set shift
+		shopt source suspend test times trap true type typeset ulimit umask
+		unalias unset wait`) {
+		m[w] = true
+	}
+	return m
+}()

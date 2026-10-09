@@ -178,9 +178,12 @@ func TestStatusLineWarning(t *testing.T) {
 		{"not tacho", script, ""},
 	}
 	for _, c := range cases {
-		got := statusLineWarning(c.command, binary)
+		got, note := statusLineWarning(c.command, binary)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
 			t.Errorf("%s: statusLineWarning = %q, want containing %q", c.name, got, c.want)
+		}
+		if note != "" {
+			t.Errorf("%s: note = %q, want none (the command is checkable)", c.name, note)
 		}
 	}
 }
