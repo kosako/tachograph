@@ -95,8 +95,12 @@ func runDoctor(args []string) int {
 		fmt.Println("  settings.json is not valid JSON — fix it, then `tacho setup claude`")
 	default:
 		fmt.Println("  command:   " + cmd)
-		if w := statusLineWarning(cmd, exe); w != "" {
-			fmt.Println("  warning:   " + w)
+		warning, note := statusLineWarning(cmd, exe)
+		if warning != "" {
+			fmt.Println("  warning:   " + warning)
+		}
+		if note != "" {
+			fmt.Println("  note:      " + note)
 		}
 	}
 	return 0

@@ -262,11 +262,101 @@ func TestFirstTokenUnescapesQuotedCommand(t *testing.T) {
 	}
 
 	command := setup.Command(false, bin)
-	if got := firstToken(command); got != bin {
-		t.Errorf("firstToken(%q) = %q, want %q", command, got, bin)
+	if got, ok := firstToken(command); got != bin || !ok {
+		t.Errorf("firstToken(%q) = %q, %v, want %q, true", command, got, ok, bin)
 	}
 	if !statusLineResolves(command) {
 		t.Errorf("statusLineResolves(%q) = false, want true (binary exists)", command)
+	}
+}
+
+// firstToken reads the first word the way the shell Claude Code runs the
+// command in does (#362): a leading ~ is the home directory and quotes and
+// escapes come off, so the form Claude Code's own docs use
+// (~/.claude/statusline.sh) and a single-quoted name are what they run. Syntax
+// tacho doesn't evaluate is reported as such (ok false) rather than as a name
+// that doesn't resolve.
+func TestFirstTokenShellWords(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cases := []struct {
+		command, want string
+		ok            bool
+	}{
+		{"~/.claude/statusline.sh", home + "/.claude/statusline.sh", true},
+		{"~", home, true},
+		{"'tacho' statusline", "tacho", true},
+		{"'/opt/my dir'/tacho statusline", "/opt/my dir/tacho", true},
+		{`"/opt/my dir/tacho" statusline`, "/opt/my dir/tacho", true},
+		{`/opt/my\ dir/tacho statusline`, "/opt/my dir/tacho", true},
+		{" \ttacho\tstatusline", "tacho", true},
+		{"tacho;echo", "tacho", true},
+		{"tacho|cat", "tacho", true},
+		{"/opt/a#b/tacho", "/opt/a#b/tacho", true},
+		{"/opt/a~b/tacho", "/opt/a~b/tacho", true},
+		{"", "", true},
+		{"'tacho statusline", "", true}, // unterminated: the shell won't run it
+		{`"tacho statusline`, "", true},
+		{"$HOME/.claude/statusline.sh", "", false},
+		{`"$HOME"/.claude/statusline.sh`, "", false},
+		{"${HOME}/.claude/statusline.sh", "", false},
+		{"$(which tacho) statusline", "", false},
+		{"`which tacho` statusline", "", false},
+		{"~other/statusline.sh", "", false},
+		{"FOO=1 tacho statusline", "", false},
+		{"(tacho statusline)", "", false},
+		{"{ tacho statusline; }", "", false},
+		{"if true; then tacho statusline; fi", "", false},
+		{"cd ~/.claude && ./statusline.sh", "", false},
+		{"exec tacho statusline", "", false},
+		{"/opt/*/tacho statusline", "", false},
+		{"2>/dev/null tacho statusline", "", false},
+		{"# tacho statusline", "", false},
+	}
+	for _, c := range cases {
+		if got, ok := firstToken(c.command); got != c.want || ok != c.ok {
+			t.Errorf("firstToken(%q) = %q, %v, want %q, %v", c.command, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// doctor accepts a statusLine that runs a script by ~/ or a quoted path, still
+// warns when that script is missing, and only notes, without the warning and
+// its advice to re-run setup, a command it can't follow to a program (#362).
+func TestStatusLineWarningShellForms(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, p := range []string{
+		filepath.Join(home, ".claude", "statusline.sh"),
+		filepath.Join(home, "my dir", "statusline.sh"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quoted := "'" + filepath.ToSlash(filepath.Join(home, "my dir", "statusline.sh")) + "'"
+	cases := []struct {
+		name, command, warning, note string
+	}{
+		{"~/ path", "~/.claude/statusline.sh", "", ""},
+		{"single-quoted path", quoted, "", ""},
+		{"missing ~/ path", "~/.claude/gone.sh", "does not resolve", ""},
+		{"expansion", "$HOME/.claude/statusline.sh", "", "not checked"},
+		{"compound", "cd ~/.claude && ./statusline.sh", "", "not checked"},
+	}
+	for _, c := range cases {
+		warning, note := statusLineWarning(c.command, "")
+		if (c.warning == "") != (warning == "") || !strings.Contains(warning, c.warning) {
+			t.Errorf("%s: warning = %q, want containing %q", c.name, warning, c.warning)
+		}
+		if (c.note == "") != (note == "") || !strings.Contains(note, c.note) {
+			t.Errorf("%s: note = %q, want containing %q", c.name, note, c.note)
+		}
 	}
 }
 

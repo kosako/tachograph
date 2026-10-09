@@ -389,15 +389,21 @@ func claudeStatusLineCommand(path string) string {
 // statusLineResolves checks that the first token of the command exists as an
 // executable (either an absolute/relative path or a PATH lookup).
 func statusLineResolves(command string) bool {
-	return statusLineBinary(command) != ""
+	bin, _ := statusLineBinary(command)
+	return bin != ""
 }
 
 // statusLineBinary resolves the executable a statusLine command runs, or ""
-// when it doesn't resolve.
-func statusLineBinary(command string) string {
-	bin := firstToken(command)
+// when it doesn't resolve. checked is false when the command's first word is
+// shell syntax tacho doesn't evaluate (see firstToken), so whether it
+// resolves is unknown.
+func statusLineBinary(command string) (bin string, checked bool) {
+	bin, ok := firstToken(command)
+	if !ok {
+		return "", false
+	}
 	if bin == "" {
-		return ""
+		return "", true
 	}
 	// A name with a slash runs as is, PATH unconsulted. LookPath does the same
 	// and checks the file is executable, so a script missing its execute bit
@@ -406,32 +412,38 @@ func statusLineBinary(command string) string {
 	// script lacks: there a regular file is enough.
 	if strings.ContainsAny(bin, "/") && runtime.GOOS == "windows" {
 		if info, err := os.Stat(bin); err != nil || info.IsDir() {
-			return ""
+			return "", true
 		}
-		return bin
+		return bin, true
 	}
 	p, err := exec.LookPath(bin)
 	if err != nil {
-		return ""
+		return "", true
 	}
-	return p
+	return p, true
 }
 
 // statusLineWarning is doctor's diagnosis of the configured statusLine
-// command ("" when fine). Besides a command that no longer resolves, it flags
-// one that runs a different tacho than this binary — e.g. an npm install's
-// absolute path left pointing into an old Node version's directory, which
-// keeps running that old tacho (#259). Commands that aren't tacho itself (a
-// user's own script) are not second-guessed.
-func statusLineWarning(command, exe string) string {
-	bin := statusLineBinary(command)
+// command (both "" when fine). Besides a command that no longer resolves, it
+// warns about one that runs a different tacho than this binary — e.g. an npm
+// install's absolute path left pointing into an old Node version's directory,
+// which keeps running that old tacho (#259). Commands that aren't tacho itself
+// (a user's own script) are not second-guessed. A command whose program tacho
+// can't tell from the text gets a note instead of a warning (#362): a warning
+// would be a guess, and its advice to re-run setup would replace the user's
+// own statusLine.
+func statusLineWarning(command, exe string) (warning, note string) {
+	bin, checked := statusLineBinary(command)
+	if !checked {
+		return "", "not checked — tacho can't tell which program this shell command runs"
+	}
 	if bin == "" {
-		return "that command does not resolve — re-run `tacho setup claude --write`"
+		return "that command does not resolve — re-run `tacho setup claude --write`", ""
 	}
 	if exe == "" || !isTachoExecutable(bin) || sameInstall(bin, exe) {
-		return ""
+		return "", ""
 	}
-	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here"
+	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here", ""
 }
 
 // isTachoExecutable reports whether path names tacho itself or its npm
@@ -444,35 +456,126 @@ func isTachoExecutable(path string) bool {
 	return false
 }
 
-// firstToken returns the first whitespace- or quote-delimited token of a shell
-// command, enough to identify the binary.
-func firstToken(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
+// firstToken returns the first word of a statusLine command as a POSIX shell
+// reads it — Claude Code runs the command in one (Git Bash on Windows, when
+// installed): quotes and backslash escapes removed, which also undoes the
+// double quoting setup.Command applies (#194 L-01), and a leading ~ expanded
+// to the home directory (#362). ok is false when the word is shell syntax
+// tacho doesn't evaluate, so the program it runs can't be told from the text:
+// an expansion, a glob or brace pattern, ~user, a variable assignment, a
+// redirection or subshell, a comment, or a word the shell handles itself
+// (shellBuiltins). An unterminated quote is a syntax error the shell won't
+// run, so it yields "", which doesn't resolve.
+func firstToken(command string) (string, bool) {
+	command = strings.TrimLeft(command, " \t\n")
+	var b strings.Builder
+	i, n := 0, len(command)
+	if n > 0 && command[0] == '~' {
+		if n > 1 && command[1] != '/' && !endsShellWord(command[1]) {
+			return "", false // ~user, ~+, ~-
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		b.WriteString(home)
+		i++
 	}
-	if command[0] == '"' {
-		// Undo the double-quote escaping setup.Command applies (\" \$ \` \\),
-		// so a quoted path round-trips into the real binary path (#194 L-01).
-		var b strings.Builder
-		for i := 1; i < len(command); i++ {
-			c := command[i]
-			if c == '\\' && i+1 < len(command) {
-				if n := command[i+1]; n == '"' || n == '$' || n == '`' || n == '\\' {
-					b.WriteByte(n)
-					i++
-					continue
+word:
+	for i < n {
+		c := command[i]
+		switch {
+		case endsShellWord(c):
+			break word
+		case c == '#' && i == 0:
+			return "", false // a comment, not a command
+		case strings.IndexByte("$`*?[{<>()", c) >= 0:
+			return "", false
+		case c == '=' && isShellName(command[:i]):
+			return "", false // an assignment before the command
+		case c == '\\':
+			if i+1 < n {
+				if command[i+1] != '\n' { // backslash-newline continues the line
+					b.WriteByte(command[i+1])
 				}
-			}
-			if c == '"' {
-				return b.String()
+				i += 2
+				continue
 			}
 			b.WriteByte(c)
+		case c == '\'':
+			j := strings.IndexByte(command[i+1:], '\'')
+			if j < 0 {
+				return "", true
+			}
+			b.WriteString(command[i+1 : i+1+j])
+			i += j + 2
+			continue
+		case c == '"':
+			// Inside double quotes a backslash escapes only " $ ` \ and a
+			// newline; $ and ` still expand.
+			for i++; ; i++ {
+				if i >= n {
+					return "", true
+				}
+				d := command[i]
+				if d == '"' {
+					break
+				}
+				if d == '$' || d == '`' {
+					return "", false
+				}
+				if d == '\\' && i+1 < n && strings.IndexByte("\"$`\\\n", command[i+1]) >= 0 {
+					i++
+					if command[i] == '\n' {
+						continue
+					}
+					d = command[i]
+				}
+				b.WriteByte(d)
+			}
+		default:
+			b.WriteByte(c)
 		}
-		return b.String() // unterminated quote: best effort
+		i++
 	}
-	if i := strings.IndexAny(command, " \t"); i >= 0 {
-		return command[:i]
+	if w := b.String(); !shellBuiltins[w] {
+		return w, true
 	}
-	return command
+	return "", false
+}
+
+// endsShellWord reports whether c ends an unquoted shell word: a blank or a
+// command separator.
+func endsShellWord(c byte) bool {
+	return strings.IndexByte(" \t\n;&|", c) >= 0
+}
+
+// isShellName reports whether s is a shell variable name.
+func isShellName(s string) bool {
+	if s == "" || s[0] >= '0' && s[0] <= '9' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// shellBuiltins are the words the shell handles itself rather than running a
+// program found on the PATH: the reserved words that open a compound command,
+// POSIX's special builtins, and the builtins that change the directory or
+// read a file before what comes next (cd ~/x && ./statusline.sh).
+var shellBuiltins = map[string]bool{
+	"!": true, "{": true, "}": true, "case": true, "do": true, "done": true,
+	"elif": true, "else": true, "esac": true, "fi": true, "for": true,
+	"function": true, "if": true, "in": true, "select": true, "then": true,
+	"time": true, "until": true, "while": true,
+	":": true, ".": true, "break": true, "continue": true, "eval": true,
+	"exec": true, "exit": true, "export": true, "readonly": true,
+	"return": true, "set": true, "shift": true, "times": true,
+	"trap": true, "unset": true,
+	"cd": true, "command": true, "source": true,
 }
