@@ -1,0 +1,74 @@
+name: npm install smoke
+
+# Exercises the real npm install path (npm pack → global install →
+# postinstall download, checksum verification, tar/zip extraction, bin shim →
+# `tacho version`) on every supported OS, since the extraction tooling differs
+# (GNU tar on Linux, bsdtar on macOS/Windows). Installs the release matching
+# npm/package.json's version.
+#
+# Called from ci.yml, where a missing release (a release-prep PR: version
+# bumped, tag not pushed yet) skips the install, and from release.yml as the
+# gate before npm publish, where it must fail instead (#351): the same steps
+# CI runs on every PR are what guards the release.
+on:
+  workflow_call:
+    inputs:
+      require-release:
+        description: Fail instead of skipping when this version's release isn't published.
+        type: boolean
+        default: false
+
+jobs:
+  smoke:
+    permissions:
+      contents: read
+    strategy:
+      # Keep the other OSes running when one fails: the OS-specific extraction
+      # differences are exactly what this job exists to diagnose.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: lts/*
+      - name: Check whether this version's release exists
+        id: release
+        env:
+          REQUIRE_RELEASE: ${{ inputs.require-release }}
+        run: |
+          version="$(node -p "require('./npm/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          url="https://github.com/kosako/tachograph/releases/download/v${version}/checksums.txt"
+          # Only an explicit 404 means "not published yet"; DNS/TLS failures
+          # abort via the command substitution's exit code, and any other
+          # status fails the job rather than silently skipping the smoke.
+          code="$(curl -sSLI -o /dev/null -w '%{http_code}' "$url")"
+          if [ "$code" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "404" ] && [ "$REQUIRE_RELEASE" != "true" ]; then
+            echo "::notice::release v${version} not published yet (release-prep PR?); skipping npm install smoke"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::HTTP ${code} checking ${url}"
+            exit 1
+          fi
+      - name: Pack and install the wrapper globally
+        if: steps.release.outputs.exists == 'true'
+        working-directory: npm
+        run: |
+          npm pack
+          npm install -g "./tachograph-${{ steps.release.outputs.version }}.tgz"
+      - name: Run the installed binary
+        if: steps.release.outputs.exists == 'true'
+        run: |
+          out="$(tacho version)"
+          echo "$out"
+          test "$out" = "tacho v${{ steps.release.outputs.version }}"
