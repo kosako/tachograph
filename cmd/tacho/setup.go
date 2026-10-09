@@ -505,8 +505,8 @@ word:
 			return "", false // a comment, not a command
 		case strings.IndexByte("$`*?[{<>()", c) >= 0:
 			return "", false
-		case c == '=' && isShellName(command[:i]):
-			return "", false // an assignment before the command
+		case c == '=' && isShellName(strings.TrimSuffix(command[:i], "+")):
+			return "", false // an assignment before the command (bash also has NAME+=)
 		case c == '\\':
 			if goos == "windows" {
 				return "", false
