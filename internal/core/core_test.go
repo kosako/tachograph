@@ -166,6 +166,89 @@ func TestStatusDropsSessionValuesFromStaleSnapshot(t *testing.T) {
 	}
 }
 
+// An available Codex whose day scan fails keeps daily null — unknown, not
+// zero usage (#180, #187). A regular file where today's day directory goes is
+// skipped by the collector's walk, so the session still shows, but the day
+// scan can't list it.
+func TestStatusKeepsCodexDailyNullWhenDayScanFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a plain file where the directory goes reads as missing on Windows, so it can't stand in for an unreadable directory there")
+	}
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	now := time.Date(2026, 7, 4, 2, 0, 0, 0, time.Local)
+	root := t.TempDir()
+	dayDir := func(d time.Time) string {
+		return filepath.Join(root, "sessions", d.Format("2006"), d.Format("01"), d.Format("02"))
+	}
+	// A session started yesterday and still running.
+	rollout := `{"type":"turn_context","payload":{"model":"gpt-5.5"}}` + "\n" +
+		`{"timestamp":"` + now.Add(-time.Hour).Format(time.RFC3339) + `","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":0,"total_tokens":1000}}}}` + "\n"
+	path := filepath.Join(dayDir(now.AddDate(0, 0, -1)), "rollout-2026-07-03T22-00-00-019e5933-2289-7e72-88fd-cdcdcdcdcdcd.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(rollout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ClaudeRoot: t.TempDir(), CodexRoot: root, Now: now, NoCache: true}
+
+	// Readable, the same root has a daily.
+	if got := Status(opts).Tools[1]; got.Daily == nil {
+		t.Fatalf("Codex daily = nil with readable logs, want a figure: %+v", got)
+	}
+
+	if err := os.WriteFile(dayDir(now), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Status(opts).Tools[1]
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Codex = %+v, want available without an error (the session is still readable)", got)
+	}
+	if got.Daily != nil {
+		t.Errorf("Codex daily = %+v, want nil when the day scan fails", got.Daily)
+	}
+}
+
+// The same contract on the Claude side: a transcript nested under a project
+// that can't be read (a dangling symlink, so no chmod — a no-op as root) fails
+// the day scan, while the collector, which looks only at the project's own
+// transcripts, still shows the session.
+func TestStatusKeepsClaudeDailyNullWhenDayScanFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	// The real clock: the day scan judges the dangling link by its own mtime,
+	// which is when it is created.
+	now := time.Now()
+	root := t.TempDir()
+	writeClaudeMessage(t, root, now.Add(-time.Minute), 100)
+	opts := Options{ClaudeRoot: root, CodexRoot: t.TempDir(), Now: now, NoCache: true}
+
+	// Readable, the same root has a daily.
+	if got := Status(opts).Tools[0]; got.Daily == nil {
+		t.Fatalf("Claude daily = nil with readable logs, want a figure: %+v", got)
+	}
+
+	nested := filepath.Join(root, "projects", "p", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "gone"), filepath.Join(nested, "broken.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	got := Status(opts).Tools[0]
+	if !got.Available || got.Error != nil {
+		t.Fatalf("Claude = %+v, want available without an error (the session is still readable)", got)
+	}
+	if got.Daily != nil {
+		t.Errorf("Claude daily = %+v, want nil when the day scan fails", got.Daily)
+	}
+}
+
 func TestAddCodexSessionCost(t *testing.T) {
 	tool := schema.Tool{
 		Tool:      schema.ToolCodex,
