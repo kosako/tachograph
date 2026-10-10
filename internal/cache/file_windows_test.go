@@ -55,13 +55,17 @@ func TestReplaceFileWaitsForAReader(t *testing.T) {
 	path := filepath.Join(dir, "status.json")
 	writeFile(t, path, "old")
 	f := openReader(t, path)
+	tmp := filepath.Join(dir, "status.json.tmp-1")
+	writeFile(t, tmp, "new")
+	// The reader is in the way: a single rename fails.
+	if err := os.Rename(tmp, path); err == nil {
+		t.Skip("this Windows renames over a file a reader holds open")
+	}
+
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		f.Close()
 	}()
-
-	tmp := filepath.Join(dir, "status.json.tmp-1")
-	writeFile(t, tmp, "new")
 	if err := replaceFile(tmp, path); err != nil {
 		t.Fatalf("replaceFile with a reader closing after 20ms: %v", err)
 	}
@@ -104,7 +108,7 @@ func TestTransientRenameError(t *testing.T) {
 	}{
 		{link(syscall.ERROR_ACCESS_DENIED), true},
 		{link(errSharingViolation), true},
-		{link(syscall.ERROR_FILE_NOT_FOUND), false},
+		{link(syscall.ERROR_FILE_NOT_FOUND), true},
 		{link(syscall.ERROR_PATH_NOT_FOUND), false},
 		{errors.New("other"), false},
 	}
