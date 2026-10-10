@@ -340,9 +340,15 @@ func TestCheckBinaryOnATaggedBuild(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
+	// Resolving the tag into the main module version records
+	// example.com/tagged's version info in the module cache, so the build
+	// gets a module cache of its own instead of the caller's; -modcacherw
+	// keeps it removable for the temporary directory's cleanup.
+	gopath := t.TempDir()
 	env = append(env,
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
-		"GOENV=off", "GOFLAGS=-buildvcs=true", "GOWORK=off", "CGO_ENABLED=0")
+		"GOENV=off", "GOFLAGS=-buildvcs=true -modcacherw", "GOWORK=off", "CGO_ENABLED=0",
+		"GOPATH="+gopath, "GOMODCACHE="+filepath.Join(gopath, "pkg", "mod"))
 	run := func(name string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(name, args...)
