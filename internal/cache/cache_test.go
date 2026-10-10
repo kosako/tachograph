@@ -55,13 +55,12 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 }
 
 // TestWriteStatusConcurrent exercises the tmp-file + atomic-rename contract:
-// many writers racing on one path never corrupt it, a reader racing them never
-// sees a partial file, the survivor is exactly one writer's payload, and no
-// temp files are left behind.
+// many writers racing on one path never corrupt it or fail, a reader racing
+// them never sees a partial file, the survivor is exactly one writer's
+// payload, and no temp files are left behind. On Windows the writers get in
+// each other's and the reader's way, which the rename retry is there for
+// (#371).
 func TestWriteStatusConcurrent(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("concurrent cache writes fail to rename over each other on Windows and leave temp files (#371)")
-	}
 	dir := setCacheDir(t)
 	now := time.Now()
 
@@ -72,7 +71,7 @@ func TestWriteStatusConcurrent(t *testing.T) {
 	}
 
 	// A reader racing the writers must only ever observe a complete file:
-	// rename is all-or-nothing, so ReadFile gets either ENOENT or whole JSON.
+	// rename is all-or-nothing, so ReadFile gets either an error or whole JSON.
 	stop := make(chan struct{})
 	var readerWG sync.WaitGroup
 	readerWG.Add(1)

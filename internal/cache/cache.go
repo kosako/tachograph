@@ -279,7 +279,11 @@ func writeJSON(name string, v any) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, name))
+	if err := replaceFile(tmp.Name(), filepath.Join(dir, name)); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 // DailyHistoryEntry is one tool's figure for one closed day in the rolling
