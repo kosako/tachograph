@@ -31,8 +31,9 @@ import (
 // (GoReleaser), so `tacho version` shows the tag as is. Other builds leave it
 // empty and fall back to build info, where the Go toolchain records the main
 // module version: the tag for `go install ...@vX.Y.Z` or a build from a clean
-// checkout of a tag, a pseudo-version for other builds from a git checkout
-// (Go 1.24 and later), and none for builds without VCS information.
+// checkout of a tag, a pseudo-version for a build from an untagged commit,
+// with "+dirty" appended when the checkout has uncommitted changes (Go 1.24
+// and later), and none for builds without VCS information.
 var version string
 
 // fallbackVersion is reported when neither an injected version nor a build-info
