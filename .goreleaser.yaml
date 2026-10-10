@@ -23,8 +23,10 @@ builds:
       - arm64
     flags:
       - -trimpath
-    # Inject the tag (e.g. v0.1.1) so `tacho version` matches the release;
-    # build info alone can't see it under GoReleaser's plain `go build`.
+    # Inject the tag (e.g. v0.1.1) so `tacho version` shows the release tag
+    # as is. Building from the tag's clean checkout, Go also records the tag
+    # as the module version in build info (scripts/check-release-assets
+    # checks it); the injection keeps `tacho version` exact either way.
     ldflags:
       - -s -w -X main.version={{ .Tag }}
 

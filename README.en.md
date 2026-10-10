@@ -93,7 +93,8 @@ setup claude` prints a snippet with the correct absolute path baked in.
 If you installed via **npm**, reinstall to pull the latest version. It
 overwrites the same location, so your statusLine / SwiftBar config keeps
 working unchanged (after switching Node versions the location changes, so
-re-run `tacho setup claude --write`):
+re-run `tacho setup claude --write`, and `tacho setup swiftbar --write` too if
+you installed the SwiftBar plugin with it):
 
 ```sh
 npm install -g tachograph@latest
