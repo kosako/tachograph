@@ -60,6 +60,24 @@ func requirePerm(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
+// Without CLAUDE_CONFIG_DIR, setup edits ~/.claude/settings.json, the file
+// Claude Code reads; with it, settings.json in that directory.
+func TestClaudeSettingsPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // the home os.UserHomeDir reads on Windows
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if got, want := claudeSettingsPath(), filepath.Join(home, ".claude", "settings.json"); got != want {
+		t.Errorf("claudeSettingsPath() without CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	if got, want := claudeSettingsPath(), filepath.Join(dir, "settings.json"); got != want {
+		t.Errorf("claudeSettingsPath() with CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}
+
 func TestNewestJSONLPicksNewestNestedFile(t *testing.T) {
 	root := t.TempDir()
 	oldPath := filepath.Join(root, "projects", "old.jsonl")
