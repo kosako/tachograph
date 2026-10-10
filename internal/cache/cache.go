@@ -1,5 +1,8 @@
-// Package cache is the short-lived file cache shared by all renderers.
-// Writes are tmp-file + rename so concurrent readers never see partial JSON.
+// Package cache keeps tacho's state in the cache dir: the short-lived status
+// cache shared by all renderers, the Claude snapshot, derived caches (daily
+// history, session trees), the notification record, and the locks around
+// them. Writes are tmp-file + rename so concurrent readers never see partial
+// JSON.
 package cache
 
 import (

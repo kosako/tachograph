@@ -67,7 +67,7 @@ PATHを通したくない場合は、`tacho` を絶対パス(例 `~/go/bin/tacho
 
 ### アップデート
 
-npm で入れた場合は、再インストールで最新版に入れ替わります(同じ場所を上書きするので、statusLineやSwiftBarの設定はそのままでOK。ただし Node の版を切り替えた後は入る場所が変わるので、`tacho setup claude --write` をやり直してください):
+npm で入れた場合は、再インストールで最新版に入れ替わります(同じ場所を上書きするので、statusLineやSwiftBarの設定はそのままでOK。ただし Node の版を切り替えた後は入る場所が変わるので、`tacho setup claude --write` をやり直してください。SwiftBar のプラグインを `tacho setup swiftbar --write` で置いている場合は、それもやり直します):
 
 ```sh
 npm install -g tachograph@latest

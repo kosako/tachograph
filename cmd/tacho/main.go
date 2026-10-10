@@ -28,17 +28,21 @@ import (
 )
 
 // version is injected at release-build time via -ldflags "-X main.version=…"
-// (GoReleaser). It's empty for `go install` and local builds, which fall back
-// to build info — GoReleaser uses plain `go build`, so its binaries carry no
-// module version and need this explicit injection.
+// (GoReleaser), so `tacho version` shows the tag as is. Other builds leave it
+// empty and fall back to build info, where the Go toolchain records the main
+// module version: the tag for `go install ...@vX.Y.Z` or a build from a clean
+// checkout of a tag, a pseudo-version for a build from an untagged commit,
+// with "+dirty" appended when the checkout has uncommitted changes (Go 1.24
+// and later), and none for builds without VCS information.
 var version string
 
 // fallbackVersion is reported when neither an injected version nor a build-info
-// module version is available — local `go build` / `go run`.
+// module version is available — builds without VCS information (`go run`,
+// `-buildvcs=false`, or outside a repository).
 const fallbackVersion = "dev"
 
 // buildVersion resolves the version to display, preferring the injected value,
-// then the module version the Go toolchain embeds at install time (so
+// then the module version the Go toolchain embeds at build time (so
 // `go install ...@v0.1.0` reports "v0.1.0"), then the fallback.
 func buildVersion() string {
 	if version != "" {
@@ -51,7 +55,8 @@ func buildVersion() string {
 }
 
 // normalizeVersion maps the build-info main module version to what we print:
-// an empty or "(devel)" value (local builds) becomes fallbackVersion.
+// an empty or "(devel)" value (a build without VCS information) becomes
+// fallbackVersion.
 func normalizeVersion(v string) string {
 	if v == "" || v == "(devel)" {
 		return fallbackVersion

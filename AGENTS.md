@@ -38,8 +38,10 @@
     approximate price table and its `pricing.json` override.
   - `internal/core` assembles schema output; `internal/schema` defines its Go
     types (keep `docs/schema.md`, the authoritative spec, in sync).
-  - `internal/config` owns `config.json`; `internal/cache` is the short-lived
-    file cache.
+  - `internal/config` owns `config.json`; `internal/cache` owns tacho's state
+    in the cache dir: the short-lived status cache (`status.json`), the
+    Claude snapshot, derived caches (daily history, session trees), the
+    notification record, and the cross-process locks.
   - `internal/render`, `internal/swiftbar`, and `internal/menubar` (the menu
     bar gauge image) render views. The preset catalog in
     `internal/render/presets.go` is mirrored by hand in the preset tables of
