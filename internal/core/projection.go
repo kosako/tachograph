@@ -3,7 +3,6 @@ package core
 import (
 	"time"
 
-	"github.com/kosako/tachograph/internal/collector/codex"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -13,32 +12,12 @@ import (
 // from used_pct, resets_at, window_minutes, and observed_at, so they are a
 // reference for "if the average so far holds", not a guarantee of what can
 // still be spent. The assumptions and the null rules are in docs/schema.md.
+// A projection is withheld once its observation is older than the tool's own
+// stale threshold (schema.StaleAfter).
 func AddProjections(t *schema.Tool, now time.Time) {
 	for i := range t.Limits {
-		t.Limits[i].Projection = project(t.Limits[i], now, staleAfter(t.Tool))
+		t.Limits[i].Projection = project(t.Limits[i], now, schema.StaleAfter(t.Tool))
 	}
-}
-
-// staleAfter is how old a limit's observation may be before its projection
-// is withheld: the tool's own stale threshold, since Codex's windows stay
-// trustworthy for hours after its last turn (see codex.StaleAfterMinutes).
-func staleAfter(tool string) time.Duration {
-	if tool == schema.ToolCodex {
-		return codex.StaleAfterMinutes * time.Minute
-	}
-	return schema.StaleAfterMinutes * time.Minute
-}
-
-// ObservedStale reports whether l was observed longer ago than its tool's
-// stale threshold (see staleAfter): use and resets since then aren't in the
-// reading (#331). A limit without a readable observation time isn't reported
-// stale — its age is unknown.
-func ObservedStale(tool string, l schema.Limit, now time.Time) bool {
-	if l.ObservedAt == nil {
-		return false
-	}
-	observed, err := time.Parse(time.RFC3339, *l.ObservedAt)
-	return err == nil && now.Sub(observed) > staleAfter(tool)
 }
 
 // project is the window-average extrapolation of one limit. With D the

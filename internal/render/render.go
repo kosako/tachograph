@@ -226,6 +226,9 @@ func Age(iso string, now time.Time) string {
 	}
 }
 
+// staleSymbol marks an old reading.
+const staleSymbol = "⚠"
+
 // staleMark renders "⚠1h" for stale data (age omitted when unknown).
 func staleMark(t schema.Tool, now time.Time) string {
 	if !t.Stale {
@@ -233,10 +236,10 @@ func staleMark(t schema.Tool, now time.Time) string {
 	}
 	if t.CollectedAt != nil {
 		if a := Age(*t.CollectedAt, now); a != "" {
-			return "⚠" + a
+			return staleSymbol + a
 		}
 	}
-	return "⚠"
+	return staleSymbol
 }
 
 // ResetShort renders an RFC 3339 reset time as "↻HH:MM" if it falls within
@@ -301,7 +304,7 @@ func ToolLine(t schema.Tool, now time.Time, st Style) string {
 	parts := []string{head, "ctx " + ctxPct(t.Session, inner)}
 	if t.Limits != nil {
 		for _, l := range t.Limits {
-			parts = append(parts, limitPart(l, now, inner))
+			parts = append(parts, limitPart(t, l, now, inner))
 		}
 	} else if fb := t.Fallback; fb != nil && (fb.SessionTokens != nil || fb.EstimatedCostUSD != nil) {
 		// Tokens and cost are independent: the statusline route can have a
@@ -330,19 +333,33 @@ func ctxPct(s *schema.Session, st Style) string {
 	return st.paintPct(pct, fmt.Sprintf("%.0f%%", pct))
 }
 
-func limitPart(l schema.Limit, now time.Time, st Style) string {
+// limitPart renders one of t's windows. A window whose reset time has passed
+// by now reads "--%", like one without a value: its use belongs to an ended
+// window and says nothing about the current one (#374). A window observed
+// longer ago than t's stale threshold is dimmed and marked with its age,
+// "⚠3h", as in the SwiftBar dropdown — unless t's whole line is stale, whose
+// head already carries the mark (#374).
+func limitPart(t schema.Tool, l schema.Limit, now time.Time, st Style) string {
 	label := l.Window
 	if label == schema.WindowWeekly {
 		label = "wk"
 	}
-	if l.UsedPct == nil {
+	if l.UsedPct == nil || schema.ResetPassed(l, now) {
 		return label + " --%"
+	}
+	old := !t.Stale && schema.ObservedStale(t.Tool, l, now)
+	inner := st
+	if old {
+		inner.Color = false // dimmed as a whole, as a stale line is
 	}
 	used := *l.UsedPct
 	shown := LimitPct(used, st.Limits)
-	s := fmt.Sprintf("%s %s %s", label, st.paintPct(used, Bar(shown, 8)), st.paintPct(used, fmt.Sprintf("%2.0f%%", shown)))
+	s := fmt.Sprintf("%s %s %s", label, inner.paintPct(used, Bar(shown, 8)), inner.paintPct(used, fmt.Sprintf("%2.0f%%", shown)))
 	if l.ResetsAt != nil {
-		s += " " + st.dim(ResetShort(*l.ResetsAt, now))
+		s += " " + inner.dim(ResetShort(*l.ResetsAt, now))
+	}
+	if old {
+		s = st.dim(s + " " + staleSymbol + Age(*l.ObservedAt, now))
 	}
 	return s
 }

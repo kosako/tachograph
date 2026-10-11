@@ -138,6 +138,11 @@ value is the headroom as last observed; it does not reflect a reset since then
 (which raises it) or consumption elsewhere (which lowers it).
 The threshold is per tool: Claude is 60 minutes (about an hour); Codex is 5
 hours, since it has no live feed and its limit windows stay valid for hours.
+On a line that isn't stale, a 5h / weekly window observed longer ago than that
+threshold is dimmed on its own and shows its age (e.g. `⚠3h`); on a stale
+line the mark at its head covers it. A window whose reset time has passed
+shows `--%`: its value belongs to a cycle that has ended, and the current
+cycle's use is unknown until the next observation.
 When no rate-limit windows are known, the line falls back to session tokens
 and, when known, estimated cost — on a backend without them (e.g. Claude Code
 on Bedrock), and also for Claude on a subscription until its limits arrive.
@@ -266,7 +271,15 @@ reads + output), the same denominator as `cost` (since v0.5.0; before that,
 `*.session.today` is Claude only — tacho doesn't compute the current
 session's today-only share for Codex, so it renders `--`.
 
-Missing values render as `--`. The 5h / weekly percentages and bars show
+Missing values render as `--`. So does a 5h / weekly window whose reset time
+has passed (its value belongs to a cycle that has ended): its percentage and
+reset time read `--`, its gauges and dials show no data. An old reading — the
+window was observed longer ago than the tool's stale threshold, or the tool's
+row is stale — is dimmed and carries one `⚠` per window (e.g. `41%⚠`): after
+the window's percentage, or after its gauges and dials when the template
+shows no percentage for it. On a stale row whose template shows the tool's
+`stale` (`{claude.stale}` / `{codex.stale}`), that mark covers the values and
+they get none. The 5h / weekly percentages and bars show
 **headroom** (percent left) by default while their color still follows usage
 (<50% used green, ≥50% yellow, ≥80% red); `tacho config set limits.display used`
 switches them to **usage** (the gauges then fill as you use them; colors are
@@ -285,7 +298,10 @@ display); clicking reveals per-tool details. The ring is colored by usage
 is an old reading — the window was observed longer ago than the tool's stale
 threshold (Claude 60 minutes / Codex 5 hours), or the tool's row is stale —
 the ring turns gray and the number and moon-text displays get a `⚠` (e.g.
-`C 8%⚠`). In the dropdown, besides each tool's header (`⚠` + age when the row
+`C 8%⚠`). Once the shown window's reset time has passed, its value belongs to
+a cycle that has ended: the ring shows no value, the number reads `--`, and
+the moon text `◌` (without switching to another window); the window's
+dropdown row reads `--` too. In the dropdown, besides each tool's header (`⚠` + age when the row
 is stale), a 5h / weekly row whose observation is old is dimmed and shows its
 age (e.g. `⚠3h`). The logo and track are
 white by default (for Dark mode or a wallpaper-darkened menu bar); set

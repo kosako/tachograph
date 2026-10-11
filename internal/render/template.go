@@ -60,6 +60,7 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 			tools["codex"] = &s.Tools[i]
 		}
 	}
+	marks := shownMarksOf(tmpl)
 	return placeholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
 		sub := placeholderRe.FindStringSubmatch(m)
 		key, widthStr := sub[1], sub[2]
@@ -75,11 +76,45 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 		if !ok || len(parts) < 2 {
 			return Missing
 		}
-		return resolve(tool, parts[1:], width, now, st)
+		return resolve(tool, parts[1:], width, now, st, marks[parts[0]])
 	})
 }
 
-func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) string {
+// shownMarks is what a template shows for one tool that decides where an old
+// window's ⚠ goes (see resolveLimit): the row's own stale mark
+// ({tool.stale}), and the windows ("5h", "wk") whose percentage it shows.
+type shownMarks struct {
+	row bool
+	pct map[string]bool
+}
+
+// shownMarksOf reads tmpl's placeholders into shownMarks per tool name,
+// resolving each path as resolve does.
+func shownMarksOf(tmpl string) map[string]shownMarks {
+	marks := map[string]shownMarks{}
+	for _, sub := range placeholderRe.FindAllStringSubmatch(tmpl, -1) {
+		parts := strings.Split(sub[1], ".")
+		if len(parts) < 2 {
+			continue
+		}
+		m := marks[parts[0]]
+		switch parts[1] {
+		case "stale":
+			m.row = true
+		case "5h", "wk":
+			if len(parts) == 2 || parts[2] == "pct" {
+				if m.pct == nil {
+					m.pct = map[string]bool{}
+				}
+				m.pct[parts[1]] = true
+			}
+		}
+		marks[parts[0]] = m
+	}
+	return marks
+}
+
+func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks) string {
 	switch path[0] {
 	case "stale":
 		if m := staleMark(*t, now); m != "" {
@@ -131,7 +166,7 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style) 
 		// characters from log-sourced text (#194 L-05).
 		return DisplayText(filepath.Base(*t.Session.CWD))
 	case "5h", "wk":
-		return resolveLimit(t, path, width, now, st)
+		return resolveLimit(t, path, width, now, st, marks)
 	}
 	return Missing
 }
@@ -219,7 +254,15 @@ func effortShort(level string) string {
 	}
 }
 
-func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st Style) string {
+// resolveLimit renders a field of one of t's windows. A window whose reset
+// time has passed by now renders as absent: its use belongs to an ended
+// window and says nothing about the current one (#374). An old reading — the
+// window was observed longer ago than t's stale threshold, or t's row is
+// stale — is dimmed instead of colored by pressure and carries one ⚠: after
+// its percentage, or after each gauge when the template shows no percentage
+// for the window. A stale row whose template shows {tool.stale} is left to
+// that mark, so the two don't repeat each other (#374).
+func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks) string {
 	window := schema.WindowFiveHour
 	if path[0] == "wk" {
 		window = schema.WindowWeekly
@@ -235,7 +278,7 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 	if len(path) > 1 {
 		field = path[1]
 	}
-	if limit == nil || limit.UsedPct == nil {
+	if limit == nil || limit.UsedPct == nil || schema.ResetPassed(*limit, now) {
 		switch field {
 		case "bar":
 			return BarMissing(width) // keep alignment even when absent
@@ -248,15 +291,29 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 	// used pressure.
 	used := *limit.UsedPct
 	shown := LimitPct(used, st.Limits)
+	paint := func(s string) string { return st.paintPct(used, s) }
+	old := schema.ObservedStale(t.Tool, *limit, now)
+	if t.Stale {
+		old = !marks.row
+	}
+	if old {
+		paint = st.dim
+	}
+	mark := func(gauge bool) string {
+		if !old || (gauge && marks.pct[path[0]]) {
+			return ""
+		}
+		return staleSymbol
+	}
 	switch field {
 	case "pct":
-		return st.paintPct(used, fmt.Sprintf("%.0f%%", shown))
+		return paint(fmt.Sprintf("%.0f%%", shown) + mark(false))
 	case "bar":
-		return st.paintPct(used, Bar(shown, width))
+		return paint(Bar(shown, width) + mark(true))
 	case "dial":
-		return st.paintPct(used, Dial(shown))
+		return paint(Dial(shown) + mark(true))
 	case "moon":
-		return Moon(shown) // emoji ignore ANSI colors; no paint
+		return Moon(shown) + mark(true) // emoji ignore ANSI colors; no paint
 	case "resets":
 		if limit.ResetsAt == nil {
 			return Missing

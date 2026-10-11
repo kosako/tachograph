@@ -17,6 +17,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"time"
 
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
@@ -87,9 +88,10 @@ const (
 // PNGBase64 renders the gauges and returns a base64 PNG plus ok=false when
 // there is nothing to draw. dark picks the logo/track ink: white when true,
 // near-black when false (the caller passes false for TACHO_APPEARANCE=light);
-// metric selects which value drives the ring and d whether a limit ring fills
-// with headroom or use.
-func PNGBase64(s schema.Status, dark bool, metric string, d render.LimitDisplay) (string, bool) {
+// metric selects which value drives the ring as of now (see
+// render.MenubarMetric) and d whether a limit ring fills with headroom or
+// use.
+func PNGBase64(s schema.Status, now time.Time, dark bool, metric string, d render.LimitDisplay) (string, bool) {
 	if len(s.Tools) == 0 {
 		return "", false
 	}
@@ -98,7 +100,7 @@ func PNGBase64(s schema.Status, dark bool, metric string, d render.LimitDisplay)
 	w := canvas*n + gap*(n-1)
 	big := image.NewNRGBA(image.Rect(0, 0, w*ss, canvas*ss))
 	for i, t := range s.Tools {
-		drawGauge(big, (canvas+gap)*i*ss, t, pal, metric, d)
+		drawGauge(big, (canvas+gap)*i*ss, t, now, pal, metric, d)
 	}
 	img := downsample(big, w, canvas)
 
@@ -126,9 +128,9 @@ func ringColor(t schema.Tool, pressure render.PressureLevel) color.NRGBA {
 }
 
 // drawGauge renders one tool into a canvas*ss square at horizontal offset ox
-// (supersampled coordinates). metric selects which value fills the ring and
-// d whether a limit fills it with headroom or use.
-func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric string, d render.LimitDisplay) {
+// (supersampled coordinates). metric selects which value fills the ring as
+// of now and d whether a limit fills it with headroom or use.
+func drawGauge(img *image.NRGBA, ox int, t schema.Tool, now time.Time, pal palette, metric string, d render.LimitDisplay) {
 	c := float64(canvas * ss)
 	cx := float64(ox) + c/2
 	cy := c / 2
@@ -140,7 +142,7 @@ func drawGauge(img *image.NRGBA, ox int, t schema.Tool, pal palette, metric stri
 	rIn := rOut - thick
 	rLogo := rIn - c*0.03
 
-	frac, _, pressure := render.MenubarMetric(t, metric, d)
+	frac, _, pressure := render.MenubarMetric(t, metric, d, now)
 	var pct float64
 	hasPct := frac != nil
 	if hasPct {

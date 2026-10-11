@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -113,11 +114,17 @@ func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text s
 // Rationale: providers add and drop windows server-side — OpenAI temporarily
 // removed Codex's 5h window in 2026-07 — and the menu bar should keep showing
 // the limit pressure that does exist instead of "--". The fallback self-
-// reverts once the configured window reappears in the payload.
-func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text string, pressure PressureLevel) {
-	l, ok := MenubarLimit(t, metric)
+// reverts once the configured window reappears in the payload. A shown
+// window whose reset time has passed by now reads "--" with no gauge rather
+// than falling back to another window: its use belongs to an ended window
+// and says nothing about the current one (#374).
+func MenubarMetric(t schema.Tool, metric string, d LimitDisplay, now time.Time) (frac *float64, text string, pressure PressureLevel) {
+	l, ok := menubarWindow(t, metric)
 	if !ok {
 		return Metric(t, metric, d)
+	}
+	if schema.ResetPassed(l, now) {
+		return nil, Missing, PressureOK
 	}
 	frac, text, pressure = limitGauge(*l.UsedPct, d)
 	if l.Window != limitWindow(metric) {
@@ -126,11 +133,23 @@ func MenubarMetric(t schema.Tool, metric string, d LimitDisplay) (frac *float64,
 	return frac, text, pressure
 }
 
-// MenubarLimit is the window the menu bar shows for a limit metric: the
+// MenubarLimit is the window whose value the menu bar shows for a limit
+// metric (see MenubarMetric). ok is false for the other metrics, when the
+// tool reports no window, and when the shown window's reset time has passed
+// by now — the menu bar then shows no value.
+func MenubarLimit(t schema.Tool, metric string, now time.Time) (schema.Limit, bool) {
+	l, ok := menubarWindow(t, metric)
+	if !ok || schema.ResetPassed(l, now) {
+		return schema.Limit{}, false
+	}
+	return l, true
+}
+
+// menubarWindow is the window the menu bar shows for a limit metric: the
 // configured one when the tool reports it, else the tool's first reported
-// window (see MenubarMetric). ok is false for the other metrics and when the
-// tool reports no window.
-func MenubarLimit(t schema.Tool, metric string) (schema.Limit, bool) {
+// window. ok is false for the other metrics and when the tool reports no
+// window.
+func menubarWindow(t schema.Tool, metric string) (schema.Limit, bool) {
 	if !IsLimitMetric(metric) || !t.Available || t.Error != nil {
 		return schema.Limit{}, false
 	}

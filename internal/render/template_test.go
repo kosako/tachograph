@@ -32,7 +32,7 @@ func testStatus() schema.Status {
 // Limits render their headroom but are colored by their use (#223): 59%
 // used shows "41%" in the warning color, not the green a 41% usage would get.
 func TestTemplateLimitHeadroomColoredByUse(t *testing.T) {
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00") // before limitsTool()'s 5h reset
 	used := 59.0
 	tool := limitsTool()
 	tool.Limits[0].UsedPct = &used // 5h window
@@ -56,7 +56,7 @@ func TestTemplateLimitHeadroomColoredByUse(t *testing.T) {
 // use (#228): 59% used shows "59%" in the warning color, and the gauges fill
 // with use instead of draining.
 func TestTemplateLimitUsedDisplayColoredByUse(t *testing.T) {
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00") // before limitsTool()'s 5h reset
 	used := 59.0
 	tool := limitsTool()
 	tool.Limits[0].UsedPct = &used // 5h window
@@ -203,5 +203,113 @@ func TestTemplateEffort(t *testing.T) {
 	s.Tools[0].Model.Effort = nil
 	if got, want := Template(tmpl, s, now, plain), "Fable 5 ctx 8%"; got != want {
 		t.Errorf("effort absent: Template = %q, want %q", got, want)
+	}
+}
+
+// A window whose reset time has passed renders as absent in every field: its
+// use belongs to an ended window (#374). The running weekly window is kept.
+func TestTemplateResetPassedWindowAbsent(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T02:00:00+09:00") // limitsTool()'s 5h reset
+	s := testStatus()
+	for tmpl, want := range map[string]string{
+		"{claude.5h.pct}":    Missing,
+		"{claude.5h}":        Missing,
+		"{claude.5h.bar:4}":  BarMissing(4),
+		"{claude.5h.dial}":   DialMissing,
+		"{claude.5h.moon}":   DialMissing,
+		"{claude.5h.resets}": Missing,
+		"{claude.wk.pct}":    "59%",
+	} {
+		if got := Template(tmpl, s, now, plain); got != want {
+			t.Errorf("%s = %q, want %q", tmpl, got, want)
+		}
+	}
+}
+
+// An old reading is dimmed and carries one ⚠ per window: after its
+// percentage, or after each gauge when the template shows no percentage for
+// the window (#374).
+func TestTemplateMarksOldWindow(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	fresh := now.Add(-time.Minute).Format(time.RFC3339)
+	old := now.Add(-3 * time.Hour).Format(time.RFC3339)
+	used := 59.0
+	s := testStatus()
+	s.Tools[0].Limits[0].ObservedAt = &fresh
+	s.Tools[0].Limits[1].ObservedAt = &old // weekly, on a fresh row
+	s.Tools[0].Limits[1].UsedPct = &used   // 41% left
+	for tmpl, want := range map[string]string{
+		"{claude.wk.pct}":                   "41%⚠",
+		"{claude.wk}":                       "41%⚠",
+		"{claude.wk.bar:4} {claude.wk.pct}": "██░░ 41%⚠",
+		"{claude.wk.bar:4} {claude.wk}":     "██░░ 41%⚠",
+		"{claude.wk.dial}{claude.wk.moon}":  "◑⚠🌓⚠",
+		"{claude.wk.bar:4}":                 "██░░⚠",
+		"{claude.5h.pct} {claude.5h.dial}":  "76% ◕",
+	} {
+		if got := Template(tmpl, s, now, plain); got != want {
+			t.Errorf("%s = %q, want %q", tmpl, got, want)
+		}
+	}
+	color := Style{Color: true}
+	if got, want := Template("{claude.wk.bar:4} {claude.wk.pct} {claude.5h.pct}", s, now, color),
+		cDim+"██░░"+cReset+" "+cDim+"41%⚠"+cReset+" "+cGreen+"76%"+cReset; got != want {
+		t.Errorf("color = %q, want %q (old window dimmed, fresh one colored)", got, want)
+	}
+}
+
+// On a stale row every window is an old reading. A template that shows the
+// row's {tool.stale} leaves its values as they were, so the marks don't
+// repeat; one that doesn't marks the values itself. Another tool's
+// {tool.stale} doesn't count (#374).
+func TestTemplateStaleRowMarkedOnce(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	collected := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	s := testStatus()
+	s.Tools[0].Stale = true
+	s.Tools[0].CollectedAt = &collected
+	for tmpl, want := range map[string]string{
+		"{claude.stale}5h {claude.5h.pct}":                "⚠2h 5h 76%",
+		"5h {claude.5h.pct} {claude.5h.dial}":             "5h 76%⚠ ◕",
+		"{codex.stale}5h {claude.5h.pct}":                 "5h 76%⚠",
+		"{claude.stale}{claude.5h.dial} {claude.wk.dial}": "⚠2h ◕ ◑",
+	} {
+		if got := Template(tmpl, s, now, plain); got != want {
+			t.Errorf("%s = %q, want %q", tmpl, got, want)
+		}
+	}
+	if got, want := Template("{claude.stale}{claude.5h.pct}", s, now, Style{Color: true}), "⚠2h "+cGreen+"76%"+cReset; got != want {
+		t.Errorf("color = %q, want %q (values beside {claude.stale} unchanged)", got, want)
+	}
+}
+
+// Every preset that shows Codex marks an old Codex reading — through
+// {codex.stale} or on the values — and the default bar marks it once (#374).
+func TestPresetsMarkOldCodex(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	collected := now.Add(-6 * time.Hour).Format(time.RFC3339)
+	codex := limitsTool()
+	codex.Tool = schema.ToolCodex
+	codex.Stale = true
+	codex.CollectedAt = &collected
+	for i := range codex.Limits {
+		codex.Limits[i].ObservedAt = &collected
+	}
+	s := schema.Status{Tools: []schema.Tool{limitsTool(), codex}}
+	for _, p := range Presets {
+		if !strings.Contains(p.Template, "{codex.") {
+			continue
+		}
+		got := Template(p.Template, s, now, plain)
+		part := got[strings.LastIndex(got, "codex"):]
+		if !strings.Contains(part, "⚠") {
+			t.Errorf("preset %s: codex part %q has no old-reading mark", p.Name, part)
+		}
+		if p.Name == "bar" && strings.Count(part, "⚠") != 1 {
+			t.Errorf("preset bar: codex part %q marks the old reading more than once", part)
+		}
+		if strings.Contains(got[:strings.LastIndex(got, "codex")], "⚠") {
+			t.Errorf("preset %s: fresh claude part of %q is marked", p.Name, got)
+		}
 	}
 }

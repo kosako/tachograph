@@ -25,10 +25,19 @@ const (
 	WindowWeekly   = "weekly"
 )
 
-// StaleAfterMinutes is the age of collected_at beyond which stale is set.
-// Rate-limit windows span hours, so a reading stays trustworthy for a while;
-// this is deliberately generous so brief idle gaps don't gray everything out.
+// StaleAfterMinutes is the age of collected_at beyond which stale is set for
+// Claude Code (StaleAfter picks a tool's threshold). Rate-limit windows span
+// hours, so a reading stays trustworthy for a while; this is deliberately
+// generous so brief idle gaps don't gray everything out.
 const StaleAfterMinutes = 60
+
+// CodexStaleAfterMinutes is Codex's stale threshold, longer than
+// StaleAfterMinutes. Codex has no live feed: freshness comes only from the
+// last token_count in the log, which advances only when a turn completes. Its
+// rate-limit windows (5h / weekly) stay valid for hours afterward, so greying
+// the whole tool 60 min after the last turn would hide still-accurate limits.
+// 5h matches the primary rate-limit window.
+const CodexStaleAfterMinutes = 300
 
 // Status is the top-level document.
 type Status struct {

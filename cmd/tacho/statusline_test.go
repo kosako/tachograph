@@ -21,7 +21,7 @@ import (
 func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	root := subscriptionStatuslineEnv(t)
 
-	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T18:00:00+09:00") // before the fixture's 5h reset (19:00)
 	dailyCost := 1.2
 	cached := &schema.Status{
 		SchemaVersion: schema.Version,
@@ -824,7 +824,7 @@ func TestRunStatuslineDefaultsWithoutTemplateFile(t *testing.T) {
 // line that is neither blank nor a # comment, and nothing after it.
 func TestRunStatuslineUsesTemplateFile(t *testing.T) {
 	dir := templateStatuslineEnv(t)
-	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T18:00:00+09:00") // before the fixture's 5h reset (19:00)
 	tmpl := "# my statusline\n\n  # {claude.wk.pct} commented out\n{claude.model} 5h {claude.5h.pct}\n{claude.wk.pct} never reached\n"
 	if err := os.WriteFile(filepath.Join(dir, "statusline.tmpl"), []byte(tmpl), 0o644); err != nil {
 		t.Fatal(err)

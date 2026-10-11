@@ -143,7 +143,7 @@ func TestRenderCostZeroDayShowsTodaysZero(t *testing.T) {
 }
 
 func TestRenderNumberStyle(t *testing.T) {
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		tool(schema.ToolCodex, false, 7, 2),
@@ -160,7 +160,7 @@ func TestRenderNumberStyle(t *testing.T) {
 // limits.display=used flips the number title, the dropdown limit rows, and
 // the ring to use; the settings menu offers both displays (#228).
 func TestRenderUsedDisplay(t *testing.T) {
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		tool(schema.ToolCodex, false, 7, 2),
@@ -208,7 +208,7 @@ func weeklyOnlyTool(pctW float64) schema.Tool {
 // A tool without the configured limit window must fall back to its available
 // window with a tag, not show "--" (issue #210).
 func TestRenderNumberStyleLimitFallback(t *testing.T) {
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		weeklyOnlyTool(15),
@@ -448,7 +448,7 @@ func TestRenderToolFilter(t *testing.T) {
 
 func TestRenderTitleBothTools(t *testing.T) {
 	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
-	now := time.Now()
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
 	s := schema.Status{Tools: []schema.Tool{
 		tool(schema.ToolClaudeCode, false, 24, 41),
 		tool(schema.ToolCodex, false, 90, 10),
@@ -742,7 +742,34 @@ func TestGaugePNGMatchesTitleImage(t *testing.T) {
 	if title != "| image="+b64 {
 		t.Error("the menu bar ring and GaugePNG differ for the same input")
 	}
-	if raw, _ := menubar.PNGBase64(s, true, cfg.Menubar.Metric, limits); raw == b64 {
+	if raw, _ := menubar.PNGBase64(s, now, true, cfg.Menubar.Metric, limits); raw == b64 {
 		t.Error("GaugePNG drew the old reading like a fresh one (ring not grayed)")
+	}
+}
+
+// A window whose reset time has passed shows "--" in the menu bar and the
+// dropdown instead of its ended cycle's value, unmarked and without falling
+// back to the weekly window; the weekly row is unaffected (#374).
+func TestRenderResetPassedWindowUnknown(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T14:00:00+09:00") // tool()'s 5h reset
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 95, 41)}}
+	cfg := config.Default()
+	cfg.Menubar.Style = config.StyleNumber
+	cfg.Menubar.Metric = render.MetricLimit5h
+	out := (Renderer{}).Render(s, now, true, cfg, core.DailyHistory{})
+	if title := strings.SplitN(out, "\n", 2)[0]; title != "C --" {
+		t.Errorf("number title = %q, want \"C --\"", title)
+	}
+	if !strings.Contains(out, "\n5h      -- | font=") || strings.Contains(out, " 5%") {
+		t.Errorf("dropdown should show the 5h window as \"--\":\n%s", out)
+	}
+	if !strings.Contains(out, barRow("weekly", 59, "")) {
+		t.Errorf("dropdown should keep the running weekly row:\n%s", out)
+	}
+
+	cfg.Menubar.Style = config.StyleMeter
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	if title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]; title != "C"+render.DialMissing {
+		t.Errorf("moon title = %q, want %q", title, "C"+render.DialMissing)
 	}
 }
