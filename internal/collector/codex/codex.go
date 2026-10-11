@@ -19,16 +19,6 @@ import (
 // turn, so the tail almost always contains both.
 const tailBytes = 512 * 1024
 
-// StaleAfterMinutes is longer than the shared schema.StaleAfterMinutes (60).
-// Exported for core, which withholds a limit's projection once its
-// observation is older than this (#295).
-// Codex has no live feed: freshness comes only from the last token_count in the
-// log, which advances only when a turn completes. Its rate-limit windows (5h /
-// weekly) stay valid for hours afterward, so greying the whole tool 60 min
-// after the last turn would hide still-accurate limits. 5h matches the primary
-// rate-limit window.
-const StaleAfterMinutes = 300
-
 type Options struct {
 	Root string    // Codex home, defaults to CODEX_HOME or ~/.codex
 	Now  time.Time // defaults to time.Now()
@@ -89,10 +79,10 @@ type pick struct {
 // limits are tracked the same way but separately: the freshest session may
 // hold only non-account buckets (#258), so the walk continues until a file
 // can improve neither the session nor the limits. Limits are only taken
-// from within StaleAfterMinutes before the session's token_count — older
-// ones would make a fresh session render stale — so the walk never looks
-// back past that window, and sessions that never carry limits (API-key use)
-// don't make every rollout get read.
+// from within schema.CodexStaleAfterMinutes before the session's
+// token_count — older ones would make a fresh session render stale — so the
+// walk never looks back past that window, and sessions that never carry
+// limits (API-key use) don't make every rollout get read.
 func pickSession(dir string) pick {
 	files := rolloutsByMtime(dir)
 	acc := pick{sawFile: len(files) > 0}
@@ -140,7 +130,7 @@ func pickSession(dir string) pick {
 // limitsFloor is the oldest account-limits timestamp still used alongside a
 // session whose token_count is at sessionTS.
 func limitsFloor(sessionTS time.Time) time.Time {
-	return sessionTS.Add(-StaleAfterMinutes * time.Minute)
+	return sessionTS.Add(-schema.CodexStaleAfterMinutes * time.Minute)
 }
 
 // rolloutFile is one .jsonl candidate with its modification time.
@@ -336,7 +326,7 @@ func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) s
 		}
 		s := ts.Local().Format(time.RFC3339)
 		t.CollectedAt = &s
-		t.Stale = now.Sub(ts) > StaleAfterMinutes*time.Minute
+		t.Stale = now.Sub(ts) > schema.CodexStaleAfterMinutes*time.Minute
 	}
 
 	sess := &schema.Session{}

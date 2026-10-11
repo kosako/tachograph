@@ -299,3 +299,51 @@ func TestStatusLines(t *testing.T) {
 		t.Errorf("StatusLines = %q, want 2 lines", got)
 	}
 }
+
+// A window whose reset time has passed reads "--%": its use belongs to an
+// ended window (#374). The running weekly window is unaffected.
+func TestToolLineResetPassedWindowUnknown(t *testing.T) {
+	setLocal(t, resetZone)
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T02:00:00+09:00") // limitsTool()'s 5h reset
+	got := ToolLine(limitsTool(), now, plain)
+	if !strings.Contains(got, "5h --%") || strings.Contains(got, "76%") || strings.Contains(got, "↻10:00") {
+		t.Errorf("ToolLine = %q, want the 5h window as \"5h --%%\"", got)
+	}
+	if !strings.Contains(got, "wk █████░░░ 59% ↻06/14") {
+		t.Errorf("ToolLine = %q, want the running weekly window kept", got)
+	}
+	if got := ToolLine(limitsTool(), now.Add(-time.Second), plain); !strings.Contains(got, "5h ██████░░ 76% ↻10:00") {
+		t.Errorf("ToolLine a second before the reset = %q, want the 5h window shown", got)
+	}
+}
+
+// A window observed longer ago than the tool's stale threshold is dimmed and
+// marked with its age, as in the SwiftBar dropdown, while the line's other
+// parts keep their colors; on a stale line the head's mark covers it (#374).
+func TestToolLineMarksOldWindow(t *testing.T) {
+	setLocal(t, resetZone)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	fresh := now.Add(-time.Minute).Format(time.RFC3339)
+	old := now.Add(-3 * time.Hour).Format(time.RFC3339)
+	tool := limitsTool()
+	tool.Limits[0].ObservedAt = &fresh
+	tool.Limits[1].ObservedAt = &old
+
+	got := ToolLine(tool, now, plain)
+	if !strings.Contains(got, "wk █████░░░ 59% ↻06/14 ⚠3h") || strings.Count(got, "⚠") != 1 {
+		t.Errorf("ToolLine = %q, want only the weekly window marked \"⚠3h\"", got)
+	}
+	colored := ToolLine(tool, now, Style{Color: true})
+	if want := cDim + "wk █████░░░ 59% ↻06/14 ⚠3h" + cReset; !strings.Contains(colored, want) {
+		t.Errorf("ToolLine (color) = %q, want the old window dimmed as a whole: %q", colored, want)
+	}
+	if !strings.Contains(colored, cGreen+"76%"+cReset) {
+		t.Errorf("ToolLine (color) = %q, want the fresh 5h window still colored", colored)
+	}
+
+	tool.Stale = true
+	tool.CollectedAt = &old
+	if got := ToolLine(tool, now, plain); strings.Count(got, "⚠") != 1 || !strings.Contains(got, "⚠3h") || strings.Contains(got, "↻06/14 ⚠") {
+		t.Errorf("ToolLine (stale) = %q, want the head's mark only", got)
+	}
+}

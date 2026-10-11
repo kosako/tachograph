@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
-	"github.com/kosako/tachograph/internal/collector/codex"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -142,14 +141,27 @@ func TestProjectUnavailableReasons(t *testing.T) {
 	}
 }
 
-// The stale threshold follows the tool: Codex's observations stay usable for
-// five hours (its windows outlive its last turn), Claude's for one.
-func TestStaleAfterFollowsTool(t *testing.T) {
-	if staleAfter(schema.ToolCodex) != codex.StaleAfterMinutes*time.Minute {
-		t.Errorf("codex staleAfter = %v", staleAfter(schema.ToolCodex))
+// The stale threshold follows the tool: an observation two hours old still
+// projects for Codex (its windows outlive its last turn) but not for Claude.
+func TestAddProjectionsStaleFollowsTool(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:00:00Z")
+	observed := now.Add(-2 * time.Hour)
+	mins := 300
+	limit := schema.Limit{
+		Window: schema.WindowFiveHour, WindowMinutes: &mins, UsedPct: fptr(20),
+		ResetsAt: rfc(observed.Add(150 * time.Minute)), ObservedAt: rfc(observed),
 	}
-	if staleAfter(schema.ToolClaudeCode) != schema.StaleAfterMinutes*time.Minute {
-		t.Errorf("claude staleAfter = %v", staleAfter(schema.ToolClaudeCode))
+	for _, c := range []struct {
+		tool  string
+		stale bool
+	}{{schema.ToolCodex, false}, {schema.ToolClaudeCode, true}} {
+		tool := schema.Tool{Tool: c.tool, Limits: []schema.Limit{limit}}
+		AddProjections(&tool, now)
+		p := tool.Limits[0].Projection
+		stale := p.UnavailableReason != nil && *p.UnavailableReason == schema.ProjectionStale
+		if stale != c.stale || (!stale && p.UnavailableReason != nil) {
+			t.Errorf("%s: projection = %+v, want stale %v", c.tool, p, c.stale)
+		}
 	}
 }
 
@@ -187,31 +199,6 @@ func TestStatusProjectsSnapshotLimits(t *testing.T) {
 	for _, l := range s.Tools[1].Limits { // the codex fixture's windows reset in 2026-05, long before now
 		if l.Projection.Method != schema.ProjectionWindowAverage || l.Projection.UnavailableReason == nil {
 			t.Errorf("codex %s projection = %+v, want window_average with a reason", l.Window, l.Projection)
-		}
-	}
-}
-
-// A limit observed longer ago than its tool's stale threshold is an old
-// reading; one without a readable observation time has no known age (#331).
-func TestObservedStale(t *testing.T) {
-	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	bad := "not-a-time"
-	cases := []struct {
-		name     string
-		tool     string
-		observed *string
-		want     bool
-	}{
-		{name: "claude within the hour", tool: schema.ToolClaudeCode, observed: rfc(now.Add(-60 * time.Minute)), want: false},
-		{name: "claude past the hour", tool: schema.ToolClaudeCode, observed: rfc(now.Add(-61 * time.Minute)), want: true},
-		{name: "codex within 5 hours", tool: schema.ToolCodex, observed: rfc(now.Add(-4 * time.Hour)), want: false},
-		{name: "codex past 5 hours", tool: schema.ToolCodex, observed: rfc(now.Add(-301 * time.Minute)), want: true},
-		{name: "no observation time", tool: schema.ToolClaudeCode, observed: nil, want: false},
-		{name: "unreadable observation time", tool: schema.ToolClaudeCode, observed: &bad, want: false},
-	}
-	for _, c := range cases {
-		if got := ObservedStale(c.tool, schema.Limit{Window: schema.WindowWeekly, ObservedAt: c.observed}, now); got != c.want {
-			t.Errorf("%s: ObservedStale = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

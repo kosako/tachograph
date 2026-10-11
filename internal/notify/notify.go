@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/kosako/tachograph/internal/cache"
-	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -58,10 +57,10 @@ type Event struct {
 // weekly windows are watched (a collector can report other window sizes).
 // Tools that are absent, errored, or stale are skipped and keep their
 // record, and so is a window observed longer ago than its tool's stale
-// threshold at now — the reading SwiftBar marks ⚠ (core.ObservedStale) — so
-// an old reading neither fires nor re-arms a threshold (#338). So is a window
-// whose reset time has passed by now (resetPassed), however fresh the
-// reading: its cycle is over (#363). Records are kept per config root (Key),
+// threshold at now — the reading SwiftBar marks ⚠ (schema.ObservedStale) —
+// so an old reading neither fires nor re-arms a threshold (#338). So is a
+// window whose reset time has passed by now (schema.ResetPassed), however
+// fresh the reading: its cycle is over (#363). Records are kept per config root (Key),
 // roots giving each tool's; a tool whose root doesn't normalize is skipped,
 // since its record couldn't be told from another profile's — as the caches
 // neither store nor match such a root (#321). thresholds must already be
@@ -87,7 +86,7 @@ func Evaluate(s schema.Status, thresholds []int, st State, roots map[string]stri
 			if l.UsedPct == nil || (l.Window != schema.WindowFiveHour && l.Window != schema.WindowWeekly) {
 				continue
 			}
-			if core.ObservedStale(t.Tool, l, now) || resetPassed(l, now) {
+			if schema.ObservedStale(t.Tool, l, now) || schema.ResetPassed(l, now) {
 				continue
 			}
 			key := Key(t.Tool, l.Window, root)
@@ -128,19 +127,6 @@ func Evaluate(s schema.Status, thresholds []int, st State, roots map[string]stri
 		}
 	}
 	return events, next
-}
-
-// resetPassed reports whether l's reset time, when readable, is not after
-// now: the window it describes has ended, and its use says nothing about the
-// current one. The snapshot still serves such a window while its observation
-// is fresh (#363). A limit without a readable reset time isn't reported
-// passed — when it ends is unknown.
-func resetPassed(l schema.Limit, now time.Time) bool {
-	if l.ResetsAt == nil {
-		return false
-	}
-	resets, err := time.Parse(time.RFC3339, *l.ResetsAt)
-	return err == nil && !resets.After(now)
 }
 
 // Body is the notification text for an event, e.g.

@@ -240,8 +240,8 @@ func titleLine(s schema.Status, now time.Time, dark bool, cfg config.Config, lim
 // (#331). cost / tokens are recomputed from the logs on every run and are
 // never shown as old.
 func shownStale(t schema.Tool, now time.Time, metric string) bool {
-	l, ok := render.MenubarLimit(t, metric)
-	return ok && (t.Stale || core.ObservedStale(t.Tool, l, now))
+	l, ok := render.MenubarLimit(t, metric, now)
+	return ok && (t.Stale || schema.ObservedStale(t.Tool, l, now))
 }
 
 // staleMark is appended to a menu bar value that is an old reading.
@@ -251,7 +251,7 @@ const staleMark = "⚠"
 // ring of each tool whose shown limit is an old reading grayed: the image the
 // menu bar shows and `tacho swiftbar --png` previews (#331).
 func GaugePNG(s schema.Status, now time.Time, dark bool, metric string, limits render.LimitDisplay) (string, bool) {
-	return menubar.PNGBase64(gaugeStatus(s, now, metric), dark, metric, limits)
+	return menubar.PNGBase64(gaugeStatus(s, now, metric), now, dark, metric, limits)
 }
 
 // gaugeStatus is s with each tool whose shown limit is an old reading marked
@@ -278,7 +278,7 @@ func numberTitle(s schema.Status, now time.Time, metric string, limits render.Li
 		if t.Tool == schema.ToolClaudeCode {
 			initial = "C"
 		}
-		_, text, _ := render.MenubarMetric(t, metric, limits)
+		_, text, _ := render.MenubarMetric(t, metric, limits, now)
 		if shownStale(t, now, metric) {
 			text += staleMark
 		}
@@ -305,7 +305,7 @@ func title(s schema.Status, now time.Time, metric string, limits render.LimitDis
 		if !t.Available || t.Error != nil {
 			continue
 		}
-		if frac, _, _ := render.MenubarMetric(t, metric, limits); frac != nil {
+		if frac, _, _ := render.MenubarMetric(t, metric, limits, now); frac != nil {
 			dial := initial + render.Moon(*frac*100)
 			if shownStale(t, now, metric) {
 				dial += staleMark
@@ -512,11 +512,13 @@ const labelW = 7
 
 // limitRow renders a rate-limit window with a bar and figure showing what
 // is left or what is used per limits, reset time, and pressure color by use
-// (or "--" when the window is absent). A window observed longer ago than the
-// tool's stale threshold is grayed and marked with its age, "⚠3h" (#331).
+// (or "--" when the window is absent, or its reset time has passed by now:
+// its use belongs to an ended window, #374). A window observed longer ago
+// than the tool's stale threshold is grayed and marked with its age, "⚠3h"
+// (#331).
 func (r Renderer) limitRow(b *strings.Builder, t schema.Tool, window, label string, now time.Time, limits render.LimitDisplay) {
 	for _, l := range t.Limits {
-		if l.Window == window && l.UsedPct != nil {
+		if l.Window == window && l.UsedPct != nil && !schema.ResetPassed(l, now) {
 			used := *l.UsedPct
 			shown := render.LimitPct(used, limits)
 			line := fmt.Sprintf("%-*s %s %.0f%%", labelW, label, lineBar(shown, barWidth), shown)
@@ -524,7 +526,7 @@ func (r Renderer) limitRow(b *strings.Builder, t schema.Tool, window, label stri
 				line += " " + render.ResetShort(*l.ResetsAt, now)
 			}
 			color := r.lineColor(t, render.PressureFor(used))
-			if core.ObservedStale(t.Tool, l, now) {
+			if schema.ObservedStale(t.Tool, l, now) {
 				line += " " + staleMark + render.Age(*l.ObservedAt, now)
 				color = colorGray
 			}

@@ -37,7 +37,9 @@
   - `internal/daily` computes daily aggregates; `internal/pricing` holds the
     approximate price table and its `pricing.json` override.
   - `internal/core` assembles schema output; `internal/schema` defines its Go
-    types (keep `docs/schema.md`, the authoritative spec, in sync).
+    types (keep `docs/schema.md`, the authoritative spec, in sync) and the
+    per-tool stale threshold and limit-window judgements (`ObservedStale`,
+    `ResetPassed`) that every view and the notifications share.
   - `internal/config` owns `config.json`; `internal/cache` owns tacho's state
     in the cache dir: the short-lived status cache (`status.json`), the
     Claude snapshot, derived caches (daily history, session trees), the
