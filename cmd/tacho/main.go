@@ -191,7 +191,7 @@ func runSwiftbar(args []string) int {
 		hist = core.RecentHistory(core.Options{Now: now}, s, swiftbar.HistoryDays, build)
 	}
 	fmt.Print(r.Render(s, now, dark, cfg, hist))
-	notifyLimits(shown, cfg, now)
+	notifyLimits(shown, cfg, now, cache.LockNotifyState, notify.Open)
 	return 0
 }
 
@@ -207,7 +207,11 @@ func runSwiftbar(args []string) int {
 // bare file name the README suggests only matches from SwiftBar 2.1.2 on;
 // 2.1.1 drops such a notification silently (without ever asking macOS for
 // notification permission).
-func notifyLimits(shown schema.Status, cfg config.Config, now time.Time) {
+//
+// lock and send are handed to notify.Notify: cache.LockNotifyState and
+// notify.Open in the tick, stand-ins in tests, which must not send a real
+// notification.
+func notifyLimits(shown schema.Status, cfg config.Config, now time.Time, lock func() (func(), error), send func(string) error) {
 	plugin := os.Getenv("SWIFTBAR_PLUGIN_PATH")
 	if plugin == "" || len(cfg.Notify.Thresholds) == 0 {
 		return
@@ -215,7 +219,7 @@ func notifyLimits(shown schema.Status, cfg config.Config, now time.Time) {
 	if resolved, err := filepath.EvalSymlinks(plugin); err == nil {
 		plugin = resolved
 	}
-	notify.Notify(shown, cfg.Notify.Thresholds, core.Roots(core.Options{}), plugin, now, cache.LockNotifyState, notify.Open)
+	notify.Notify(shown, cfg.Notify.Thresholds, core.Roots(core.Options{}), plugin, now, lock, send)
 }
 
 const configUsage = `usage:

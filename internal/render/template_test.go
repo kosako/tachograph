@@ -86,6 +86,7 @@ func TestTemplateLimitUsedDisplayColoredByUse(t *testing.T) {
 }
 
 func TestTemplateBasics(t *testing.T) {
+	setLocal(t, resetZone)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	s := testStatus()
 
@@ -103,7 +104,7 @@ func TestTemplateBasics(t *testing.T) {
 		"{codex.5h.dial}":               DialMissing,
 		"{claude.5h.moon}":              "🌔", // 76% left
 		"{codex.5h.moon}":               DialMissing,
-		"{claude.5h.resets}":            hhmm(t, "2026-06-13T02:00:00+09:00"),
+		"{claude.5h.resets}":            "↻10:00", // 02:00+09:00 in resetZone
 		"{claude.tokens}":               "989k",
 		"{claude.tokens.session}":       "989k",
 		"{claude.tokens.session.today}": "120k",

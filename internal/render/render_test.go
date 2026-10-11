@@ -113,36 +113,34 @@ func TestFormatTokens(t *testing.T) {
 	}
 }
 
-// hhmm / mmdd render expected values in the test runner's local timezone,
-// keeping assertions valid on any CI timezone.
-func hhmm(t *testing.T, iso string) string { return expect(t, iso, "↻15:04") }
-func mmdd(t *testing.T, iso string) string { return expect(t, iso, "↻01/02") }
-
-func expect(t *testing.T, iso, layout string) string {
+// setLocal switches the local timezone for the rest of the test.
+func setLocal(t *testing.T, loc *time.Location) {
 	t.Helper()
-	ts, err := time.Parse(time.RFC3339, iso)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ts.Local().Format(layout)
+	prev := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = prev })
 }
 
+// resetZone is the local timezone the tests of rendered reset times pin. It
+// isn't the fixtures' +09:00, so a reset time rendered without converting it
+// to local time reads differently whatever the machine's TZ: 02:00+09:00 is
+// 10:00 the day before here, and 10:30+09:00 on 06/15 is 06/14.
+var resetZone = time.FixedZone("UTC-7", -7*60*60)
+
 func TestResetShort(t *testing.T) {
+	setLocal(t, resetZone)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
-	soon := "2026-06-13T02:00:58+09:00"
-	if got := ResetShort(soon, now); got != hhmm(t, soon) {
-		t.Errorf("ResetShort(soon) = %q, want %q", got, hhmm(t, soon))
+	if got, want := ResetShort("2026-06-13T02:00:58+09:00", now), "↻10:00"; got != want {
+		t.Errorf("ResetShort(soon) = %q, want %q", got, want)
 	}
-	far := "2026-06-15T10:30:00+09:00"
-	if got := ResetShort(far, now); got != mmdd(t, far) {
-		t.Errorf("ResetShort(far) = %q, want %q", got, mmdd(t, far))
+	if got, want := ResetShort("2026-06-15T10:30:00+09:00", now), "↻06/14"; got != want {
+		t.Errorf("ResetShort(far) = %q, want %q", got, want)
 	}
 	if got := ResetShort("garbage", now); got != "↻--" {
 		t.Errorf("ResetShort(garbage) = %q", got)
 	}
-	past := "2026-06-08T10:30:00+09:00"
-	if got := ResetShort(past, now); got != mmdd(t, past) {
-		t.Errorf("ResetShort(past) = %q, want date form %q for expired resets", got, mmdd(t, past))
+	if got, want := ResetShort("2026-06-08T10:30:00+09:00", now), "↻06/07"; got != want {
+		t.Errorf("ResetShort(past) = %q, want date form %q for expired resets", got, want)
 	}
 }
 
@@ -167,10 +165,12 @@ func limitsTool() schema.Tool {
 }
 
 func TestToolLineWithLimits(t *testing.T) {
+	setLocal(t, resetZone)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	got := ToolLine(limitsTool(), now, plain)
 	// Limits read as headroom: 23.5% used → 76% left, 41.2% used → 59% left.
-	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "76%", hhmm(t, "2026-06-13T02:00:00+09:00"), "wk", "59%", mmdd(t, "2026-06-15T10:30:00+09:00")} {
+	// The resets render in resetZone: 02:00+09:00 → 10:00, 06/15 → 06/14.
+	for _, want := range []string{"claude", "Fable 5", "ctx 8%", "5h", "76%", "↻10:00", "wk", "59%", "↻06/14"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ToolLine = %q, missing %q", got, want)
 		}

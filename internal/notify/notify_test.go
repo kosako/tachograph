@@ -83,6 +83,33 @@ func TestEvaluateFiresOncePerThresholdPerCycle(t *testing.T) {
 	}
 }
 
+// Headroom exactly at a threshold has dropped "to or below" it: it fires
+// once, and the same reading on the next tick stays quiet instead of
+// re-arming it (only headroom above a threshold re-arms it).
+func TestEvaluateFiresAtExactThreshold(t *testing.T) {
+	th := []int{50, 30, 10}
+	r1 := "2026-09-20T03:00:00+09:00"
+	st := State{}
+	for _, c := range []struct {
+		used float64
+		want int // the threshold the headroom lands on
+	}{
+		{50, 50},
+		{70, 30},
+		{90, 10},
+	} {
+		s := status(limitsTool(schema.ToolClaudeCode, false, c.used, 0, r1))
+		var ev []Event
+		ev, st = Evaluate(s, th, st, testRoots, testNow)
+		if len(ev) != 1 || ev[0].Threshold != c.want || ev[0].Remaining != float64(c.want) {
+			t.Fatalf("%v%% used: events = %+v, want one at %d%% left", c.used, ev, c.want)
+		}
+		if ev, st = Evaluate(s, th, st, testRoots, testNow); len(ev) != 0 {
+			t.Errorf("%v%% used again: events = %+v, want none", c.used, ev)
+		}
+	}
+}
+
 // Dropping past several thresholds at once announces the deepest one only,
 // and marks all of them so none fires later in the same cycle.
 func TestEvaluateCollapsesMultipleCrossings(t *testing.T) {
