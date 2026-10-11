@@ -305,3 +305,37 @@ func TestCodexTotalsCrossMidnightResumeCountsOnce(t *testing.T) {
 		t.Errorf("CodexTotals.Tokens = %d, want 50000 (150000 latest - 100000 pre-midnight, counted once)", got)
 	}
 }
+
+// A session resumed shortly before midnight leaves a pre-midnight snapshot in
+// both of its files: the old file's last one (20:00) and the resumed file's
+// own (23:30), which carries the cumulative further. The delta base is the
+// larger of the two whichever file is read first — the old file is read after
+// the resumed one when it was last written before midnight, and before it
+// when something touched it since; its base would count yesterday's
+// 20:00–23:30 growth into today (#376).
+func TestCodexTotalsResumeBeforeMidnightUsesLargerBase(t *testing.T) {
+	now, dayStart := codexDayClock()
+	final := dayStart.Add(-4 * time.Hour) // the old file's last snapshot: yesterday 20:00
+	resumedBefore := dayStart.Add(-30 * time.Minute).Format(time.RFC3339)
+	afterMidnight := dayStart.Add(60 * time.Minute).Format(time.RFC3339)
+
+	id := "019e5933-2289-7e72-88fd-acacacacacac"
+	for _, c := range []struct {
+		name   string
+		oldMod time.Time
+	}{
+		{"old file last written before midnight", final},
+		{"old file touched after midnight", now},
+	} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T18-00-00-"+id+".jsonl"),
+			codexSessionAt([2]any{final.Format(time.RFC3339), 100000}), c.oldMod)
+		// Resumed at 23:20 into a second file that crosses midnight.
+		writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T23-20-00-"+id+".jsonl"),
+			codexSessionAt([2]any{resumedBefore, 130000}, [2]any{afterMidnight, 150000}), now)
+
+		if got := mustCodexTotals(t, root, now, noPrices).Tokens; got != 20000 {
+			t.Errorf("%s: CodexTotals.Tokens = %d, want 20000 (150000 latest - 130000, the larger pre-midnight base)", c.name, got)
+		}
+	}
+}

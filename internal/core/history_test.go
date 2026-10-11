@@ -211,6 +211,45 @@ func TestRecentHistoryRekeysAndRetriesUnknown(t *testing.T) {
 	}
 }
 
+// Editing pricing.json changes the cache key as a new build does, so the
+// closed days are repriced instead of served at the old rates (#243).
+func TestRecentHistoryRecomputesAfterPricingChange(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	writePricing := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "pricing.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudeCost := func(h DailyHistory, i int) float64 {
+		if d := h.Tools[schema.ToolClaudeCode][i]; d != nil && d.CostUSD != nil {
+			return *d.CostUSD
+		}
+		return -1
+	}
+	today := time.Date(2026, 7, 4, 0, 0, 0, 0, time.Local)
+	opts := Options{
+		ClaudeRoot: claudeRootWithDays(t, map[time.Time]int64{today.AddDate(0, 0, -1): 200}),
+		CodexRoot:  t.TempDir(),
+		Now:        today.Add(9 * time.Hour),
+	}
+
+	writePricing(`{"claude-fable":{"input":1}}`)
+	if got, want := claudeCost(RecentHistory(opts, historyStatus(0), 3, "v1"), 1), 200*1.0/1e6; got != want {
+		t.Fatalf("claude yesterday cost = %v, want %v (pricing.json's rate)", got, want)
+	}
+
+	// Another length, so the override's stamp changes even where two writes
+	// share an mtime.
+	writePricing(`{"claude-fable":{"input":2.5}}`)
+	opts.Now = opts.Now.Add(time.Minute)
+	if got, want := claudeCost(RecentHistory(opts, historyStatus(0), 3, "v1"), 1), 200*2.5/1e6; got != want {
+		t.Errorf("claude yesterday cost after editing pricing.json = %v, want %v (recomputed, not the cached %v)", got, want, 200*1.0/1e6)
+	}
+}
+
 // Inside the grace window after midnight yesterday is computed but not
 // stored, since late lines may still land on it; once the grace has passed
 // it is cached like any other closed day.

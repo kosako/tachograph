@@ -162,6 +162,35 @@ func TestCodexDaysResumeChainsBaseAcrossDays(t *testing.T) {
 	}
 }
 
+// When the session resumed shortly before the window opened, both files hold
+// a snapshot before it: the old file's last one and the resumed file's own,
+// which carries the cumulative further. The window's first day takes the
+// larger as its base, and the next day chains from that day's last (#376).
+func TestCodexDaysResumeBeforeWindowUsesLargerBase(t *testing.T) {
+	root := t.TempDir()
+	now, today := daysClock()
+	d1 := today.AddDate(0, 0, -1)
+	id := "019e5933-2289-7e72-88fd-bcbcbcbcbcbc"
+	final := d1.Add(-4 * time.Hour) // the old file's last write: 20:00 the day before the window
+	writeFile(t, filepath.Join(codexDayDir(root, now, 2), "rollout-2026-07-02T18-00-00-"+id+".jsonl"),
+		codexSessionAt([2]any{final.Format(time.RFC3339), 100000}), final)
+	// Resumed at 23:20 into a second file that crosses into the window.
+	writeFile(t, filepath.Join(codexDayDir(root, now, 2), "rollout-2026-07-02T23-20-00-"+id+".jsonl"),
+		codexSessionAt(
+			[2]any{d1.Add(-30 * time.Minute).Format(time.RFC3339), 130000},
+			[2]any{d1.Add(1 * time.Hour).Format(time.RFC3339), 150000},
+			[2]any{today.Add(1 * time.Hour).Format(time.RFC3339), 160000},
+		), now)
+
+	got, err := CodexDays(root, d1, today.AddDate(0, 0, 1), noPrices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[DayKey(d1)].Tokens != 20000 || got[DayKey(today)].Tokens != 10000 || len(got) != 2 {
+		t.Errorf("CodexDays = %+v, want yesterday 20000 (150000-130000, the larger base) / today 10000", got)
+	}
+}
+
 // A rollout without parsable timestamps is attributed whole to its own day
 // directory when that day is inside the window, and dropped otherwise.
 func TestCodexDaysTimestampLessRolloutUsesDirectoryDay(t *testing.T) {

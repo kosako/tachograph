@@ -14,6 +14,7 @@ import (
 
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/core"
+	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -774,5 +775,86 @@ func TestRunStatuslineKeepsOrderWithinSecond(t *testing.T) {
 	run(89, second.Add(100*time.Millisecond))
 	if got := snapshotUsed(t, now, root); got[schema.WindowWeekly] != 92 {
 		t.Errorf("snapshot weekly = %v, want the reading from later in the second (92)", got[schema.WindowWeekly])
+	}
+}
+
+// templateStatuslineEnv isolates a statusline run that takes its template
+// from the config directory: subscriptionStatuslineEnv with a known
+// TACHO_CONFIG_DIR, returned, and the home and XDG directories moved away so
+// no real statusline.tmpl can be picked up instead.
+func templateStatuslineEnv(t *testing.T) string {
+	t.Helper()
+	subscriptionStatuslineEnv(t)
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	return dir
+}
+
+// fixtureStatusline runs the statusline on the fixture payload with args
+// (plus --no-color) and returns the line it prints.
+func fixtureStatusline(t *testing.T, now time.Time, args ...string) string {
+	t.Helper()
+	input, err := os.ReadFile(filepath.Join("..", "..", "internal", "collector", "claude", "testdata", "statusline_input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if code := runStatuslineWithIO(append(args, "--no-color"), bytes.NewReader(input), &out, now); code != 0 {
+		t.Fatalf("runStatuslineWithIO exit = %d", code)
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// Without --template or a statusline.tmpl the statusline renders the
+// built-in default template.
+func TestRunStatuslineDefaultsWithoutTemplateFile(t *testing.T) {
+	templateStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+
+	want := fixtureStatusline(t, now, "--template", render.DefaultTemplate)
+	if got := fixtureStatusline(t, now); got != want {
+		t.Errorf("statusline output = %q, want the default template's %q", got, want)
+	}
+}
+
+// A statusline.tmpl in the config directory supplies the template: its first
+// line that is neither blank nor a # comment, and nothing after it.
+func TestRunStatuslineUsesTemplateFile(t *testing.T) {
+	dir := templateStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	tmpl := "# my statusline\n\n  # {claude.wk.pct} commented out\n{claude.model} 5h {claude.5h.pct}\n{claude.wk.pct} never reached\n"
+	if err := os.WriteFile(filepath.Join(dir, "statusline.tmpl"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := fixtureStatusline(t, now), "Fable 5 5h 76%"; got != want { // 23.5% used → 76% left
+		t.Errorf("statusline output = %q, want %q (the file's first template line)", got, want)
+	}
+}
+
+// `tacho config statusline-preset NAME` writes the preset where the next
+// statusline run without --template picks it up.
+func TestRunStatuslineUsesPresetFromConfig(t *testing.T) {
+	templateStatuslineEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	preset, ok := render.PresetTemplate("minimal")
+	if !ok {
+		t.Fatal("no minimal preset")
+	}
+	want := fixtureStatusline(t, now, "--template", preset)
+	if def := fixtureStatusline(t, now, "--template", render.DefaultTemplate); want == def {
+		t.Fatalf("the minimal preset renders like the default (%q), so the run can't tell them apart", want)
+	}
+
+	var code int
+	capture(t, &os.Stdout, func() { code = run([]string{"config", "statusline-preset", "minimal"}) })
+	if code != 0 {
+		t.Fatalf("config statusline-preset minimal = %d, want 0", code)
+	}
+	if got := fixtureStatusline(t, now); got != want {
+		t.Errorf("statusline output = %q, want the minimal preset's %q", got, want)
 	}
 }
