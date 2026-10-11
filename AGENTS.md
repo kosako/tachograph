@@ -63,6 +63,7 @@
 - For Go changes, run:
 
 ```sh
+gofmt -l .   # must print nothing; CI fails otherwise
 GOCACHE="$(mktemp -d)" go vet ./...
 GOCACHE="$(mktemp -d)" go test ./...
 ```

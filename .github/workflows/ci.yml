@@ -22,6 +22,18 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+      # Fail when a Go file isn't gofmt'd (#390), naming the files and showing
+      # the diff that gofmt -w applies. Only in this job: formatting doesn't
+      # depend on the OS, and a Windows checkout may turn line endings to CRLF.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::Not gofmt'd; run gofmt -w on these files:"
+            printf '%s\n' "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
       - run: go vet ./...
       - run: go build ./...
       - run: go test ./...
