@@ -226,9 +226,9 @@ func TestTemplateResetPassedWindowAbsent(t *testing.T) {
 	}
 }
 
-// An old reading is dimmed and carries one ⚠ per window: after its
-// percentage, or after each gauge when the template shows no percentage for
-// the window (#374).
+// An old reading is dimmed and carries one ⚠ per window: after its first
+// percentage in the template, or after its first gauge when the template
+// shows no percentage for the window (#374).
 func TestTemplateMarksOldWindow(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
 	fresh := now.Add(-time.Minute).Format(time.RFC3339)
@@ -239,17 +239,25 @@ func TestTemplateMarksOldWindow(t *testing.T) {
 	s.Tools[0].Limits[1].ObservedAt = &old // weekly, on a fresh row
 	s.Tools[0].Limits[1].UsedPct = &used   // 41% left
 	for tmpl, want := range map[string]string{
-		"{claude.wk.pct}":                   "41%⚠",
-		"{claude.wk}":                       "41%⚠",
-		"{claude.wk.bar:4} {claude.wk.pct}": "██░░ 41%⚠",
-		"{claude.wk.bar:4} {claude.wk}":     "██░░ 41%⚠",
-		"{claude.wk.dial}{claude.wk.moon}":  "◑⚠🌓⚠",
-		"{claude.wk.bar:4}":                 "██░░⚠",
-		"{claude.5h.pct} {claude.5h.dial}":  "76% ◕",
+		"{claude.wk.pct}":                    "41%⚠",
+		"{claude.wk}":                        "41%⚠",
+		"{claude.wk.bar:4} {claude.wk.pct}":  "██░░ 41%⚠",
+		"{claude.wk.bar:4} {claude.wk}":      "██░░ 41%⚠",
+		"{claude.wk.pct} {claude.wk}":        "41%⚠ 41%",
+		"{claude.wk.dial}{claude.wk.moon}":   "◑⚠🌓",
+		"{claude.wk.moon} {claude.wk.bar:4}": "🌓⚠ ██░░",
+		"{claude.wk.bar:4}":                  "██░░⚠",
+		"{claude.5h.pct} {claude.5h.dial}":   "76% ◕",
+		"{codex.wk.pct} {claude.wk.dial}":    "-- ◑⚠",
 	} {
 		if got := Template(tmpl, s, now, plain); got != want {
 			t.Errorf("%s = %q, want %q", tmpl, got, want)
 		}
+	}
+	// A reset time never carries the mark (it renders in the local zone, so
+	// only the mark is checked).
+	if got := Template("{claude.wk.resets} {claude.wk.dial}", s, now, plain); !strings.HasSuffix(got, " ◑⚠") || strings.Count(got, "⚠") != 1 {
+		t.Errorf("resets + dial = %q, want the mark on the dial only", got)
 	}
 	color := Style{Color: true}
 	if got, want := Template("{claude.wk.bar:4} {claude.wk.pct} {claude.5h.pct}", s, now, color),
@@ -273,6 +281,7 @@ func TestTemplateStaleRowMarkedOnce(t *testing.T) {
 		"5h {claude.5h.pct} {claude.5h.dial}":             "5h 76%⚠ ◕",
 		"{codex.stale}5h {claude.5h.pct}":                 "5h 76%⚠",
 		"{claude.stale}{claude.5h.dial} {claude.wk.dial}": "⚠2h ◕ ◑",
+		"{claude.5h.dial} {claude.wk.dial}":               "◕⚠ ◑⚠",
 	} {
 		if got := Template(tmpl, s, now, plain); got != want {
 			t.Errorf("%s = %q, want %q", tmpl, got, want)

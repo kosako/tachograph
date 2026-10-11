@@ -276,10 +276,10 @@ has passed (its value belongs to a cycle that has ended): its percentage and
 reset time read `--`, its gauges and dials show no data. An old reading — the
 window was observed longer ago than the tool's stale threshold, or the tool's
 row is stale — is dimmed and carries one `⚠` per window (e.g. `41%⚠`): after
-the window's percentage, or after its gauges and dials when the template
-shows no percentage for it. On a stale row whose template shows the tool's
-`stale` (`{claude.stale}` / `{codex.stale}`), that mark covers the values and
-they get none. The 5h / weekly percentages and bars show
+the window's first percentage in the template, or after its first gauge or
+dial when the template shows no percentage for it. On a stale row whose
+template shows the tool's `stale` (`{claude.stale}` / `{codex.stale}`), that
+mark covers the values: they get no `⚠` and keep their usual usage colors. The 5h / weekly percentages and bars show
 **headroom** (percent left) by default while their color still follows usage
 (<50% used green, ≥50% yellow, ≥80% red); `tacho config set limits.display used`
 switches them to **usage** (the gauges then fill as you use them; colors are

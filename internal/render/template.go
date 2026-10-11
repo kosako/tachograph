@@ -61,7 +61,9 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 		}
 	}
 	marks := shownMarksOf(tmpl)
+	index := -1 // of the placeholder being expanded, in shownMarksOf's order
 	return placeholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
+		index++
 		sub := placeholderRe.FindStringSubmatch(m)
 		key, widthStr := sub[1], sub[2]
 		width := 0
@@ -76,23 +78,32 @@ func Template(tmpl string, s schema.Status, now time.Time, st Style) string {
 		if !ok || len(parts) < 2 {
 			return Missing
 		}
-		return resolve(tool, parts[1:], width, now, st, marks[parts[0]])
+		return resolve(tool, parts[1:], width, now, st, marks[parts[0]], index)
 	})
 }
 
 // shownMarks is what a template shows for one tool that decides where an old
-// window's ⚠ goes (see resolveLimit): the row's own stale mark
-// ({tool.stale}), and the windows ("5h", "wk") whose percentage it shows.
+// window's ⚠ goes (see resolveLimit): whether it shows the row's own stale
+// mark ({tool.stale}), and per window ("5h", "wk") the placeholder that
+// carries the window's one ⚠.
 type shownMarks struct {
-	row bool
-	pct map[string]bool
+	row     bool
+	carrier map[string]carrier
+}
+
+// carrier is the placeholder, by its index among the template's, that
+// carries a window's ⚠: the window's first percentage, else its first gauge
+// (bar, dial, moon).
+type carrier struct {
+	index int
+	pct   bool
 }
 
 // shownMarksOf reads tmpl's placeholders into shownMarks per tool name,
 // resolving each path as resolve does.
 func shownMarksOf(tmpl string) map[string]shownMarks {
 	marks := map[string]shownMarks{}
-	for _, sub := range placeholderRe.FindAllStringSubmatch(tmpl, -1) {
+	for i, sub := range placeholderRe.FindAllStringSubmatch(tmpl, -1) {
 		parts := strings.Split(sub[1], ".")
 		if len(parts) < 2 {
 			continue
@@ -102,11 +113,19 @@ func shownMarksOf(tmpl string) map[string]shownMarks {
 		case "stale":
 			m.row = true
 		case "5h", "wk":
-			if len(parts) == 2 || parts[2] == "pct" {
-				if m.pct == nil {
-					m.pct = map[string]bool{}
+			field := "pct"
+			if len(parts) > 2 {
+				field = parts[2]
+			}
+			pct := field == "pct"
+			if !pct && field != "bar" && field != "dial" && field != "moon" {
+				continue
+			}
+			if c, ok := m.carrier[parts[1]]; !ok || (pct && !c.pct) {
+				if m.carrier == nil {
+					m.carrier = map[string]carrier{}
 				}
-				m.pct[parts[1]] = true
+				m.carrier[parts[1]] = carrier{index: i, pct: pct}
 			}
 		}
 		marks[parts[0]] = m
@@ -114,7 +133,7 @@ func shownMarksOf(tmpl string) map[string]shownMarks {
 	return marks
 }
 
-func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks) string {
+func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks, index int) string {
 	switch path[0] {
 	case "stale":
 		if m := staleMark(*t, now); m != "" {
@@ -166,7 +185,7 @@ func resolve(t *schema.Tool, path []string, width int, now time.Time, st Style, 
 		// characters from log-sourced text (#194 L-05).
 		return DisplayText(filepath.Base(*t.Session.CWD))
 	case "5h", "wk":
-		return resolveLimit(t, path, width, now, st, marks)
+		return resolveLimit(t, path, width, now, st, marks, index)
 	}
 	return Missing
 }
@@ -258,11 +277,13 @@ func effortShort(level string) string {
 // time has passed by now renders as absent: its use belongs to an ended
 // window and says nothing about the current one (#374). An old reading — the
 // window was observed longer ago than t's stale threshold, or t's row is
-// stale — is dimmed instead of colored by pressure and carries one ⚠: after
-// its percentage, or after each gauge when the template shows no percentage
-// for the window. A stale row whose template shows {tool.stale} is left to
-// that mark, so the two don't repeat each other (#374).
-func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks) string {
+// stale — is dimmed instead of colored by pressure, and the window carries
+// one ⚠: after its first percentage in the template, or after its first
+// gauge when the template shows no percentage for it (index is this
+// placeholder's, see shownMarks). A stale row whose template shows
+// {tool.stale} is left to that mark: its values keep their pressure colors
+// and get no ⚠, as before, so the two don't repeat each other (#374).
+func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st Style, marks shownMarks, index int) string {
 	window := schema.WindowFiveHour
 	if path[0] == "wk" {
 		window = schema.WindowWeekly
@@ -296,24 +317,22 @@ func resolveLimit(t *schema.Tool, path []string, width int, now time.Time, st St
 	if t.Stale {
 		old = !marks.row
 	}
+	mark := ""
 	if old {
 		paint = st.dim
-	}
-	mark := func(gauge bool) string {
-		if !old || (gauge && marks.pct[path[0]]) {
-			return ""
+		if c, ok := marks.carrier[path[0]]; ok && c.index == index {
+			mark = staleSymbol
 		}
-		return staleSymbol
 	}
 	switch field {
 	case "pct":
-		return paint(fmt.Sprintf("%.0f%%", shown) + mark(false))
+		return paint(fmt.Sprintf("%.0f%%", shown) + mark)
 	case "bar":
-		return paint(Bar(shown, width) + mark(true))
+		return paint(Bar(shown, width) + mark)
 	case "dial":
-		return paint(Dial(shown) + mark(true))
+		return paint(Dial(shown) + mark)
 	case "moon":
-		return Moon(shown) + mark(true) // emoji ignore ANSI colors; no paint
+		return Moon(shown) + mark // emoji ignore ANSI colors; no paint
 	case "resets":
 		if limit.ResetsAt == nil {
 			return Missing
