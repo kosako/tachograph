@@ -18,6 +18,32 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	}
 }
 
+// A user who sets neither TACHO_CONFIG_DIR nor XDG_CONFIG_HOME keeps the
+// config in ~/.config/tachograph, on every platform; XDG_CONFIG_HOME moves it
+// to its tachograph folder, and TACHO_CONFIG_DIR wins over both.
+func TestDirDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // the home os.UserHomeDir reads on Windows
+	t.Setenv("TACHO_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if got, want := Dir(), filepath.Join(home, ".config", "tachograph"); got != want {
+		t.Errorf("Dir() with only a home = %q, want %q", got, want)
+	}
+
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if got, want := Dir(), filepath.Join(xdg, "tachograph"); got != want {
+		t.Errorf("Dir() with XDG_CONFIG_HOME = %q, want %q", got, want)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if got := Dir(); got != dir {
+		t.Errorf("Dir() with TACHO_CONFIG_DIR and XDG_CONFIG_HOME = %q, want %q", got, dir)
+	}
+}
+
 // limits.display round-trips, and a config written before the key existed
 // (#228) keeps the headroom display it had.
 func TestLimitsDisplayRoundTripAndDefault(t *testing.T) {

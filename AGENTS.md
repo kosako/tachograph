@@ -50,6 +50,8 @@
   - `internal/notify` raises macOS notifications; `internal/setup` generates
     and applies the Claude Code statusLine config and the SwiftBar plugin.
   - `cmd/tacho` owns CLI wiring, including `tacho doctor`.
+  - `internal/testhome` is test-only: the `TestMain` of each package whose
+    tests write files runs them under a throwaway home.
   - `scripts/check-release-assets` checks a release's archives (checksums,
     the binary's place, platform, and version) for the release workflow,
     and a GoReleaser snapshot's (version aside) for CI on every PR.
