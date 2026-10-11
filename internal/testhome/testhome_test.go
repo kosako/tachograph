@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,9 +20,20 @@ var overrides = []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "TACHO_CONFIG_DIR", 
 // environment and whichever OS runs the tests; on macOS, say,
 // os.UserConfigDir never reads XDG_CONFIG_HOME.
 func TestMain(m *testing.M) {
-	outer := filepath.Join(os.TempDir(), "tacho-outer-home")
+	tmp := os.TempDir()
+	seed := map[string]string{}
+	// On Windows os.TempDir falls back to USERPROFILE when TMP and TEMP are
+	// both unset; pin it, or the outer USERPROFILE below would move where
+	// Run makes the throwaway home to a directory that does not exist.
+	if runtime.GOOS == "windows" {
+		seed["TMP"] = tmp
+	}
+	outer := filepath.Join(tmp, "tacho-outer-home")
 	for _, k := range append([]string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA"}, overrides...) {
-		if err := os.Setenv(k, filepath.Join(outer, k)); err != nil {
+		seed[k] = filepath.Join(outer, k)
+	}
+	for k, v := range seed {
+		if err := os.Setenv(k, v); err != nil {
 			fmt.Fprintln(os.Stderr, "TestMain:", err)
 			os.Exit(1)
 		}
