@@ -97,7 +97,6 @@ func TestSnippet(t *testing.T) {
 	}
 }
 
-
 // The quoted command must survive an actual POSIX shell: the first argv the
 // shell reconstructs is exactly the original path, whatever it contains
 // (#194 L-01). This is the property the escaping exists for.
