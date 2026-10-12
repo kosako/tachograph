@@ -71,7 +71,8 @@ test("checksumFor parses GoReleaser checksums.txt", () => {
 // binary, writes nothing, or fails. install.js itself runs unchanged. A
 // network failure is thrown the way Node's fetch throws it: a TypeError
 // "fetch failed" (or "terminated" for a body cut off) whose cause is the
-// socket's error, or an AggregateError of one per address tried.
+// socket's error, an AggregateError of one per address tried, or a proxy's
+// connection error whose own cause is the TLS error.
 const INSTALL_STUB = `
 const fs = require("fs");
 const path = require("path");
@@ -95,6 +96,15 @@ const causes = {
     socketError("connect ECONNREFUSED 192.0.2.1:443", "ECONNREFUSED"),
     socketError("connect ECONNREFUSED 2001:db8::1:443", "ECONNREFUSED"),
   ], ""), { code: "ECONNREFUSED" }),
+  proxy: () => Object.assign(new Error("Secure Proxy Connection failed"), {
+    code: "UND_ERR_PRX_TLS",
+    cause: socketError("Hostname/IP does not match certificate's altnames", "ERR_TLS_CERT_ALTNAME_INVALID"),
+  }),
+  loop: () => {
+    const e = socketError("connect ECONNRESET", "ECONNRESET");
+    e.cause = e;
+    return e;
+  },
   none: () => undefined,
 };
 globalThis.fetch = async (url) => {
@@ -226,6 +236,10 @@ for (const [name, scenario, want, extracted] of [
       `download failed: fetch failed (CERT_HAS_EXPIRED: certificate has expired) for ${download}`],
     ["every address refused", { network: "download", cause: "addresses" },
       `download failed: fetch failed (connect ECONNREFUSED 192.0.2.1:443; connect ECONNREFUSED 2001:db8::1:443) for ${download}`],
+    ["a proxy's TLS error", { network: "download", cause: "proxy" },
+      `download failed: fetch failed (UND_ERR_PRX_TLS: Secure Proxy Connection failed; caused by ERR_TLS_CERT_ALTNAME_INVALID: Hostname/IP does not match certificate's altnames) for ${download}`],
+    ["a cause that refers to itself", { network: "download", cause: "loop" },
+      `download failed: fetch failed (connect ECONNRESET) for ${download}`],
     ["a failure without a cause", { network: "download", cause: "none" },
       `download failed: fetch failed for ${download}`],
     ["a download cut off", { dropped: "download" },
