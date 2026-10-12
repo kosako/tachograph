@@ -118,7 +118,9 @@ jobs:
         with:
           node-version: lts/*
       # Trusted publishing requires npm >= 11.5.1; the runner's bundled npm
-      # may be older.
-      - run: npm install -g npm@11
+      # may be older. Pinned, like GoReleaser: this job holds the OIDC token
+      # that publishes, so a new npm release must not run in it unreviewed
+      # (#382). Raise it on purpose; 11.21.0 published v0.10.5.
+      - run: npm install -g npm@11.21.0
       - run: npm publish
         working-directory: npm
