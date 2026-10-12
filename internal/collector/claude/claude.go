@@ -1,7 +1,11 @@
 // Package claude collects status from Claude Code, via two routes:
 //
 //  1. the statusline stdin JSON (richest: model, context %, rate limits)
-//  2. transcript files under ~/.claude/projects (model + session tokens only)
+//  2. transcript files under ~/.claude/projects (model + session only)
+//
+// Neither route counts the session's tokens: core.AddSessionTree does, over
+// the session's whole transcript tree, so the collector leaves session.tokens
+// and fallback.session_tokens null (#375).
 package claude
 
 import (
@@ -172,19 +176,12 @@ func fromStatusline(opts Options) schema.Tool {
 	// session.tokens is the session's cumulative usage by contract. Since
 	// Claude Code v2.1.132 the statusline's context_window.total_* mean
 	// "currently in the context window" (the figure shrinks on /compact), so
-	// the cumulative totals come from the transcript instead, with the same
-	// aggregation as the transcript route. An unreadable or usage-less
-	// transcript leaves tokens null (unknown, never a wrong-semantics
-	// substitute) — see #185. This covers the main transcript;
-	// core.AddSessionTree widens it to the session's subagent / workflow
-	// transcripts (#262).
+	// they are never used for it (#185): core.AddSessionTree counts it from
+	// the transcripts. Here the transcript only dates the rate limits.
 	var lastResponse time.Time // the session's latest API response on record
 	if in.TranscriptPath != "" {
 		if b, err := os.ReadFile(in.TranscriptPath); err == nil {
-			if totals, last := usageFromTranscript(b); last != nil {
-				totals.Total = totals.Input + totals.Output
-				sess.Tokens = &totals
-				fb.SessionTokens = &totals.Total
+			if last, ok := lastUsageLine(b); ok {
 				if ts, err := time.Parse(time.RFC3339Nano, last.Timestamp); err == nil {
 					lastResponse = ts
 				}
@@ -277,7 +274,6 @@ func fromTranscripts(opts Options) schema.Tool {
 	// opened, or a non-conversation entry was written last). Fall back to the
 	// next most recent transcript that actually carries usage.
 	var (
-		totals  schema.Tokens
 		last    *TranscriptLine
 		path    string
 		readErr error
@@ -288,8 +284,8 @@ func fromTranscripts(opts Options) schema.Tool {
 			readErr = err
 			continue
 		}
-		if tt, ll := usageFromTranscript(b); ll != nil {
-			totals, last, path = tt, ll, p
+		if l, ok := lastUsageLine(b); ok {
+			last, path = &l, p
 			break
 		}
 	}
@@ -307,9 +303,7 @@ func fromTranscripts(opts Options) schema.Tool {
 	}
 	sess := &schema.Session{}
 	sess.TranscriptPath = &path
-	totals.Total = totals.Input + totals.Output
-	sess.Tokens = &totals
-	t.Fallback = &schema.Fallback{SessionTokens: &totals.Total}
+	t.Fallback = &schema.Fallback{} // session_tokens is core.AddSessionTree's to fill
 
 	if last.SessionID != "" {
 		sess.ID = &last.SessionID
@@ -329,27 +323,6 @@ func fromTranscripts(opts Options) schema.Tool {
 	// Rate limits are only delivered via the statusline stdin; this route
 	// leaves limits null (renderers fall back to session tokens).
 	return t
-}
-
-// usageFromTranscript sums token usage across a transcript's assistant turns.
-// last is nil when the transcript carries no usable usage entries, which is
-// the signal to fall back to an older transcript.
-func usageFromTranscript(b []byte) (totals schema.Tokens, last *TranscriptLine) {
-	seen := UsageSet{}
-	EachUsageLine(b, func(line TranscriptLine) {
-		// last tracks the newest usage-bearing line for model/session/timestamp.
-		// Update it on every line, including duplicate blocks: a later block is
-		// still the newest entry, so dedup must not rewind the metadata time.
-		last = &line
-		if seen.Dup(line) {
-			return
-		}
-		u := line.Message.Usage
-		totals.Input += u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-		totals.CachedInput += u.CacheReadInputTokens
-		totals.Output += u.OutputTokens
-	})
-	return totals, last
 }
 
 // transcriptsByRecency lists transcript paths newest-first by mtime, so the

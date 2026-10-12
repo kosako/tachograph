@@ -198,6 +198,28 @@ func TestClaudeSessionTreeDedupsOlderFilesAcrossTree(t *testing.T) {
 	}
 }
 
+// Claude Code writes a transcript line per content block, each repeating the
+// response's usage; session.tokens counts the response once, not once per
+// block. The collector used to count it too (#375).
+func TestClaudeSessionTreeCountsContentBlocksOnce(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	block := claudeMsgID(now, "msg_a", "req_a", 10, 20, 100, 5) // 135
+	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
+	writeFile(t, mainPath, block+"\n"+block+"\n"+block+"\n"+claudeMsg(now, 1, 2, 50, 3)+"\n", now) // 135 three times + 56
+
+	cum, today, ok := ClaudeSessionTree(mainPath, now, noPrices, nil)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if cum.Total != 135+56 || cum.Input != 130+53 || cum.CachedInput != 100+50 || cum.Output != 5+3 {
+		t.Errorf("cumulative = %+v, want each response once (Total %d)", cum, 135+56)
+	}
+	if today.Tokens != 135+56 {
+		t.Errorf("today Tokens = %d, want %d", today.Tokens, 135+56)
+	}
+}
+
 // withFormat re-tags an encoded fileUsage as another cache format.
 func withFormat(b []byte, format uint64) []byte {
 	_, n := binary.Uvarint(b)

@@ -545,9 +545,9 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	input, _ := io.ReadAll(stdin)
 
 	claudeTool := claude.Collect(claude.Options{Now: now, StatuslineInput: input})
-	// The live payload knows only the current session's main transcript; widen
-	// its tokens to the session's subagent / workflow transcripts and total
-	// today's portion so {claude.*.session.today} works (#262).
+	// The live payload carries no cumulative tokens; count them over the
+	// session's main and subagent / workflow transcripts, and total today's
+	// portion so {claude.*.session.today} works (#262, #375).
 	core.AddSessionTree(&claudeTool, now, pricing.Load())
 	if shouldWriteStatuslineSnapshot(input, claudeTool) {
 		// The snapshot belongs to the config root this payload was observed

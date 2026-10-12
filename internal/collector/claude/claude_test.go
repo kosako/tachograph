@@ -89,14 +89,11 @@ func TestFromStatusline(t *testing.T) {
 	if s.ContextUsedPct == nil || *s.ContextUsedPct != 8 {
 		t.Errorf("ContextUsedPct = %v", s.ContextUsedPct)
 	}
-	// Cumulative usage comes from the transcript (same aggregation as the
-	// transcript route), not from context_window.total_* — those mean
-	// "currently in the context window" since Claude Code v2.1.132 (#185).
-	if s.Tokens == nil || s.Tokens.Input != 75226 || s.Tokens.Output != 881 || s.Tokens.Total != 76107 {
-		t.Errorf("Tokens = %+v, want transcript cumulative (Input=75226, Output=881, Total=76107)", s.Tokens)
-	}
-	if s.Tokens.CachedInput != 69451 {
-		t.Errorf("CachedInput = %d, want 69451 (cache_read sum from transcript)", s.Tokens.CachedInput)
+	// Cumulative usage is core.AddSessionTree's to count from the transcripts
+	// (#375), never context_window.total_* — those mean "currently in the
+	// context window" since Claude Code v2.1.132 (#185).
+	if s.Tokens != nil {
+		t.Errorf("Tokens = %+v, want nil (left to core.AddSessionTree)", s.Tokens)
 	}
 
 	if len(got.Limits) != 2 {
@@ -117,8 +114,8 @@ func TestFromStatusline(t *testing.T) {
 	if got.Fallback == nil || got.Fallback.EstimatedCostUSD == nil || *got.Fallback.EstimatedCostUSD != 0.01234 {
 		t.Errorf("Fallback = %+v", got.Fallback)
 	}
-	if got.Fallback.SessionTokens == nil || *got.Fallback.SessionTokens != 76107 {
-		t.Errorf("Fallback.SessionTokens = %v, want 76107 (transcript cumulative)", got.Fallback.SessionTokens)
+	if got.Fallback.SessionTokens != nil {
+		t.Errorf("Fallback.SessionTokens = %v, want nil (left to core.AddSessionTree)", *got.Fallback.SessionTokens)
 	}
 }
 
@@ -199,8 +196,9 @@ func TestFromStatuslineBedrockDegradesLimits(t *testing.T) {
 	if got.Limits != nil {
 		t.Errorf("Limits = %+v, want null on bedrock", got.Limits)
 	}
-	if got.Fallback == nil || got.Fallback.SessionTokens == nil {
-		t.Errorf("Fallback = %+v, want session tokens for degraded display", got.Fallback)
+	// The degraded display's session tokens are core.AddSessionTree's (#375).
+	if got.Fallback == nil || got.Fallback.EstimatedCostUSD == nil {
+		t.Errorf("Fallback = %+v, want the payload's cost for degraded display", got.Fallback)
 	}
 }
 
@@ -221,12 +219,20 @@ func TestFromTranscripts(t *testing.T) {
 		t.Errorf("Limits = %+v, want null via transcript route", got.Limits)
 	}
 	s := got.Session
-	if s == nil || s.Tokens == nil {
+	if s == nil || s.ID == nil || *s.ID != "abc12345-1234-5678-9abc-def012345678" || s.TranscriptPath == nil {
 		t.Fatalf("Session = %+v", s)
 	}
-	// input = (100+5000+30000) + (2+673+39451) = 75226, output = 881
-	if s.Tokens.Input != 75226 || s.Tokens.CachedInput != 69451 || s.Tokens.Output != 881 {
-		t.Errorf("Tokens = %+v", s.Tokens)
+	// Tokens are core.AddSessionTree's to count (#375); fallback stays an
+	// object, as it reads in the JSON when that count is unknown.
+	if s.Tokens != nil {
+		t.Errorf("Tokens = %+v, want nil (left to core.AddSessionTree)", s.Tokens)
+	}
+	if got.Fallback == nil || got.Fallback.SessionTokens != nil {
+		t.Errorf("Fallback = %+v, want an empty fallback", got.Fallback)
+	}
+	// Dated by the newest response (12:01:30), not the first.
+	if want := time.Date(2026, 6, 12, 12, 1, 30, 0, time.UTC).Local().Format(time.RFC3339); got.CollectedAt == nil || *got.CollectedAt != want {
+		t.Errorf("CollectedAt = %v, want %s", got.CollectedAt, want)
 	}
 	if got.Stale {
 		t.Error("Stale = true, want false (last entry 3.5min before now)")
@@ -340,9 +346,8 @@ func TestTranscriptFallbackPastEmpty(t *testing.T) {
 	if !got.Available || got.Error != nil {
 		t.Fatalf("Available=%v Error=%+v", got.Available, got.Error)
 	}
-	if got.Session == nil || got.Session.Tokens == nil ||
-		got.Session.Tokens.Input != 10 || got.Session.Tokens.Output != 5 {
-		t.Fatalf("Tokens = %+v, want fallback to older transcript", got.Session.Tokens)
+	if got.Session == nil || got.Session.TranscriptPath == nil || *got.Session.TranscriptPath != filepath.Join(dir, "old.jsonl") {
+		t.Fatalf("Session = %+v, want fallback to older transcript", got.Session)
 	}
 	if got.Session.ID == nil || *got.Session.ID != "old" {
 		t.Errorf("Session.ID = %v, want \"old\" after fallback", got.Session.ID)
@@ -368,9 +373,11 @@ func TestTranscriptTieBreakByPath(t *testing.T) {
 	}
 }
 
-// Claude Code writes one line per content block, each repeating the same usage;
-// the transcript route must count each response once, not once per block.
-func TestTranscriptDedupContentBlocks(t *testing.T) {
+// Claude Code writes one line per content block, each repeating the same
+// usage; the transcript route is dated by the newest block, not the first.
+// Counting each response once is core.AddSessionTree's (#375; see
+// internal/daily's TestClaudeSessionTreeCountsContentBlocksOnce).
+func TestTranscriptNewestBlock(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "projects", "-proj")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -386,14 +393,9 @@ func TestTranscriptDedupContentBlocks(t *testing.T) {
 
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	got := Collect(Options{Root: root, Now: now, Getenv: noEnv})
-	if got.Session == nil || got.Session.Tokens == nil {
+	if got.Session == nil {
 		t.Fatalf("Session = %+v", got.Session)
 	}
-	// Counted once: Input=10+20+100=130, CachedInput=100, Output=5.
-	if tk := got.Session.Tokens; tk.Input != 130 || tk.CachedInput != 100 || tk.Output != 5 {
-		t.Errorf("Tokens = %+v, want one response (Input=130, CachedInput=100, Output=5)", tk)
-	}
-	// Metadata tracks the newest block (12:00:06), not the first, despite dedup.
 	if got.CollectedAt == nil {
 		t.Fatal("CollectedAt = nil")
 	}
@@ -481,6 +483,7 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 	const (
 		noTranscript = iota
 		responded    // last response at lastResponse before now
+		laterTurns   // an older response, the last one, then a user turn
 		unreadable   // transcript_path names no file
 		noTimestamp  // the usage line carries no timestamp
 		badTimestamp // the usage line's timestamp doesn't parse
@@ -493,6 +496,7 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 		want         time.Duration // observed_at, before now
 	}{
 		{name: "last response", transcript: responded, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
+		{name: "last of several responses", transcript: laterTurns, lastResponse: 3 * time.Hour, want: 3 * time.Hour},
 		{name: "sub-second last response", transcript: responded, lastResponse: 2750 * time.Millisecond, want: 2750 * time.Millisecond},
 		{name: "session start", running: ms(600000), want: 10 * time.Minute},
 		{name: "start after the last response (a resumed session's probe)", transcript: responded, lastResponse: 3 * time.Hour, running: ms(600000), want: 10 * time.Minute},
@@ -516,6 +520,10 @@ func TestFromStatuslineLimitsObservedAtFromSession(t *testing.T) {
 			switch c.transcript {
 			case responded:
 				line = `{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse).UTC().Format(time.RFC3339Nano) + `",` + usage + `}`
+			case laterTurns:
+				line = `{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse-time.Hour).UTC().Format(time.RFC3339Nano) + `",` + usage + "}\n" +
+					`{"type":"assistant","timestamp":"` + now.Add(-c.lastResponse).UTC().Format(time.RFC3339Nano) + `",` + usage + "}\n" +
+					`{"type":"user","timestamp":"` + now.Add(-time.Minute).UTC().Format(time.RFC3339Nano) + `"}`
 			case noTimestamp:
 				line = `{"type":"assistant",` + usage + `}`
 			case badTimestamp:

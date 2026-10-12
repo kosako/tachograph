@@ -61,16 +61,41 @@ func (u *Usage) CacheWrites() (fiveMinute, oneHour, unknown, total int64) {
 // assistant usage. Blank, non-JSON, and usage-less lines are skipped.
 func EachUsageLine(b []byte, fn func(TranscriptLine)) {
 	for _, raw := range bytes.Split(b, []byte("\n")) {
-		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
-			continue
+		if line, ok := usageLine(raw); ok {
+			fn(line)
 		}
-		var line TranscriptLine
-		if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
-			continue
-		}
-		fn(line)
 	}
+}
+
+// lastUsageLine returns the last line in b that carries assistant usage — the
+// one EachUsageLine visits last — and false when there is none. It walks b
+// from the end, so only the lines after that one are parsed, not the whole
+// transcript (#375).
+func lastUsageLine(b []byte) (TranscriptLine, bool) {
+	for {
+		i := bytes.LastIndexByte(b, '\n')
+		if line, ok := usageLine(b[i+1:]); ok {
+			return line, true
+		}
+		if i < 0 {
+			return TranscriptLine{}, false
+		}
+		b = b[:i]
+	}
+}
+
+// usageLine parses one raw transcript line, reporting whether it carries
+// assistant usage.
+func usageLine(raw []byte) (TranscriptLine, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || !bytes.Contains(raw, []byte(`"usage"`)) {
+		return TranscriptLine{}, false
+	}
+	var line TranscriptLine
+	if json.Unmarshal(raw, &line) != nil || line.Message == nil || line.Message.Usage == nil {
+		return TranscriptLine{}, false
+	}
+	return line, true
 }
 
 // usageKey identifies one assistant API response. Claude Code writes a
