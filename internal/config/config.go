@@ -167,6 +167,21 @@ func NormalizeThresholds(in []int) []int {
 	return out
 }
 
+// NormalizeTools drops repeated tool names, keeping each name's first place
+// in the written order. Unknown names stay (Warnings reports them). It never
+// returns nil, so an empty selection persists as [].
+func NormalizeTools(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, t := range in {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // Default is the configuration applied when no file exists — it preserves the
 // original behavior (both tools, meter style, 5-hour limit, headroom).
 func Default() Config {
@@ -262,6 +277,10 @@ func parse(b []byte) (Config, error) {
 	if c.Tools == nil {
 		c.Tools = Default().Tools
 	}
+	// A tool listed twice means the same as listing it once, so the repeat is
+	// dropped without a warning, as a repeated threshold is; kept, it would be
+	// shown and summed twice (#379).
+	c.Tools = NormalizeTools(c.Tools)
 	if c.Menubar.Style == "" {
 		c.Menubar.Style = StyleMeter
 	}
