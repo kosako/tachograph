@@ -124,6 +124,48 @@ func TestRenderMeterCostFallsBackToNumber(t *testing.T) {
 	}
 }
 
+// A menubar.metric written by hand that the menu bar doesn't offer — context
+// included — reads "--" in every style, as config's warning says, instead of
+// the context reading or a gauge of it (#381). The --png preview draws no
+// value either.
+func TestRenderUnofferedMetricReadsMissing(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
+	s := schema.Status{Tools: []schema.Tool{
+		tool(schema.ToolClaudeCode, false, 24, 41),
+		tool(schema.ToolCodex, false, 7, 2),
+	}}
+	for _, metric := range []string{render.MetricContext, "bogus"} {
+		for _, c := range []struct{ style, textEnv string }{
+			{config.StyleMeter, ""},  // gauge image
+			{config.StyleMeter, "1"}, // moon-dial text
+			{config.StyleNumber, ""},
+		} {
+			t.Setenv("TACHO_SWIFTBAR_TEXT", c.textEnv)
+			cfg := config.Default()
+			cfg.Menubar.Style = c.style
+			cfg.Menubar.Metric = metric
+			title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+			if want := "C --  X --"; title != want {
+				t.Errorf("%s, style %s, TACHO_SWIFTBAR_TEXT=%q: title = %q, want %q", metric, c.style, c.textEnv, title, want)
+			}
+		}
+	}
+
+	png := func(metric string) string {
+		b64, ok := GaugePNG(s, now, true, metric, render.LimitRemaining)
+		if !ok {
+			t.Fatalf("GaugePNG(%s) rendered nothing", metric)
+		}
+		return b64
+	}
+	if png(render.MetricContext) != png("bogus") {
+		t.Error("the --png preview drew a value for context")
+	}
+	if png(render.MetricLimit5h) == png("bogus") {
+		t.Error("the --png preview drew no value for limit_5h")
+	}
+}
+
 // Right after midnight (no usage today), the cost title must read today's
 // $0.00/d — not a session cost carried over from earlier days, which used to
 // show as if it were today's (#261).

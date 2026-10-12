@@ -117,8 +117,13 @@ func Metric(t schema.Tool, metric string, d LimitDisplay) (frac *float64, text s
 // reverts once the configured window reappears in the payload. A shown
 // window whose reset time has passed by now reads "--" with no gauge rather
 // than falling back to another window: its use belongs to an ended window
-// and says nothing about the current one (#374).
+// and says nothing about the current one (#374). A metric the menu bar
+// doesn't offer (not in MenubarMetrics, context included) reads "--" with no
+// gauge, as config's warning for it says (#381).
 func MenubarMetric(t schema.Tool, metric string, d LimitDisplay, now time.Time) (frac *float64, text string, pressure PressureLevel) {
+	if !ValidMenubarMetric(metric) {
+		return nil, Missing, PressureOK
+	}
 	l, ok := menubarWindow(t, metric)
 	if !ok {
 		return Metric(t, metric, d)

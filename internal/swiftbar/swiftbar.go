@@ -215,15 +215,17 @@ func (r Renderer) clickOption(b *strings.Builder, depth int, label string, param
 // tachometer gauge image (colored, so `image=` not the tinted
 // `templateImage=`) driven by metric (see effectiveMetric); with the number
 // style it is the metric value as text. cost/tokens have no gauge fraction,
-// so the meter style falls back to the number text for them. For gauge
+// so the meter style falls back to the number text for them, as it does for a
+// metric the menu bar doesn't offer, which reads "--" (#381). For gauge
 // metrics, TACHO_SWIFTBAR_TEXT forces the moon-dial text instead of the
 // image. A value that is an old reading is marked in every style (see
 // shownStale).
 func titleLine(s schema.Status, now time.Time, dark bool, cfg config.Config, limits render.LimitDisplay, metric string) string {
 	// The meter (gauge) ring can only fill for percentage metrics; cost/tokens
 	// have no fraction, so the ring would always be empty — fall back to the
-	// number style for them.
-	if cfg.Menubar.Style == config.StyleNumber || !render.MetricIsGauge(metric) {
+	// number style for them. A metric the menu bar doesn't offer (context
+	// included) has no value there either.
+	if cfg.Menubar.Style == config.StyleNumber || !render.MetricIsGauge(metric) || !render.ValidMenubarMetric(metric) {
 		return numberTitle(s, now, metric, limits)
 	}
 	if os.Getenv("TACHO_SWIFTBAR_TEXT") == "" {
