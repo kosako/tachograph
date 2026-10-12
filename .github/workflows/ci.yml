@@ -39,7 +39,25 @@ jobs:
       - run: go test ./...
       # The npm wrapper carries the release-delivery logic (platform→asset
       # mapping, tag normalization). Run its suite so a drift fails on PR, not
-      # on a release tag that's already public.
+      # on a release tag that's already public — on the oldest Node that
+      # npm/package.json's engines accepts (read from it, so the two can't
+      # drift) as well as the current LTS, so an API newer than that floor
+      # fails here, not in a user's postinstall (#382).
+      - name: Node floor from npm/package.json engines
+        id: node-floor
+        run: |
+          engines="$(jq -r '.engines.node | strings' npm/package.json)"
+          floor='^>=([0-9]+(\.[0-9]+){0,2})$'
+          if [[ ! "$engines" =~ $floor ]]; then
+            echo "::error::npm/package.json engines.node is ${engines:-not a string}; want >=N (or >=N.N, >=N.N.N) to test the floor"
+            exit 1
+          fi
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.node-floor.outputs.version }}
+      - run: node test.js
+        working-directory: npm
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*

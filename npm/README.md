@@ -14,7 +14,7 @@ tacho setup claude    # print the Claude Code statusLine config (--write install
 matching [GitHub release](https://github.com/kosako/tachograph/releases)
 (macOS / Linux / Windows, x64 or arm64) and verifies it against the release's
 `checksums.txt`. The download runs in the package's postinstall script
-(Node.js 18+), so installing with `--ignore-scripts` leaves no binary. If no
+(Node.js 22+), so installing with `--ignore-scripts` leaves no binary. If no
 prebuilt binary fits your platform, install from source instead:
 
 ```sh
