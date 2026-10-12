@@ -123,6 +123,21 @@ func TestMetricUnavailable(t *testing.T) {
 	}
 }
 
+// A metric the menu bar doesn't offer reads "--" with no gauge there — context
+// included, though the tool has a context reading — as config's warning for
+// it says (#381). Metric itself still reads context, for the dropdown's row.
+func TestMenubarMetricUnofferedIsMissing(t *testing.T) {
+	tool := metricTool()
+	for _, m := range []string{MetricContext, "ctx", ""} {
+		if frac, text, p := MenubarMetric(tool, m, LimitRemaining, time.Now()); frac != nil || text != Missing || p != PressureOK {
+			t.Errorf("MenubarMetric(%q) = %v, %q, %v, want nil, %q, %v", m, frac, text, p, Missing, PressureOK)
+		}
+	}
+	if _, text, _ := Metric(tool, MetricContext, LimitRemaining); text != "8%" {
+		t.Errorf("Metric(context) = %q, want 8%% (the dropdown's context row)", text)
+	}
+}
+
 // A limit metric whose window the tool no longer reports falls back to the
 // first reported limit, tagged with its window — OpenAI dropped Codex's 5h
 // window in 2026-07, and the menu bar should show weekly pressure, not "--".
