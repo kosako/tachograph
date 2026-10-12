@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/kosako/tachograph/internal/config"
+	"github.com/kosako/tachograph/internal/render"
+	"github.com/kosako/tachograph/internal/schema"
 )
 
 // Disabling the last tool via the dropdown (configToggleTool) must persist an
@@ -53,6 +57,45 @@ func TestConfigSetEmptyToolsPersistsEmpty(t *testing.T) {
 	}
 	if c := config.Load(); len(c.Tools) != 0 {
 		t.Errorf("Load().Tools = %v, want empty", c.Tools)
+	}
+}
+
+// config set tools keeps each tool once, in the order first written (#379).
+func TestConfigSetToolsDropsRepeats(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+
+	if code := configSet("tools", "codex, claude-code,codex"); code != 0 {
+		t.Fatalf("config set tools returned %d", code)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct{ Tools []string }
+	if err := json.Unmarshal(b, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"codex", "claude-code"}; !slices.Equal(saved.Tools, want) {
+		t.Errorf("saved tools = %q, want %q", saved.Tools, want)
+	}
+}
+
+// A tool written twice in a hand-edited config.json is summed once: tacho
+// daily's table, total $ included, reads as with the tool written once
+// (#379).
+func TestDailyTableCountsRepeatedToolOnce(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tools":["codex","codex"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cost := 2.0
+	days := []string{"2026-10-12"}
+	cols := map[string][]*schema.Daily{schema.ToolCodex: {{Tokens: 1000, CostUSD: &cost}}}
+	got := render.DailyTable(days, config.Load().Tools, cols)
+	if want := render.DailyTable(days, []string{schema.ToolCodex}, cols); got != want {
+		t.Errorf("DailyTable =\n%s\nwant\n%s", got, want)
 	}
 }
 

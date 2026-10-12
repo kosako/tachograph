@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -286,6 +287,45 @@ func TestLoadStrictContract(t *testing.T) {
 // notify.thresholds round-trips normalized (invalid and duplicate values
 // dropped, descending), a file written before the key existed reads as off,
 // and off persists as an explicit empty list.
+// A tool listed twice means the same as listing it once: Load keeps each
+// tool's first place without a warning (an unknown one is still reported,
+// once), so it is neither shown nor summed twice, and the next Save writes it
+// once (#379).
+func TestLoadDropsRepeatedTools(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	raw := `{"tools":["codex","claude-code","codex","cursor","cursor","claude-code"]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := Load()
+	if want := []string{"codex", "claude-code", "cursor"}; !slices.Equal(c.Tools, want) {
+		t.Errorf("Tools = %q, want %q", c.Tools, want)
+	}
+	if want := []string{`tools: "cursor" is not claude-code or codex — ignored`}; !slices.Equal(c.Warnings(), want) {
+		t.Errorf("Warnings = %q, want %q", c.Warnings(), want)
+	}
+	s := schema.Status{Tools: []schema.Tool{{Tool: "claude-code"}, {Tool: "codex"}}}
+	if got := c.FilterStatus(s).Tools; len(got) != 2 || got[0].Tool != "codex" || got[1].Tool != "claude-code" {
+		t.Errorf("FilterStatus = %+v, want codex then claude-code, once each", got)
+	}
+
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct{ Tools []string }
+	if err := json.Unmarshal(b, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"codex", "claude-code", "cursor"}; !slices.Equal(saved.Tools, want) {
+		t.Errorf("saved tools = %q, want %q", saved.Tools, want)
+	}
+}
+
 func TestNotifyThresholdsRoundTripAndNormalize(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)

@@ -373,7 +373,7 @@ func configSet(key, val string) int {
 			}
 			tools = append(tools, t)
 		}
-		c.Tools = tools
+		c.Tools = config.NormalizeTools(tools)
 	case "menubar.style":
 		if !config.ValidStyle(val) {
 			fmt.Fprintf(os.Stderr, "tacho: invalid style %q (want meter or number)\n", val)
