@@ -32,6 +32,6 @@
     "test": "node test.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }
