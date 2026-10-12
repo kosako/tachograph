@@ -21,24 +21,44 @@ const binDir = path.join(__dirname, "bin");
 // at the go-install fallback.
 const FETCH_TIMEOUT_MS = 120_000;
 
-// fetchBuffer downloads url fully and maps failures (HTTP errors, timeouts)
-// to messages that name what was being fetched.
+// fetchBuffer downloads url fully and maps failures (HTTP errors, timeouts,
+// network errors) to messages that name what was being fetched and why.
 async function fetchBuffer(url, what) {
+  let res;
   try {
-    const res = await fetch(url, {
+    res = await fetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      throw new Error(`${what} failed: ${res.status} ${res.statusText} for ${url}`);
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer());
     }
-    return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (err.name === "TimeoutError") {
       throw new Error(`${what} timed out after ${FETCH_TIMEOUT_MS / 1000}s for ${url}`);
     }
-    throw err;
+    const reason = causeOf(err);
+    throw new Error(`${what} failed: ${err.message}${reason ? ` (${reason})` : ""} for ${url}`);
   }
+  throw new Error(`${what} failed: ${res.status} ${res.statusText} for ${url}`);
+}
+
+// causeOf is why fetch failed at the network level (DNS, a refused
+// connection, TLS): fetch itself only says "fetch failed" and keeps the
+// reason in err.cause — an error with a code, or an AggregateError of one per
+// address tried, with an empty message (#382). Empty when there is none.
+function causeOf(err) {
+  const cause = err.cause;
+  if (!cause) return "";
+  if (typeof cause !== "object") return String(cause);
+  let msg = cause.message;
+  if (!msg && Array.isArray(cause.errors)) {
+    msg = cause.errors.map((e) => e.message).filter(Boolean).join("; ");
+  }
+  if (cause.code && !String(msg).includes(cause.code)) {
+    msg = msg ? `${cause.code}: ${msg}` : cause.code;
+  }
+  return msg || "";
 }
 
 // tarBin picks the extractor. On Windows the zip asset needs bsdtar, but PATH
