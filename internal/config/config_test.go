@@ -284,9 +284,6 @@ func TestLoadStrictContract(t *testing.T) {
 	}
 }
 
-// notify.thresholds round-trips normalized (invalid and duplicate values
-// dropped, descending), a file written before the key existed reads as off,
-// and off persists as an explicit empty list.
 // A tool listed twice means the same as listing it once: Load keeps each
 // tool's first place without a warning (an unknown one is still reported,
 // once), so it is neither shown nor summed twice, and the next Save writes it
@@ -326,6 +323,9 @@ func TestLoadDropsRepeatedTools(t *testing.T) {
 	}
 }
 
+// notify.thresholds round-trips normalized (invalid and duplicate values
+// dropped, descending), a file written before the key existed reads as off,
+// and off persists as an explicit empty list.
 func TestNotifyThresholdsRoundTripAndNormalize(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
