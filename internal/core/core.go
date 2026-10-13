@@ -105,11 +105,7 @@ func addCodexSessionCost(t *schema.Tool, prices pricing.Table) {
 		return
 	}
 	u := t.Session.Tokens
-	nonCachedInput := u.Input - u.CachedInput
-	if nonCachedInput < 0 {
-		nonCachedInput = 0
-	}
-	cost := r.Cost(nonCachedInput, 0, u.CachedInput, u.Output)
+	cost := r.CodexCost(u.Input, u.CachedInput, u.Output)
 	if t.Fallback == nil {
 		t.Fallback = &schema.Fallback{}
 	}

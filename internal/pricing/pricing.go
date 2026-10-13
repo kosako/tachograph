@@ -241,6 +241,14 @@ func (r Rate) Cost(in, cacheWrite, cacheRead, out int64) float64 {
 	return r.CostByTTL(in, cacheWrite, 0, 0, cacheRead, out)
 }
 
+// CodexCost prices usage reported the OpenAI way, as Codex logs it: input
+// includes the cached input, which is billed at the cache-read rate, and
+// there are no cache writes. Session and daily costs go through this one
+// rule (#383); a cached count above the input bills no uncached input.
+func (r Rate) CodexCost(input, cachedInput, output int64) float64 {
+	return r.Cost(max(input-cachedInput, 0), 0, cachedInput, output)
+}
+
 // CostByTTL prices a breakdown whose cache writes are split by TTL, as
 // claude.Usage.CacheWrites reports them: 5-minute writes at CacheWrite (the
 // table's rate), 1-hour writes at twice the input rate (Anthropic's
