@@ -8,7 +8,9 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -108,6 +110,82 @@ func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
 	return writeJSON("snapshot-"+t.Tool+".json", f)
 }
 
+// SnapshotState is what ReadSnapshot makes of a tool's snapshot file: served
+// (fresh or stale) or, if not, why not. doctor reports it rather than judging
+// the file by its modification time, which can't tell a snapshot written for
+// another config dir or schema from one the readers use (#379).
+type SnapshotState string
+
+const (
+	SnapshotMissing    SnapshotState = "missing"    // no snapshot file
+	SnapshotUnreadable SnapshotState = "unreadable" // the file can't be read
+	SnapshotInvalid    SnapshotState = "invalid"    // not valid JSON, or no valid collected_at
+	SnapshotOldSchema  SnapshotState = "old_schema" // written under another schema version
+	SnapshotOtherRoot  SnapshotState = "other_root" // observed from another config root (#321)
+	SnapshotExpired    SnapshotState = "expired"    // collected more than maxAge ago
+	SnapshotStale      SnapshotState = "stale"      // served, marked stale
+	SnapshotFresh      SnapshotState = "fresh"      // served as is
+)
+
+// SnapshotReport describes a tool's snapshot as ReadSnapshot sees it.
+type SnapshotReport struct {
+	State SnapshotState
+	// Err is why the file could not be read (SnapshotUnreadable).
+	Err error
+	// SchemaVersion is the schema the snapshot was written under, set from
+	// SnapshotOldSchema on.
+	SchemaVersion string
+	// Root is the config root the snapshot was observed from ("" when it
+	// records none), set from SnapshotOtherRoot on.
+	Root string
+	// CollectedAt is when the snapshot was collected, set from
+	// SnapshotExpired on.
+	CollectedAt time.Time
+}
+
+// InspectSnapshot reports what ReadSnapshot makes of tool's snapshot for
+// root at now. Both go through the same checks, so doctor says why a
+// snapshot is not used exactly when the readers don't use it (#379).
+func InspectSnapshot(tool string, maxAge time.Duration, now time.Time, root string) SnapshotReport {
+	_, r := inspectSnapshot(tool, maxAge, now, root)
+	return r
+}
+
+// inspectSnapshot reads tool's snapshot and judges it for root at now. The
+// snapshot is returned only when it is served: fresh, or stale by age
+// (StaleAfterMinutes) but within maxAge.
+func inspectSnapshot(tool string, maxAge time.Duration, now time.Time, root string) (*snapshotFile, SnapshotReport) {
+	snap, r := readSnapshotFile(tool)
+	if snap == nil {
+		return nil, r
+	}
+	r.Root = snap.Root
+	if !sameRoot(snap.Root, root) {
+		r.State = SnapshotOtherRoot
+		return nil, r
+	}
+	if snap.CollectedAt == nil {
+		r.State = SnapshotInvalid
+		return nil, r
+	}
+	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
+	if err != nil {
+		r.State = SnapshotInvalid
+		return nil, r
+	}
+	r.CollectedAt = ts
+	switch age := now.Sub(ts); {
+	case age > maxAge:
+		r.State = SnapshotExpired
+		return nil, r
+	case age > schema.StaleAfterMinutes*time.Minute:
+		r.State = SnapshotStale
+	default:
+		r.State = SnapshotFresh
+	}
+	return snap, r
+}
+
 // ReadSnapshot returns a tool snapshot no older than maxAge, with its
 // stale flag recomputed against now. Rate limits age out separately, from
 // their original observation time: a snapshot that preserved old limits
@@ -115,16 +193,12 @@ func WriteSnapshot(t schema.Tool, limitsObserved time.Time, root string) error {
 // past the ceiling for up to another maxAge (#186). Only a snapshot observed
 // from root is served (#321).
 func ReadSnapshot(tool string, maxAge time.Duration, now time.Time, root string) (*schema.Tool, bool) {
-	snap, ok := readSnapshotFile(tool)
-	if !ok || !sameRoot(snap.Root, root) || snap.CollectedAt == nil {
-		return nil, false
-	}
-	ts, err := time.Parse(time.RFC3339, *snap.CollectedAt)
-	if err != nil || now.Sub(ts) > maxAge {
+	snap, r := inspectSnapshot(tool, maxAge, now, root)
+	if snap == nil {
 		return nil, false
 	}
 	t := snap.Tool
-	t.Stale = now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
+	t.Stale = r.State == SnapshotStale
 	if len(t.Limits) > 0 {
 		observed, ok := snap.limitsObservedAt()
 		if !ok || now.Sub(observed) > maxAge {
@@ -141,8 +215,8 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time, root string)
 // carried forward still age out (#186). Only a snapshot observed from root
 // is consulted (#321).
 func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root string) ([]schema.Limit, string, time.Time, bool) {
-	snap, ok := readSnapshotFile(tool)
-	if !ok || !sameRoot(snap.Root, root) || len(snap.Limits) == 0 {
+	snap, _ := readSnapshotFile(tool)
+	if snap == nil || !sameRoot(snap.Root, root) || len(snap.Limits) == 0 {
 		return nil, "", time.Time{}, false
 	}
 	observed, ok := snap.limitsObservedAt()
@@ -221,20 +295,28 @@ func (s *snapshotFile) limitsObservedAt() (time.Time, bool) {
 	return ts, true
 }
 
-func readSnapshotFile(tool string) (*snapshotFile, bool) {
+// readSnapshotFile reads tool's snapshot. When there is none to judge, it
+// returns nil and why: missing, unreadable, invalid, or old_schema.
+func readSnapshotFile(tool string) (*snapshotFile, SnapshotReport) {
 	dir, err := Dir()
 	if err != nil {
-		return nil, false
+		return nil, SnapshotReport{State: SnapshotUnreadable, Err: err}
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "snapshot-"+tool+".json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, SnapshotReport{State: SnapshotMissing}
+	}
 	if err != nil {
-		return nil, false
+		return nil, SnapshotReport{State: SnapshotUnreadable, Err: err}
 	}
 	var snap snapshotFile
-	if json.Unmarshal(b, &snap) != nil || snap.SchemaVersion != schema.Version {
-		return nil, false
+	if json.Unmarshal(b, &snap) != nil {
+		return nil, SnapshotReport{State: SnapshotInvalid}
 	}
-	return &snap, true
+	if snap.SchemaVersion != schema.Version {
+		return nil, SnapshotReport{State: SnapshotOldSchema, SchemaVersion: snap.SchemaVersion}
+	}
+	return &snap, SnapshotReport{SchemaVersion: snap.SchemaVersion}
 }
 
 // ReadJSON decodes the named cache file into v. False when the file is

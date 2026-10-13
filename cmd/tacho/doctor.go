@@ -173,14 +173,12 @@ func reportCache(now time.Time) {
 		return
 	}
 	fmt.Println("  dir:       " + dir)
-	reportCacheFile("status.json", filepath.Join(dir, "status.json"), cache.StatusTTL, 0, now,
+	reportCacheFile("status.json", filepath.Join(dir, "status.json"), cache.StatusTTL, now,
 		"run `tacho` or `tacho status --json` once")
-	reportCacheFile("Claude snapshot", filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"),
-		cache.SnapshotMaxAge, schema.StaleAfterMinutes*time.Minute, now,
-		"run Claude Code with `tacho statusline` configured")
+	reportSnapshot(now)
 }
 
-func reportCacheFile(label, path string, maxAge, staleAfter time.Duration, now time.Time, hint string) {
+func reportCacheFile(label, path string, maxAge time.Duration, now time.Time, hint string) {
 	info, err := os.Stat(path)
 	key := fmt.Sprintf("%s:", label)
 	if err != nil {
@@ -192,15 +190,50 @@ func reportCacheFile(label, path string, maxAge, staleAfter time.Duration, now t
 		return
 	}
 
-	age := now.Sub(info.ModTime())
 	state := "fresh"
-	switch {
-	case maxAge > 0 && age > maxAge:
+	if now.Sub(info.ModTime()) > maxAge {
 		state = "expired"
-	case staleAfter > 0 && age > staleAfter:
-		state = "stale but usable"
 	}
 	fmt.Printf("  %-16s present (modified %s, %s)\n", key, doctorAge(info.ModTime(), now), state)
+}
+
+// reportSnapshot reports the Claude snapshot as the readers judge it, by the
+// same checks (cache.InspectSnapshot): a snapshot written for another config
+// dir or schema version is there but never used, which its modification
+// time can't tell (#379). Its age is its collected_at, as the readers use.
+func reportSnapshot(now time.Time) {
+	const key = "Claude snapshot:"
+	const rewrite = "the next `tacho statusline` run rewrites it"
+	root := core.Roots(core.Options{})[schema.ToolClaudeCode] // the root the readers use (#321)
+	r := cache.InspectSnapshot(schema.ToolClaudeCode, cache.SnapshotMaxAge, now, root)
+	switch r.State {
+	case cache.SnapshotMissing:
+		fmt.Printf("  %-16s missing — run Claude Code with `tacho statusline` configured\n", key)
+	case cache.SnapshotUnreadable:
+		fmt.Printf("  %-16s unreadable: %v\n", key, r.Err)
+	case cache.SnapshotInvalid:
+		fmt.Printf("  %-16s present but not used — not a valid snapshot; %s\n", key, rewrite)
+	case cache.SnapshotOldSchema:
+		fmt.Printf("  %-16s present but not used — written for schema %q, this tacho reads %s; %s\n",
+			key, r.SchemaVersion, schema.Version, rewrite)
+	case cache.SnapshotOtherRoot:
+		fmt.Printf("  %-16s present but not used — observed from another Claude config dir (%s, not %s)\n",
+			key, orNone(r.Root), orNone(root))
+	case cache.SnapshotExpired:
+		fmt.Printf("  %-16s present (collected %s, expired)\n", key, doctorAge(r.CollectedAt, now))
+	case cache.SnapshotStale:
+		fmt.Printf("  %-16s present (collected %s, stale but usable)\n", key, doctorAge(r.CollectedAt, now))
+	default:
+		fmt.Printf("  %-16s present (collected %s, fresh)\n", key, doctorAge(r.CollectedAt, now))
+	}
+}
+
+// orNone names a config root for doctor, "none" when it isn't known.
+func orNone(root string) string {
+	if root == "" {
+		return "none"
+	}
+	return root
 }
 
 func reportIntegrations() {
