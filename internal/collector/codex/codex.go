@@ -79,7 +79,7 @@ type pick struct {
 // limits are tracked the same way but separately: the freshest session may
 // hold only non-account buckets (#258), so the walk continues until a file
 // can improve neither the session nor the limits. Limits are only taken
-// from within schema.CodexStaleAfterMinutes before the session's
+// from within Codex's stale threshold (schema.StaleAfter) before the session's
 // token_count — older ones would make a fresh session render stale — so the
 // walk never looks back past that window, and sessions that never carry
 // limits (API-key use) don't make every rollout get read.
@@ -130,7 +130,7 @@ func pickSession(dir string) pick {
 // limitsFloor is the oldest account-limits timestamp still used alongside a
 // session whose token_count is at sessionTS.
 func limitsFloor(sessionTS time.Time) time.Time {
-	return sessionTS.Add(-schema.CodexStaleAfterMinutes * time.Minute)
+	return sessionTS.Add(-schema.StaleAfter(schema.ToolCodex))
 }
 
 // rolloutFile is one .jsonl candidate with its modification time.
@@ -326,7 +326,7 @@ func build(path string, tc, lim *TokenCount, turn *TurnContext, now time.Time) s
 		}
 		s := ts.Local().Format(time.RFC3339)
 		t.CollectedAt = &s
-		t.Stale = now.Sub(ts) > schema.CodexStaleAfterMinutes*time.Minute
+		t.Stale = now.Sub(ts) > schema.StaleAfter(schema.ToolCodex)
 	}
 
 	sess := &schema.Session{}
