@@ -784,7 +784,7 @@ func codexDeltaTotals(model string, before, last *codex.TokenUsage, prices prici
 		Output:      outTok,
 	}
 	if r, ok := prices.For(model); ok {
-		out.Cost = r.Cost(clamp0(in-cached), 0, cached, outTok)
+		out.Cost = r.CodexCost(in, cached, outTok)
 	}
 	return out
 }
@@ -834,7 +834,7 @@ func codexEventCost(events []codexTC, base *codex.TokenUsage, baseModel string, 
 		}
 		s := byModel[m]
 		in, cached, outTok := clamp0(s.in), clamp0(s.cached), clamp0(s.out)
-		cost += r.Cost(clamp0(in-cached), 0, cached, outTok)
+		cost += r.CodexCost(in, cached, outTok)
 	}
 	return cost
 }

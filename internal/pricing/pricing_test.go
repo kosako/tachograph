@@ -263,6 +263,21 @@ func TestCost(t *testing.T) {
 	}
 }
 
+// Codex's input includes its cached input: the uncached part is billed at the
+// input rate, the cached part at the cache-read rate, and nothing as cache
+// writes (#383).
+func TestCodexCost(t *testing.T) {
+	r := Rate{In: 2, Out: 10, CacheRead: 0.5, CacheWrite: 2.5}
+	// (600_000*2 + 400_000*0.5 + 100_000*10) / 1e6 = 1.2 + 0.2 + 1.0
+	if got := r.CodexCost(1_000_000, 400_000, 100_000); got != 2.4 {
+		t.Errorf("CodexCost = %v, want 2.4", got)
+	}
+	// A cached count above the input bills no uncached input, never a negative one.
+	if got, want := r.CodexCost(100, 300, 0), r.Cost(0, 0, 300, 0); got != want {
+		t.Errorf("CodexCost(cached > input) = %v, want the cached part alone %v", got, want)
+	}
+}
+
 func TestCostByTTL(t *testing.T) {
 	r := Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}
 	// 5m writes at cache_write, 1h writes at 2x input, reads at cache_read:
