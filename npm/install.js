@@ -21,24 +21,61 @@ const binDir = path.join(__dirname, "bin");
 // at the go-install fallback.
 const FETCH_TIMEOUT_MS = 120_000;
 
-// fetchBuffer downloads url fully and maps failures (HTTP errors, timeouts)
-// to messages that name what was being fetched.
+// fetchBuffer downloads url fully and maps failures (HTTP errors, timeouts,
+// network errors) to messages that name what was being fetched and why.
 async function fetchBuffer(url, what) {
+  let res;
   try {
-    const res = await fetch(url, {
+    res = await fetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      throw new Error(`${what} failed: ${res.status} ${res.statusText} for ${url}`);
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer());
     }
-    return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (err.name === "TimeoutError") {
       throw new Error(`${what} timed out after ${FETCH_TIMEOUT_MS / 1000}s for ${url}`);
     }
-    throw err;
+    const reason = causeOf(err);
+    throw new Error(`${what} failed: ${err.message}${reason ? ` (${reason})` : ""} for ${url}`);
   }
+  throw new Error(`${what} failed: ${res.status} ${res.statusText} for ${url}`);
+}
+
+// causeOf is why fetch failed at the network level (DNS, a refused
+// connection, TLS, a proxy): fetch itself only says "fetch failed" and keeps
+// the reason in err.cause — an error with a code, an AggregateError of one per
+// address tried with an empty message, or a wrapper (a proxy's connection
+// error) whose own cause holds the specifics. Every level of that chain is
+// named, outermost first (#382). Empty when there is none.
+function causeOf(err) {
+  const parts = [];
+  const seen = new Set();
+  for (let c = err.cause, depth = 0; c != null && depth < 5 && !seen.has(c); c = c.cause, depth++) {
+    if (typeof c !== "object") {
+      parts.push(String(c));
+      break;
+    }
+    seen.add(c);
+    const part = describeError(c);
+    if (part) parts.push(part);
+  }
+  return parts.join("; caused by ");
+}
+
+// describeError names one error of a cause chain: its message (an
+// AggregateError's is empty, so its errors' messages), with its code in front
+// unless the message already says it.
+function describeError(e) {
+  let msg = e.message;
+  if (!msg && Array.isArray(e.errors)) {
+    msg = e.errors.map((x) => x && x.message).filter(Boolean).join("; ");
+  }
+  if (e.code && !String(msg).includes(e.code)) {
+    msg = msg ? `${e.code}: ${msg}` : e.code;
+  }
+  return msg || "";
 }
 
 // tarBin picks the extractor. On Windows the zip asset needs bsdtar, but PATH

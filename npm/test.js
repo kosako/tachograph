@@ -68,7 +68,11 @@ test("checksumFor parses GoReleaser checksums.txt", () => {
 // replaces fetch with the scenario's responses for this platform's asset and
 // checksums.txt, and tar (child_process.execFileSync, which install.js takes
 // once it loads) with a stub that records the call and then writes the
-// binary, writes nothing, or fails. install.js itself runs unchanged.
+// binary, writes nothing, or fails. install.js itself runs unchanged. A
+// network failure is thrown the way Node's fetch throws it: a TypeError
+// "fetch failed" (or "terminated" for a body cut off) whose cause is the
+// socket's error, an AggregateError of one per address tried, or a proxy's
+// connection error whose own cause is the TLS error.
 const INSTALL_STUB = `
 const fs = require("fs");
 const path = require("path");
@@ -83,12 +87,45 @@ const sums = {
   mismatch: "0".repeat(64) + "  " + asset + "\\n",
   missing: sha + "  tachograph_other_asset.tar.gz\\n",
 }[s.sums];
+const socketError = (message, code) => Object.assign(new Error(message), { code });
+const causes = {
+  refused: () => socketError("connect ECONNREFUSED 192.0.2.1:443", "ECONNREFUSED"),
+  dns: () => socketError("getaddrinfo ENOTFOUND github.com", "ENOTFOUND"),
+  tls: () => socketError("certificate has expired", "CERT_HAS_EXPIRED"),
+  addresses: () => Object.assign(new AggregateError([
+    socketError("connect ECONNREFUSED 192.0.2.1:443", "ECONNREFUSED"),
+    socketError("connect ECONNREFUSED 2001:db8::1:443", "ECONNREFUSED"),
+  ], ""), { code: "ECONNREFUSED" }),
+  proxy: () => Object.assign(new Error("Secure Proxy Connection failed"), {
+    code: "UND_ERR_PRX_TLS",
+    cause: socketError("Hostname/IP does not match certificate's altnames", "ERR_TLS_CERT_ALTNAME_INVALID"),
+  }),
+  loop: () => {
+    const e = socketError("connect ECONNRESET", "ECONNRESET");
+    e.cause = e;
+    return e;
+  },
+  none: () => undefined,
+};
 globalThis.fetch = async (url) => {
   const which = url.endsWith("/checksums.txt") ? "sums" : "download";
   if (s.timeout === which) {
     const err = new Error("The operation was aborted due to timeout");
     err.name = "TimeoutError";
     throw err;
+  }
+  if (s.network === which) {
+    const cause = causes[s.cause]();
+    throw new TypeError("fetch failed", cause ? { cause } : undefined);
+  }
+  if (s.dropped === which) {
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => {
+        throw new TypeError("terminated", { cause: socketError("other side closed", "UND_ERR_SOCKET") });
+      },
+    };
   }
   const status = (which === "sums" ? s.sumsStatus : s.downloadStatus) || 200;
   if (status !== 200) return new Response("", { status, statusText: "Stub Error" });
@@ -181,4 +218,41 @@ for (const [name, scenario, want, extracted] of [
     assert.strictEqual(r.installed, null);
     assert.deepStrictEqual(r.leftovers, []);
   });
+}
+
+// A network-level failure says what was fetched, from where, and why — the
+// cause Node keeps behind its bare "fetch failed" — so a proxy, DNS, or TLS
+// problem on the user's side can be told apart (#382).
+{
+  const { version } = require("./package.json");
+  const download = downloadURL(version, assetFor(process.platform, process.arch).asset);
+  const sums = checksumsURL(version);
+  for (const [name, scenario, want] of [
+    ["a refused connection", { network: "download", cause: "refused" },
+      `download failed: fetch failed (connect ECONNREFUSED 192.0.2.1:443) for ${download}`],
+    ["an unresolved host", { network: "sums", cause: "dns" },
+      `checksums download failed: fetch failed (getaddrinfo ENOTFOUND github.com) for ${sums}`],
+    ["a TLS error", { network: "download", cause: "tls" },
+      `download failed: fetch failed (CERT_HAS_EXPIRED: certificate has expired) for ${download}`],
+    ["every address refused", { network: "download", cause: "addresses" },
+      `download failed: fetch failed (connect ECONNREFUSED 192.0.2.1:443; connect ECONNREFUSED 2001:db8::1:443) for ${download}`],
+    ["a proxy's TLS error", { network: "download", cause: "proxy" },
+      `download failed: fetch failed (UND_ERR_PRX_TLS: Secure Proxy Connection failed; caused by ERR_TLS_CERT_ALTNAME_INVALID: Hostname/IP does not match certificate's altnames) for ${download}`],
+    ["a cause that refers to itself", { network: "download", cause: "loop" },
+      `download failed: fetch failed (connect ECONNRESET) for ${download}`],
+    ["a failure without a cause", { network: "download", cause: "none" },
+      `download failed: fetch failed for ${download}`],
+    ["a download cut off", { dropped: "download" },
+      `download failed: terminated (UND_ERR_SOCKET: other side closed) for ${download}`],
+  ]) {
+    test(`install names the cause of ${name}`, () => {
+      const r = runInstall({ sums: "listed", extract: "ok", ...scenario });
+      assert.strictEqual(r.status, 1, r.stdout);
+      assert.ok(r.stderr.split("\n").includes(want), `stderr:\n${r.stderr}\nwant the line:\n${want}`);
+      assert.match(r.stderr, /go install github\.com\/kosako\/tachograph\/cmd\/tacho@latest/);
+      assert.strictEqual(r.extracted, false);
+      assert.strictEqual(r.installed, null);
+      assert.deepStrictEqual(r.leftovers, []);
+    });
+  }
 }
