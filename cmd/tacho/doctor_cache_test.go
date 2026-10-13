@@ -66,30 +66,49 @@ func TestReportSnapshot(t *testing.T) {
 		}
 	}
 	this := func() string { return core.Roots(core.Options{})[schema.ToolClaudeCode] }
+	other := filepath.Join(t.TempDir(), "other-profile")
+	otherStored, _ := cache.NormalizeRoot(other)
+	// noHome leaves this run without a Claude config dir: no CLAUDE_CONFIG_DIR
+	// and no home directory to find ~/.claude in.
+	noHome := func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", "")
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "") // the home os.UserHomeDir reads on Windows
+	}
 
 	for _, c := range []struct {
 		name string
+		env  func(t *testing.T) // after the Claude root is isolated
 		seed func(t *testing.T, dir string)
-		want string
+		want string // {here} stands for this run's root, as stored
 	}{
-		{"missing", func(*testing.T, string) {}, "missing — run Claude Code with `tacho statusline` configured"},
-		{"fresh", func(t *testing.T, dir string) { write(this(), 2*time.Minute)(t, dir) }, "present (collected 2m ago, fresh)"},
-		{"stale", func(t *testing.T, dir string) { write(this(), 2*time.Hour)(t, dir) }, "present (collected 2h ago, stale but usable)"},
-		{"expired", func(t *testing.T, dir string) { write(this(), cache.SnapshotMaxAge+24*time.Hour)(t, dir) }, "present (collected 31d ago, expired)"},
-		{"other root", write(filepath.Join(t.TempDir(), "other-profile"), 2*time.Minute),
-			"present but not used — observed from another Claude config dir ("},
-		{"other schema", raw(`{"schema_version":"9.9","collected_at":"` + now.Format(time.RFC3339) + `"}`),
+		{"missing", nil, func(*testing.T, string) {}, "missing — run Claude Code with `tacho statusline` configured"},
+		{"fresh", nil, func(t *testing.T, dir string) { write(this(), 2*time.Minute)(t, dir) }, "present (collected 2m ago, fresh)"},
+		{"stale", nil, func(t *testing.T, dir string) { write(this(), 2*time.Hour)(t, dir) }, "present (collected 2h ago, stale but usable)"},
+		{"expired", nil, func(t *testing.T, dir string) { write(this(), cache.SnapshotMaxAge+24*time.Hour)(t, dir) }, "present (collected 31d ago, expired)"},
+		{"other root", nil, write(other, 2*time.Minute),
+			"present but not used — observed from another Claude config dir (" + otherStored + ", not {here})"},
+		{"no root recorded", nil, write("", 2*time.Minute),
+			"present but not used — it records no Claude config dir (written by a tacho before v0.9.0, or one that couldn't resolve it)"},
+		{"this run has no root", noHome, write(other, 2*time.Minute),
+			"present but not used — this run's Claude config dir can't be resolved"},
+		{"other schema", nil, raw(`{"schema_version":"9.9","collected_at":"` + now.Format(time.RFC3339) + `"}`),
 			`present but not used — written for schema "9.9", this tacho reads ` + schema.Version},
-		{"not JSON", raw(`{`), "present but not used — not a valid snapshot"},
+		{"not JSON", nil, raw(`{`), "present but not used — not a valid snapshot"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("TACHO_CACHE_DIR", dir)
 			isolateClaudeRoot(t)
+			if c.env != nil {
+				c.env(t)
+			}
 			c.seed(t, dir)
+			here, _ := cache.NormalizeRoot(this())
+			want := strings.ReplaceAll(c.want, "{here}", here)
 			out := capture(t, &os.Stdout, func() { reportSnapshot(now) })
-			if !strings.HasPrefix(out, "  Claude snapshot: ") || !strings.Contains(out, c.want) {
-				t.Errorf("reportSnapshot =\n%s\nwant a Claude snapshot line with %q", out, c.want)
+			if !strings.HasPrefix(out, "  Claude snapshot: ") || !strings.Contains(out, want) {
+				t.Errorf("reportSnapshot =\n%s\nwant a Claude snapshot line with %q", out, want)
 			}
 		})
 	}

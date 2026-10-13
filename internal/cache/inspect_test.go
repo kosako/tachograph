@@ -36,14 +36,15 @@ func TestInspectSnapshot(t *testing.T) {
 	stored, _ := NormalizeRoot(snapRoot)
 	other, _ := NormalizeRoot("/profiles/b")
 
-	for _, c := range []struct {
+	type inspectCase struct {
 		name   string
 		seed   func(t *testing.T, dir string)
 		state  SnapshotState
 		schema string // SchemaVersion, checked from SnapshotOldSchema on
 		root   string // Root, checked from SnapshotOtherRoot on
 		age    time.Duration
-	}{
+	}
+	cases := []inspectCase{
 		{name: "missing", seed: func(*testing.T, string) {}, state: SnapshotMissing},
 		{name: "unreadable", seed: func(t *testing.T, dir string) {
 			if err := os.Mkdir(snapFile(dir), 0o755); err != nil {
@@ -58,13 +59,29 @@ func TestInspectSnapshot(t *testing.T) {
 		{name: "no collected_at", seed: raw(`{` + current + `}`), state: SnapshotInvalid, schema: schema.Version, root: snapRoot},
 		{name: "bad collected_at", seed: raw(`{` + current + `,"collected_at":"yesterday"}`), state: SnapshotInvalid,
 			schema: schema.Version, root: snapRoot},
-		{name: "expired", seed: written(snapRoot, SnapshotMaxAge+time.Minute), state: SnapshotExpired,
-			schema: schema.Version, root: stored, age: SnapshotMaxAge + time.Minute},
-		{name: "stale", seed: written(snapRoot, schema.StaleAfterMinutes*time.Minute+time.Minute), state: SnapshotStale,
-			schema: schema.Version, root: stored, age: schema.StaleAfterMinutes*time.Minute + time.Minute},
 		{name: "fresh", seed: written(snapRoot, 2*time.Minute), state: SnapshotFresh,
 			schema: schema.Version, root: stored, age: 2 * time.Minute},
+	}
+	// Ages at and around both thresholds: the stale threshold is the last age
+	// still fresh and maxAge the last still served (both compare with >).
+	staleAfter := schema.StaleAfterMinutes * time.Minute
+	for _, b := range []struct {
+		name  string
+		age   time.Duration
+		state SnapshotState
+	}{
+		{"just under the stale threshold", staleAfter - time.Second, SnapshotFresh},
+		{"at the stale threshold", staleAfter, SnapshotFresh},
+		{"just over the stale threshold", staleAfter + time.Second, SnapshotStale},
+		{"just under maxAge", SnapshotMaxAge - time.Second, SnapshotStale},
+		{"at maxAge", SnapshotMaxAge, SnapshotStale},
+		{"just over maxAge", SnapshotMaxAge + time.Second, SnapshotExpired},
 	} {
+		cases = append(cases, inspectCase{name: b.name, seed: written(snapRoot, b.age), state: b.state,
+			schema: schema.Version, root: stored, age: b.age})
+	}
+
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := setCacheDir(t)
 			c.seed(t, dir)

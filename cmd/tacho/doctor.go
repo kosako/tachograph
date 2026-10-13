@@ -217,8 +217,16 @@ func reportSnapshot(now time.Time) {
 		fmt.Printf("  %-16s present but not used — written for schema %q, this tacho reads %s; %s\n",
 			key, r.SchemaVersion, schema.Version, rewrite)
 	case cache.SnapshotOtherRoot:
-		fmt.Printf("  %-16s present but not used — observed from another Claude config dir (%s, not %s)\n",
-			key, orNone(r.Root), orNone(root))
+		// Root mismatch covers three cases, told apart so the line doesn't
+		// claim another config dir when one side has none to compare.
+		switch here, ok := cache.NormalizeRoot(root); {
+		case !ok:
+			fmt.Printf("  %-16s present but not used — this run's Claude config dir can't be resolved\n", key)
+		case r.Root == "":
+			fmt.Printf("  %-16s present but not used — it records no Claude config dir (written by a tacho before v0.9.0, or one that couldn't resolve it)\n", key)
+		default:
+			fmt.Printf("  %-16s present but not used — observed from another Claude config dir (%s, not %s)\n", key, r.Root, here)
+		}
 	case cache.SnapshotExpired:
 		fmt.Printf("  %-16s present (collected %s, expired)\n", key, doctorAge(r.CollectedAt, now))
 	case cache.SnapshotStale:
@@ -226,14 +234,6 @@ func reportSnapshot(now time.Time) {
 	default:
 		fmt.Printf("  %-16s present (collected %s, fresh)\n", key, doctorAge(r.CollectedAt, now))
 	}
-}
-
-// orNone names a config root for doctor, "none" when it isn't known.
-func orNone(root string) string {
-	if root == "" {
-		return "none"
-	}
-	return root
 }
 
 func reportIntegrations() {
