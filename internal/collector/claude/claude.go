@@ -317,7 +317,7 @@ func fromTranscripts(opts Options) schema.Tool {
 	if ts, err := time.Parse(time.RFC3339Nano, last.Timestamp); err == nil {
 		s := ts.Local().Format(time.RFC3339)
 		t.CollectedAt = &s
-		t.Stale = opts.Now.Sub(ts) > schema.StaleAfterMinutes*time.Minute
+		t.Stale = opts.Now.Sub(ts) > schema.StaleAfter(schema.ToolClaudeCode)
 	}
 	t.Session = sess
 	// Rate limits are only delivered via the statusline stdin; this route

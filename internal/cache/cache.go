@@ -24,7 +24,7 @@ const StatusTTL = 30 * time.Second
 
 // SnapshotMaxAge is how long a statusline snapshot is still used. It carries
 // rate limits and context the transcript route can't see. Once it goes stale
-// by age (see StaleAfterMinutes), its rate limits keep showing as last-known
+// by age (see schema.StaleAfter), its rate limits keep showing as last-known
 // values (marked stale) rather than dropping to "--", while its context and
 // other session values are cleared: they describe a session it can no longer
 // vouch for (#235). Deliberately long: last-known limits beat no data.
@@ -154,7 +154,7 @@ func InspectSnapshot(tool string, maxAge time.Duration, now time.Time, root stri
 
 // inspectSnapshot reads tool's snapshot and judges it for root at now. The
 // snapshot is returned only when it is served: fresh, or stale by age
-// (StaleAfterMinutes) but within maxAge.
+// (schema.StaleAfter) but within maxAge.
 func inspectSnapshot(tool string, maxAge time.Duration, now time.Time, root string) (*snapshotFile, SnapshotReport) {
 	snap, r := readSnapshotFile(tool)
 	if snap == nil {
@@ -179,7 +179,7 @@ func inspectSnapshot(tool string, maxAge time.Duration, now time.Time, root stri
 	case age > maxAge:
 		r.State = SnapshotExpired
 		return nil, r
-	case age > schema.StaleAfterMinutes*time.Minute:
+	case age > schema.StaleAfter(tool):
 		r.State = SnapshotStale
 	default:
 		r.State = SnapshotFresh
