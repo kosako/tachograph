@@ -1,6 +1,6 @@
 //go:build !windows
 
-package cache
+package atomicfile
 
 // transientRenameError is always false: rename replaces atomically here,
 // whoever has the file open, so one that failed fails again.

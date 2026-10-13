@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kosako/tachograph/internal/atomicfile"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
 )
@@ -305,7 +306,7 @@ func parse(b []byte) (Config, error) {
 	return c, nil
 }
 
-// Save writes the config atomically (tmp file + rename).
+// Save writes the config atomically (tmp file + rename, see atomicfile).
 func Save(c Config) error {
 	dir := Dir()
 	if dir == "" {
@@ -319,20 +320,7 @@ func Save(c Config) error {
 		return err
 	}
 	b = append(b, '\n')
-	tmp, err := os.CreateTemp(dir, "config.json.tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), Path())
+	return atomicfile.Write(Path(), b, 0o600)
 }
 
 // ToolEnabled reports whether a tool should be shown.

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kosako/tachograph/internal/atomicfile"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/setup"
 )
@@ -76,17 +77,19 @@ func runSetup(args []string) int {
 	}
 	// Back up only once: the merge is idempotent, so re-running --write would
 	// otherwise overwrite the original backup with tacho's own merged output and
-	// lose the user's pre-tacho statusLine. Keep the first .bak.
+	// lose the user's pre-tacho statusLine. Keep the first .bak. The settings
+	// and the backup are written atomically, so an interrupted write can't
+	// leave a truncated settings.json behind (#194 L-02), and get 0600.
 	if bak := path + ".bak"; len(existing) > 0 {
 		if _, err := os.Stat(bak); os.IsNotExist(err) {
-			if err := writeFileAtomic(bak, existing, 0o600); err != nil {
+			if err := atomicfile.Write(bak, existing, 0o600); err != nil {
 				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 				return 1
 			}
 			fmt.Println("Backed up existing settings to " + bak)
 		}
 	}
-	if err := writeFileAtomic(path, merged, 0o600); err != nil {
+	if err := atomicfile.Write(path, merged, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
@@ -154,13 +157,14 @@ func runSetupSwiftBar(args []string) int {
 			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 			return 1
 		}
-		if err := writeFileAtomic(bak, existing, 0o600); err != nil {
+		if err := atomicfile.Write(bak, existing, 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 			return 1
 		}
 		fmt.Println("Backed up the previous plugin to " + bak + " (copy back any export lines you added)")
 	}
-	if err := writeFileAtomic(path, []byte(plugin), 0o755); err != nil {
+	// 0755: SwiftBar runs the plugin, so it must be executable.
+	if err := atomicfile.Write(path, []byte(plugin), 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
@@ -333,37 +337,6 @@ func claudeSettingsPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".claude", "settings.json")
-}
-
-// writeFileAtomic writes b via a temp file + rename in the target directory,
-// so an interrupted write can't leave a truncated settings.json behind
-// (#194 L-02, the same contract as the cache writes). The file gets perm:
-// 0600 for settings and backups (what CreateTemp gave them before), 0755 for
-// the SwiftBar plugin, which must be executable.
-func writeFileAtomic(path string, b []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return nil
 }
 
 // claudeStatusLineCommand extracts the configured statusLine command, or a

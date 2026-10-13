@@ -44,6 +44,9 @@
     in the cache dir: the short-lived status cache (`status.json`), the
     Claude snapshot, derived caches (daily history, session trees), the
     notification record, and the cross-process locks.
+  - `internal/atomicfile` replaces a file through a temp file and a rename
+    (retried on Windows while another process has the file open). The cache,
+    `config.json`, and the files `tacho setup --write` writes all use it.
   - `internal/render`, `internal/swiftbar`, and `internal/menubar` (the menu
     bar gauge image) render views. The preset catalog in
     `internal/render/presets.go` is mirrored by hand in the preset tables of

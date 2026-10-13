@@ -123,6 +123,23 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+// A Save whose rename fails returns the error and leaves no temp file in the
+// config dir (#379): here a directory takes config.json's place, which no
+// rename can replace.
+func TestSaveRemovesTempWhenRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.Mkdir(filepath.Join(dir, "config.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(Config{Tools: []string{schema.ToolCodex}}); err == nil {
+		t.Fatal("Save over a directory succeeded")
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*")); len(leftovers) != 0 {
+		t.Errorf("leftover temp files after a failed Save: %v", leftovers)
+	}
+}
+
 func TestLoadPartialFileKeepsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)

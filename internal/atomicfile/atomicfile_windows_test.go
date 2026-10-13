@@ -1,6 +1,6 @@
 //go:build windows
 
-package cache
+package atomicfile
 
 import (
 	"errors"
@@ -18,8 +18,8 @@ func writeFile(t *testing.T, path, data string) {
 	}
 }
 
-// openReader opens path the way the cache's readers do and closes it at the
-// end of the test unless the caller closes it first.
+// openReader opens path the way tacho's readers do and closes it at the end
+// of the test unless the caller closes it first.
 func openReader(t *testing.T, path string) *os.File {
 	t.Helper()
 	f, err := os.Open(path)
@@ -75,22 +75,22 @@ func TestReplaceFileWaitsForAReader(t *testing.T) {
 }
 
 // A write whose rename stays blocked past the retry budget fails, leaves
-// the cache file as it was, and removes its temp file.
-func TestWriteJSONGivesUpOnAHeldFile(t *testing.T) {
-	dir := setCacheDir(t)
+// the file as it was, and removes its temp file.
+func TestWriteGivesUpOnAHeldFile(t *testing.T) {
+	dir := t.TempDir()
 	path := filepath.Join(dir, "held.json")
-	writeFile(t, path, `"old"`)
+	writeFile(t, path, "old")
 	openReader(t, path)
 
 	start := time.Now()
-	err := WriteJSON("held.json", "new")
+	err := Write(path, []byte("new"), 0o600)
 	if !transientRenameError(err) {
-		t.Fatalf("WriteJSON over a held file = %v; want the rename's transient error", err)
+		t.Fatalf("Write over a held file = %v; want the rename's transient error", err)
 	}
 	if took := time.Since(start); took > 5*renameRetryBudget {
-		t.Errorf("WriteJSON took %v; want it to stop near the %v budget", took, renameRetryBudget)
+		t.Errorf("Write took %v; want it to stop near the %v budget", took, renameRetryBudget)
 	}
-	if b, err := os.ReadFile(path); err != nil || string(b) != `"old"` {
+	if b, err := os.ReadFile(path); err != nil || string(b) != "old" {
 		t.Errorf("held file = %q, %v; want it unchanged", b, err)
 	}
 	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*")); len(leftovers) != 0 {
