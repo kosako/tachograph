@@ -663,18 +663,11 @@ func earliestObservation(limits []schema.Limit) time.Time {
 	return earliest
 }
 
-// loadTemplate reads ~/.config/tachograph/statusline.tmpl (XDG and
-// TACHO_CONFIG_DIR aware), falling back to the built-in default.
+// loadTemplate reads statusline.tmpl from the config directory (config.Dir,
+// where `tacho config statusline-preset` writes it), falling back to the
+// built-in default.
 func loadTemplate() string {
-	dir := os.Getenv("TACHO_CONFIG_DIR")
-	if dir == "" {
-		if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-			dir = filepath.Join(x, "tachograph")
-		} else if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, ".config", "tachograph")
-		}
-	}
-	if dir != "" {
+	if dir := config.Dir(); dir != "" {
 		if b, err := os.ReadFile(filepath.Join(dir, "statusline.tmpl")); err == nil {
 			if t := render.FirstTemplateLine(string(b)); t != "" {
 				return t
