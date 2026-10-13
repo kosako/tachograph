@@ -1,14 +1,43 @@
-package cache
+// Package atomicfile replaces a file through a temp file and a rename, so a
+// reader sees the old content or the new, never a partial write. The cache,
+// the config, and the files `tacho setup --write` writes all go through it,
+// so a failed write is handled the same way everywhere (#379).
+package atomicfile
 
 import (
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"time"
 )
 
-// renameRetryBudget bounds how long a cache write keeps retrying a rename
-// that another tacho process is in the way of for the moment (#371).
+// renameRetryBudget bounds how long a write keeps retrying a rename that
+// another tacho process is in the way of for the moment (#371).
 const renameRetryBudget = 500 * time.Millisecond
+
+// Write writes b to a temp file in path's directory, gives it perm, and
+// renames it over path. The temp file is removed whenever the write fails,
+// so a failure leaves path as it was and nothing beside it.
+func Write(path string, b []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(b)
+	if err == nil {
+		err = tmp.Chmod(perm)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = replaceFile(tmp.Name(), path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
+}
 
 // replaceFile renames tmp over path. A rename that fails with an error
 // transientRenameError accepts — on Windows, another process has the file

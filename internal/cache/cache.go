@@ -1,8 +1,8 @@
 // Package cache keeps tacho's state in the cache dir: the short-lived status
 // cache shared by all renderers, the Claude snapshot, derived caches (daily
 // history, session trees), the notification record, and the locks around
-// them. Writes are tmp-file + rename so concurrent readers never see partial
-// JSON.
+// them. Writes go through atomicfile (tmp-file + rename) so concurrent readers
+// never see partial JSON.
 package cache
 
 import (
@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kosako/tachograph/internal/atomicfile"
 	"github.com/kosako/tachograph/internal/schema"
 )
 
@@ -269,24 +270,7 @@ func writeJSON(name string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, name+".tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := replaceFile(tmp.Name(), filepath.Join(dir, name)); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return nil
+	return atomicfile.Write(filepath.Join(dir, name), b, 0o600)
 }
 
 // DailyHistoryEntry is one tool's figure for one closed day in the rolling
