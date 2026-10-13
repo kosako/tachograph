@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/atomicfile"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/setup"
@@ -326,17 +327,15 @@ func goBinFrom(gobin, gopath string) string {
 	return ""
 }
 
-// claudeSettingsPath returns ~/.claude/settings.json, honoring
-// CLAUDE_CONFIG_DIR the way Claude Code itself does.
+// claudeSettingsPath returns settings.json in the Claude Code config root
+// (agentpath.ClaudeRoot: CLAUDE_CONFIG_DIR, else ~/.claude), the way Claude
+// Code itself finds it.
 func claudeSettingsPath() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, "settings.json")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	root, ok := agentpath.ClaudeRoot("")
+	if !ok {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "settings.json")
+	return filepath.Join(root, "settings.json")
 }
 
 // claudeStatusLineCommand extracts the configured statusLine command, or a
