@@ -59,15 +59,28 @@ func TestForSpeed(t *testing.T) {
 }
 
 // The premium multiplies the standard rate in force, so a pricing.json
-// override of the standard rate carries into fast mode.
+// override of the standard rate carries into fast mode. The rate is looked
+// up by the id as given — only the premium's lookup drops the suffixes — so
+// an override keyed by a dated id applies to that id alone.
 func TestForSpeedFollowsOverride(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
-	if err := os.WriteFile(filepath.Join(dir, "pricing.json"), []byte(`{"claude-opus-5-5":{"input":6}}`), 0o644); err != nil {
+	over := `{"claude-opus-5-5":{"input":6},` +
+		`"claude-opus-5-5-20260923":{"input":7,"output":30,"cache_read":0.3,"cache_write":9}}`
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"), []byte(over), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, ok := Load().ForSpeed("claude-opus-5-5", SpeedFast)
-	if want := (Rate{In: 12, Out: 40, CacheRead: 0.4, CacheWrite: 10}); !ok || r != want {
-		t.Errorf("ForSpeed with an input override = %+v, %v; want %+v", r, ok, want)
+	tab := Load()
+	for _, c := range []struct {
+		model string
+		want  Rate
+	}{
+		{"claude-opus-5-5", Rate{In: 12, Out: 40, CacheRead: 0.4, CacheWrite: 10}},
+		{"claude-opus-5-5[1m]", Rate{In: 12, Out: 40, CacheRead: 0.4, CacheWrite: 10}},
+		{"claude-opus-5-5-20260923", Rate{In: 14, Out: 60, CacheRead: 0.6, CacheWrite: 18}},
+	} {
+		if r, ok := tab.ForSpeed(c.model, SpeedFast); !ok || r != c.want {
+			t.Errorf("ForSpeed(%q) with overrides = %+v, %v; want %+v", c.model, r, ok, c.want)
+		}
 	}
 }
