@@ -470,7 +470,13 @@ transcript records 1-hour cache writes, they are priced at 2x the input rate
 (`cache_write` is the 5-minute rate and does not apply to them). Long-prompt
 premiums are not modeled: Claude Haiku 5.5, for example, bills every category
 at 5x for prompts over 100K tokens, but tacho counts them at the standard rate,
-so those come out low. Models not in the price table still count toward the
+so those come out low. A response served in Claude's fast mode (Opus 5.5 /
+Opus 5 / Opus 4.8; the transcript's usage reports `speed` as `fast`) is priced
+at twice that model's rate — its `pricing.json` override, if any — in all four
+categories, matching the published fast-mode prices. A response that ran at
+standard speed is priced at the standard rate even with `/fast` on, and a
+`fast` speed on any other model keeps the standard rate rather than a guessed
+premium. Models not in the price table still count toward the
 token total, but are excluded from the cost calculation and the cost total (if
 no priced model ran that day, cost shows as unknown, `--`). If `pricing.json`
 can't be parsed (bad JSON, or a value of the wrong type), the whole file is

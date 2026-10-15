@@ -109,7 +109,7 @@
 | `used_pct` | 「使った割合」(%)。ツールが報告した値をそのまま入れる(通常は 0–100 だが範囲外の補正はせず、0–100 に丸めるのは表示のときだけ)。ツールが値を報告しない枠(キー欠落 / null)は null のまま(0 とはみなさない、#322)。JSON はこの意味のまま。レンダラは既定で残量 `100 - used_pct` を表示し(`limits.display: used` で使用率)、色分けは `used_pct` 基準(#223 / #228) |
 | `fallback` | `limits: null` のときの主表示(セッショントークン数+推定コスト)。値自体は `limits` の有無に関わらず取れる限り入る(`session_tokens` は `session.tokens.total` と同じ値) |
 | `daily.tokens` / `session_today.tokens` | 課金対象トークン(`input` + `output`。`input` は cache write / cache read 込み)で、`session.tokens.total` および `cost_usd` と分母が同じ(#234)。`input` / `cached_input` / `output` の内訳を併せて持つ。Codex は `total_token_usage` の増分をそのまま使う |
-| `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算。Codex の daily は `token_count` イベント単位の増分をその時点の `turn_context.model` 単価で積算(セッション内のモデル切替に追随)。Codex の `fallback.estimated_cost_usd`(session cost)は累積値しか持たないため「現在モデル × 全累積」の概算 |
+| `daily.cost_usd` / `session_today.cost_usd` | 料金表の `cache_read` / `cache_write` を使う推定値。Claude transcript が `cache_creation.ephemeral_1h_input_tokens` を持つ場合、1h cache write は input 単価の2倍として計算。Claude の fast mode の応答(usage の `speed` が `fast`)は、Opus 5.5 / Opus 5 / Opus 4.8 に限り単価の 4 項目を 2 倍にして計算(#407)。Codex の daily は `token_count` イベント単位の増分をその時点の `turn_context.model` 単価で積算(セッション内のモデル切替に追随)。Codex の `fallback.estimated_cost_usd`(session cost)は累積値しか持たないため「現在モデル × 全累積」の概算 |
 
 ## データソース対応表
 

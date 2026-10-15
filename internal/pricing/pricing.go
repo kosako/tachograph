@@ -236,6 +236,68 @@ func (t Table) match(model string) (Rate, bool) {
 	return t[best], true
 }
 
+// SpeedFast is the usage.speed an Anthropic response reports when it was
+// served in fast mode ("standard" otherwise).
+const SpeedFast = "fast"
+
+// fastModeMultipliers are Anthropic's fast-mode premiums, by bare model id
+// (see fastModelID): a fast response bills every category at the standard
+// rate times this
+// (Opus 5.5 $8/$40 against $4/$20, Opus 5 and Opus 4.8 $10/$50 against
+// $5/$25), prompt-caching multipliers applying on top so cache reads and
+// writes scale too. Fast mode exists only for these models and only on the
+// first-party API (#407).
+var fastModeMultipliers = map[string]float64{
+	"claude-opus-5-5": 2,
+	"claude-opus-5":   2,
+	"claude-opus-4-8": 2,
+}
+
+// ForSpeed returns the rate for a model at the speed one response reports
+// (its usage.speed). A fast response on a model with a fast-mode premium
+// bills at the standard rate — built-in or pricing.json — times that
+// premium. Any other speed, or a fast response on a model without a known
+// premium, bills at the standard rate: an unknown premium isn't guessed.
+func (t Table) ForSpeed(model, speed string) (Rate, bool) {
+	r, ok := t.For(model)
+	if !ok || speed != SpeedFast {
+		return r, ok
+	}
+	if m, known := fastModeMultipliers[fastModelID(model)]; known {
+		r = Rate{In: r.In * m, Out: r.Out * m, CacheRead: r.CacheRead * m, CacheWrite: r.CacheWrite * m}
+	}
+	return r, true
+}
+
+// fastModelID reduces a model id to the bare form fastModeMultipliers is
+// keyed by, dropping what the price lookup tolerates around a model's id:
+// the Bedrock provider prefix (canonical), a context-window suffix such as
+// "[1m]", and a date suffix such as "-20260923". Anything else, a "-preview"
+// say, names a different id and keeps no premium.
+func fastModelID(model string) string {
+	id := canonical(model)
+	if i := strings.IndexByte(id, '['); i != -1 && strings.HasSuffix(id, "]") {
+		id = id[:i]
+	}
+	if i := strings.LastIndexByte(id, '-'); i != -1 && isDate(id[i+1:]) {
+		id = id[:i]
+	}
+	return id
+}
+
+// isDate reports whether s is an 8-digit YYYYMMDD-style date.
+func isDate(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // Cost returns the USD cost of a token breakdown at the given rate.
 func (r Rate) Cost(in, cacheWrite, cacheRead, out int64) float64 {
 	return r.CostByTTL(in, cacheWrite, 0, 0, cacheRead, out)
