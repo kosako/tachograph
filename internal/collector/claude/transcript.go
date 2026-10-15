@@ -31,6 +31,10 @@ type Usage struct {
 	CacheReadInputTokens     int64          `json:"cache_read_input_tokens"`
 	OutputTokens             int64          `json:"output_tokens"`
 	CacheCreation            *CacheCreation `json:"cache_creation"`
+	// Speed is "fast" for a response served in fast mode and "standard"
+	// otherwise; transcripts from before the field was recorded leave it
+	// empty. It sets which rate the response bills at (#407).
+	Speed string `json:"speed"`
 }
 
 type CacheCreation struct {

@@ -476,7 +476,7 @@ func claudeLineTotals(line claude.TranscriptLine, prices pricing.Table) Totals {
 		Output:      u.OutputTokens,
 		Tokens:      in + u.OutputTokens,
 	}
-	if r, ok := prices.For(line.Message.Model); ok {
+	if r, ok := prices.ForSpeed(line.Message.Model, u.Speed); ok {
 		t.Cost = r.CostByTTL(u.InputTokens, cacheWrite5m, cacheWrite1h, cacheWriteUnknown, u.CacheReadInputTokens, u.OutputTokens)
 	}
 	return t
