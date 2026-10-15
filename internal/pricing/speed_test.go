@@ -24,13 +24,23 @@ func TestForSpeed(t *testing.T) {
 		{"claude-opus-5", SpeedFast, Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}},
 		{"claude-opus-4-8", SpeedFast, Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}},
 		{"anthropic.claude-opus-4-8", SpeedFast, double(tab["claude-opus"])}, // the canonical id decides
+		// The date and context-window suffixes the price lookup accepts.
+		{"claude-opus-5-5-20260923", SpeedFast, double(tab["claude-opus-5-5"])},
+		{"claude-opus-5-5[1m]", SpeedFast, double(tab["claude-opus-5-5"])},
+		{"claude-opus-5-5-20260923[1m]", SpeedFast, double(tab["claude-opus-5-5"])},
+		{"claude-opus-5[1m]", SpeedFast, double(tab["claude-opus"])},
+		{"claude-opus-5-20260501", SpeedFast, double(tab["claude-opus"])},
+		{"claude-opus-4-8-20260527", SpeedFast, double(tab["claude-opus"])},
 		// Standard, or speed not recorded: the standard rate.
 		{"claude-opus-5-5", "standard", tab["claude-opus-5-5"]},
 		{"claude-opus-5-5", "", tab["claude-opus-5-5"]},
+		{"claude-opus-5-5[1m]", "standard", tab["claude-opus-5-5"]},
 		{"claude-opus-4-8", "standard", tab["claude-opus"]},
 		// No known premium: the standard rate, not a guessed one.
 		{"claude-opus-4-7", SpeedFast, tab["claude-opus"]},
+		{"claude-opus-4-7-20260416", SpeedFast, tab["claude-opus"]},
 		{"claude-opus-5-5-preview", SpeedFast, tab["claude-opus-5-5"]},
+		{"claude-opus-5-5-2026", SpeedFast, tab["claude-opus-5-5"]}, // not an 8-digit date
 		{"claude-sonnet-5-5", SpeedFast, tab["claude-sonnet-5-5"]},
 	}
 	for _, c := range cases {
