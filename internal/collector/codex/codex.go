@@ -88,7 +88,7 @@ func pickSession(dir string) pick {
 	acc := pick{sawFile: len(files) > 0}
 	for _, f := range files {
 		if acc.tc != nil {
-			info, err := os.Stat(f.path)
+			info, err := os.Stat(f.Path)
 			if err != nil {
 				acc.readErr = err
 				continue
@@ -101,7 +101,7 @@ func pickSession(dir string) pick {
 				continue
 			}
 		}
-		tc, lim, turn, err := sessionEvents(f.path)
+		tc, lim, turn, err := sessionEvents(f.Path)
 		if err != nil {
 			acc.readErr = err
 			continue
@@ -109,7 +109,7 @@ func pickSession(dir string) pick {
 		if tc != nil {
 			if ts, err := time.Parse(time.RFC3339Nano, tc.timestamp); err == nil &&
 				(acc.tc == nil || ts.After(acc.ts)) {
-				acc.tc, acc.turn, acc.path, acc.ts = tc, turn, f.path, ts
+				acc.tc, acc.turn, acc.path, acc.ts = tc, turn, f.Path, ts
 			}
 		}
 		if lim != nil {
@@ -133,69 +133,21 @@ func limitsFloor(sessionTS time.Time) time.Time {
 	return sessionTS.Add(-schema.StaleAfter(schema.ToolCodex))
 }
 
-// rolloutFile is one .jsonl candidate with its modification time.
-type rolloutFile struct {
-	path string
-	mod  time.Time
-}
-
-// rolloutsByMtime lists every rollout under the YYYY/MM/DD tree, newest
-// mtime first. Equal mtimes tie-break by path (descending) so selection is
-// deterministic rather than dependent on directory read order. An entry
-// whose stat fails stays listed with a zero mtime (sorting last): the mtime
-// only orders the visit, and the caller's stat/read surfaces the error so a
-// listed-but-unreadable rollout reads as read_error, not as absent.
-func rolloutsByMtime(dir string) []rolloutFile {
-	var out []rolloutFile
-	for _, day := range dayDirsDesc(dir) {
-		entries, err := os.ReadDir(day)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-				continue
-			}
-			var mod time.Time
-			if info, err := e.Info(); err == nil {
-				mod = info.ModTime()
-			}
-			out = append(out, rolloutFile{filepath.Join(day, e.Name()), mod})
-		}
-	}
+// rolloutsByMtime lists every rollout (ListRollouts), newest mtime first.
+// Equal mtimes tie-break by path (descending) so selection is deterministic
+// rather than dependent on directory read order. A directory that can't be
+// listed is a gap, not a failure: the pick is made from what was listed. An
+// entry whose stat fails stays listed with a zero mtime (sorting last): the
+// mtime only orders the visit, and the caller's stat/read surfaces the error
+// so a listed-but-unreadable rollout reads as read_error, not as absent.
+func rolloutsByMtime(dir string) []RolloutFile {
+	out, _ := ListRollouts(dir) // failures leave gaps; see above
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].mod.Equal(out[j].mod) {
-			return out[i].path > out[j].path
+		if out[i].Mod.Equal(out[j].Mod) {
+			return out[i].Path > out[j].Path
 		}
-		return out[i].mod.After(out[j].mod)
+		return out[i].Mod.After(out[j].Mod)
 	})
-	return out
-}
-
-// dayDirsDesc lists the YYYY/MM/DD leaf directories under dir, newest first by
-// name at each level.
-func dayDirsDesc(dir string) []string {
-	var days []string
-	for _, y := range subdirsDesc(dir) {
-		for _, m := range subdirsDesc(y) {
-			days = append(days, subdirsDesc(m)...)
-		}
-	}
-	return days
-}
-
-// subdirsDesc lists dir's immediate subdirectories in descending name order.
-func subdirsDesc(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].IsDir() {
-			out = append(out, filepath.Join(dir, entries[i].Name()))
-		}
-	}
 	return out
 }
 

@@ -1,16 +1,102 @@
-// Rollout-event parsing shared by this collector and internal/daily. The
-// on-disk rollout format is an external contract owned by Codex CLI, so its
-// event envelope, payload shapes, and session-id rule live here in one place.
+// Rollout discovery and event parsing shared by this collector and
+// internal/daily. The on-disk rollout layout and format are an external
+// contract owned by Codex CLI, so where rollouts live, their event envelope,
+// payload shapes, and session-id rule live here in one place.
 
 package codex
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"math"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"time"
 )
+
+// RolloutFile is one rollout found by ListRollouts: its path, the
+// YYYY/MM/DD directory holding it, and its mtime (zero when it couldn't be
+// read).
+type RolloutFile struct {
+	Path string
+	Day  string
+	Mod  time.Time
+}
+
+// ListRollouts lists every rollout under sessions/YYYY/MM/DD — each
+// non-directory .jsonl entry of a day directory — in directory-name order.
+// Other entries at any level are skipped. A missing sessions directory means
+// no rollouts yet, not a failure.
+//
+// A failure doesn't stop the walk: a directory that can't be listed is
+// skipped whole, and an entry whose mtime can't be read stays listed with a
+// zero mtime. err is the first such failure, and what it means is the
+// caller's call: the collector still picks from what was listed, while daily
+// takes any gap as unknown totals (#187).
+func ListRollouts(sessions string) (files []RolloutFile, err error) {
+	years, err := os.ReadDir(sessions)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var first error
+	fail := func(err error) {
+		if first == nil {
+			first = err
+		}
+	}
+	for _, y := range years {
+		if !y.IsDir() {
+			continue
+		}
+		for _, month := range subdirs(filepath.Join(sessions, y.Name()), fail) {
+			for _, day := range subdirs(month, fail) {
+				entries, err := os.ReadDir(day)
+				if err != nil {
+					fail(err)
+					continue
+				}
+				for _, e := range entries {
+					if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+						continue
+					}
+					var mod time.Time
+					if info, err := e.Info(); err == nil {
+						mod = info.ModTime()
+					} else {
+						fail(err)
+					}
+					files = append(files, RolloutFile{filepath.Join(day, e.Name()), day, mod})
+				}
+			}
+		}
+	}
+	return files, first
+}
+
+// subdirs lists dir's immediate subdirectories in name order. A directory
+// that can't be listed goes to fail and yields none — not the part ReadDir
+// read before failing.
+func subdirs(dir string, fail func(error)) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fail(err)
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
+}
 
 // Event is one rollout line's envelope.
 type Event struct {
