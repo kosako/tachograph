@@ -297,10 +297,11 @@ func parse(b []byte) (Config, error) {
 	if c.Limits.Display == "" {
 		c.Limits.Display = DefaultLimitDisplay
 	}
-	// Out-of-range or duplicate thresholds in a hand-edited file are dropped
-	// rather than failing the load (Load never fails); `config set` rejects
-	// them up front. Every ignored value is kept as a warning for doctor /
-	// config show (#230).
+	// Out-of-range thresholds in a hand-edited file are dropped rather than
+	// failing the load (Load never fails), each kept as a warning for
+	// doctor / config show (#230); `config set` rejects them up front.
+	// Duplicates are merged into one silently, here and in `config set`
+	// alike (NormalizeThresholds).
 	c.warnings = valueWarnings(c, c.Notify.Thresholds)
 	c.Notify.Thresholds = NormalizeThresholds(c.Notify.Thresholds)
 	return c, nil
