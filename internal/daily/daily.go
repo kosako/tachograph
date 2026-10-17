@@ -528,9 +528,12 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 		window[DayKey(d)] = true
 	}
 
-	files, err := codexRolloutFiles(sessions)
+	// A listing or stat failure leaves a day's contents unknown, so it is an
+	// error (callers keep daily null, not 0) rather than a silent gap (#187).
+	// No sessions directory yet is a real zero, not unknown.
+	files, err := codex.ListRollouts(sessions)
 	if err != nil {
-		return nil, err // unknown totals; callers keep daily null, not 0
+		return nil, err
 	}
 
 	// Dedup by session id (the UUID in the rollout filename) so a session
@@ -541,30 +544,30 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	// any parsable timestamp the cumulative can't be split across days, so it
 	// is attributed to the file's own day directory — as a snapshot at the
 	// end of that day — and ignored when the directory is outside the window.
-	addRollout := func(f codexRolloutFile, ro codexRollout) {
+	addRollout := func(f codex.RolloutFile, ro codexRollout) {
 		if ro.last == nil {
 			return
 		}
 		if !ro.tsParsed {
-			day, ok := dayDirs[f.day]
+			day, ok := dayDirs[f.Day]
 			if !ok {
 				return
 			}
 			ro.events = []codexTC{{ts: DayStartFrom(day, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model}}
 		}
-		key, ok := codex.SessionID(filepath.Base(f.path))
+		key, ok := codex.SessionID(filepath.Base(f.Path))
 		if !ok {
-			key = f.path
+			key = f.Path
 		}
 		mergeCodexRollout(bySession, key, ro)
 	}
-	var old []codexRolloutFile
+	var old []codex.RolloutFile
 	for _, f := range files {
-		if f.mod.Before(from) {
+		if f.Mod.Before(from) {
 			old = append(old, f)
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, from)
+		ro, err := codexRolloutUsage(f.Path, from)
 		if err != nil {
 			return nil, err // unknown totals; callers keep daily null, not 0
 		}
@@ -575,9 +578,9 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	// window opened as candidates after all (their content, not their mtime,
 	// decides the day split). This runs before base-linking so a promoted
 	// session's own delta base isn't skipped by ordering.
-	var bases []codexRolloutFile
+	var bases []codex.RolloutFile
 	for _, f := range old {
-		info, err := os.Stat(f.path)
+		info, err := os.Stat(f.Path)
 		if err != nil {
 			// Can't confirm an append: keep the enumeration-time "old"
 			// classification instead of erroring, so long-dead junk (e.g. a
@@ -592,7 +595,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 			bases = append(bases, f)
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, from)
+		ro, err := codexRolloutUsage(f.Path, from)
 		if err != nil {
 			return nil, err // unknown totals; callers keep daily null, not 0
 		}
@@ -603,11 +606,11 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	// holds the delta base (the last pre-window snapshot). Only files sharing
 	// a session id seen in the window can contribute, so only those are read.
 	for _, f := range bases {
-		id, ok := codex.SessionID(filepath.Base(f.path))
+		id, ok := codex.SessionID(filepath.Base(f.Path))
 		if !ok || bySession[id] == nil {
 			continue
 		}
-		ro, err := codexRolloutUsage(f.path, from)
+		ro, err := codexRolloutUsage(f.Path, from)
 		if err != nil {
 			return nil, err // unknown totals; callers keep daily null, not 0
 		}
@@ -668,68 +671,6 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 		i = j
 	}
 	return out
-}
-
-// codexRolloutFile is one rollout candidate: its path, the day directory
-// holding it, and its mtime.
-type codexRolloutFile struct {
-	path string
-	day  string
-	mod  time.Time
-}
-
-// codexRolloutFiles lists every rollout under sessions/YYYY/MM/DD with its
-// mtime. Listing or stat failures make a day's contents unknown, so they are
-// errors (callers keep daily null) rather than silent gaps (#187). Non-.jsonl
-// and non-directory entries are skipped.
-func codexRolloutFiles(sessions string) ([]codexRolloutFile, error) {
-	years, err := os.ReadDir(sessions)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil // no sessions yet: a real zero, not unknown
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []codexRolloutFile
-	for _, y := range years {
-		if !y.IsDir() {
-			continue
-		}
-		months, err := os.ReadDir(filepath.Join(sessions, y.Name()))
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range months {
-			if !m.IsDir() {
-				continue
-			}
-			days, err := os.ReadDir(filepath.Join(sessions, y.Name(), m.Name()))
-			if err != nil {
-				return nil, err
-			}
-			for _, d := range days {
-				if !d.IsDir() {
-					continue
-				}
-				day := filepath.Join(sessions, y.Name(), m.Name(), d.Name())
-				entries, err := os.ReadDir(day)
-				if err != nil {
-					return nil, err
-				}
-				for _, e := range entries {
-					if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-						continue
-					}
-					info, err := e.Info()
-					if err != nil {
-						return nil, err
-					}
-					out = append(out, codexRolloutFile{filepath.Join(day, e.Name()), day, info.ModTime()})
-				}
-			}
-		}
-	}
-	return out, nil
 }
 
 // mergeCodexRollout folds one rollout into its session's entry. Cumulative
