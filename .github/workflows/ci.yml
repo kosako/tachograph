@@ -42,7 +42,9 @@ jobs:
       # on a release tag that's already public — on the oldest Node that
       # npm/package.json's engines accepts (read from it, so the two can't
       # drift) as well as the current LTS, so an API newer than that floor
-      # fails here, not in a user's postinstall (#382).
+      # fails here, not in a user's postinstall (#382). The floor is padded to
+      # N.N.N, as setup-node resolves a bare 22 to the newest 22.x rather than
+      # 22.0.0, and the run checks it got exactly that version (#416).
       - name: Node floor from npm/package.json engines
         id: node-floor
         run: |
@@ -52,12 +54,22 @@ jobs:
             echo "::error::npm/package.json engines.node is ${engines:-not a string}; want >=N (or >=N.N, >=N.N.N) to test the floor"
             exit 1
           fi
-          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          version="${BASH_REMATCH[1]}"
+          until [[ "$version" == *.*.* ]]; do version+=.0; done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ steps.node-floor.outputs.version }}
-      - run: node test.js
+      - name: node test.js on the Node floor
+        run: |
+          if [ "$(node --version)" != "v$NODE_FLOOR" ]; then
+            echo "::error::Node is $(node --version), want exactly the floor v$NODE_FLOOR"
+            exit 1
+          fi
+          node test.js
         working-directory: npm
+        env:
+          NODE_FLOOR: ${{ steps.node-floor.outputs.version }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
