@@ -95,6 +95,12 @@ func TestReportSnapshot(t *testing.T) {
 		{"other schema", nil, raw(`{"schema_version":"9.9","collected_at":"` + now.Format(time.RFC3339) + `"}`),
 			`present but not used — written for schema "9.9", this tacho reads ` + schema.Version},
 		{"not JSON", nil, raw(`{`), "present but not used — not a valid snapshot"},
+		{"unreadable", nil, func(t *testing.T, dir string) {
+			// A directory where the snapshot goes: there, but not readable as a file.
+			if err := os.Mkdir(filepath.Join(dir, "snapshot-"+schema.ToolClaudeCode+".json"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "unreadable: "},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()

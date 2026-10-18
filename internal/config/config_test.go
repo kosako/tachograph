@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -120,6 +121,31 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if got.Menubar.Style != StyleNumber || got.Menubar.Metric != "cost" {
 		t.Errorf("Menubar = %+v", got.Menubar)
+	}
+}
+
+// config.json is owner-only (0600), new or replacing a looser one.
+func TestSaveIsOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix permission bits on Windows, only the read-only attribute")
+	}
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "config.json")
+	for _, when := range []string{"new", "replacing a 0644 file"} {
+		if err := Save(Config{Tools: []string{schema.ToolCodex}}); err != nil {
+			t.Fatalf("Save (%s): %v", when, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("config.json (%s): mode %v, want 0600", when, got)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

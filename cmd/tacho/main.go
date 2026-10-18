@@ -443,8 +443,9 @@ func appearanceDark() bool {
 
 // systemDark reports macOS dark mode. Unlike the menu bar (which follows the
 // wallpaper), the dropdown menu follows the system appearance, so this is the
-// right signal for the dropdown text color.
-func systemDark() bool {
+// right signal for the dropdown text color. It's a var so tests don't read
+// the machine's real preferences.
+var systemDark = func() bool {
 	out, _ := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
 	return strings.Contains(string(out), "Dark")
 }
