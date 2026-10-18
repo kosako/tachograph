@@ -7,6 +7,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/rand/v2"
@@ -53,9 +54,17 @@ func Write(path string, b []byte, perm os.FileMode) error {
 // nothing is changed. tacho's own cache files go through Write instead: a
 // link planted in the cache dir is replaced, never followed elsewhere.
 func WriteThrough(path string, b []byte, perm os.FileMode) error {
+	// Only a path known not to exist, or known not to be a link, is written
+	// in place: after any other failure to look, it may be a link that a
+	// rename would replace.
 	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
-		return Write(path, b, perm) // not a link: a missing path is created
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return Write(path, b, perm) // a missing path is created
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink == 0:
+		return Write(path, b, perm)
 	}
 	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
