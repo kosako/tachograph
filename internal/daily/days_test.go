@@ -1,6 +1,7 @@
 package daily
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -222,5 +223,39 @@ func TestCodexDaysErrorWhenWindowDayDirUnreadable(t *testing.T) {
 
 	if _, err := CodexDays(root, today.AddDate(0, 0, -1), today.AddDate(0, 0, 1), noPrices); err == nil {
 		t.Error("CodexDays = nil error, want an error for the unlistable day directory")
+	}
+}
+
+// An unreadable directory outside the window makes the result unknown too
+// (#187): a resumed session's rollout stays in its start day's directory
+// however old, so what can't be listed may hold today's growth. Only the
+// rollout listing reports it — the window's day checks never look there —
+// whether a day's directory or a month's is unreadable.
+func TestCodexTotalsErrorWhenOldDirUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory that permission bits make unreadable")
+	}
+	for _, level := range []string{"day", "month"} {
+		t.Run(level, func(t *testing.T) {
+			root := t.TempDir()
+			now, _ := daysClock()
+			writeFile(t, filepath.Join(codexDayDir(root, now, 0), "s1.jsonl"), codexSession(100), now)
+			dir := codexDayDir(root, now, 40) // in an earlier month than today
+			writeFile(t, filepath.Join(dir, "s2.jsonl"), codexSession(9999), now.AddDate(0, 0, -40))
+			if got := mustCodexTotals(t, root, now, noPrices); got.Tokens != 100 {
+				t.Fatalf("readable: Tokens = %d, want 100 (today's rollout only)", got.Tokens)
+			}
+			if level == "month" {
+				dir = filepath.Dir(dir)
+			}
+			if err := os.Chmod(dir, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+			if _, err := CodexTotals(root, now, noPrices); err == nil {
+				t.Errorf("CodexTotals = nil error, want an error for the unlistable %s directory", level)
+			}
+		})
 	}
 }

@@ -19,8 +19,10 @@ import (
 // daily-history.json is read or written and the dropdown has no history
 // section — while show (the default) computes and caches it (#302). The
 // agents' data dirs are empty temp dirs, so no real transcripts are read;
-// the cache and config dirs are temporary too.
+// the cache and config dirs are temporary too, and the system appearance is
+// a stand-in.
 func TestRunSwiftbarHistoryHiddenSkipsCache(t *testing.T) {
+	stubSystemDark(t, false)
 	cacheDir, cfgDir := t.TempDir(), t.TempDir()
 	t.Setenv("TACHO_CACHE_DIR", cacheDir)
 	t.Setenv("TACHO_CONFIG_DIR", cfgDir)
@@ -60,6 +62,15 @@ func TestRunSwiftbarHistoryHiddenSkipsCache(t *testing.T) {
 	if !strings.Contains(out, "日の cost/tokens") || !strings.Contains(out, "----☑ 直近 7 日 | bash=") {
 		t.Errorf("history section or its checked entry missing with the history shown:\n%s", out)
 	}
+}
+
+// stubSystemDark stands in for the system appearance the dropdown follows,
+// so a SwiftBar tick in a test doesn't read the machine's real preferences.
+func stubSystemDark(t *testing.T, dark bool) {
+	t.Helper()
+	orig := systemDark
+	systemDark = func() bool { return dark }
+	t.Cleanup(func() { systemDark = orig })
 }
 
 // notifyTick runs the notification pass of one SwiftBar tick, with

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,34 +62,46 @@ func TestListRolloutsLayout(t *testing.T) {
 }
 
 // A directory that can't be listed doesn't stop the walk: the rest is still
-// listed for the collector, and the failure is reported for daily (#187).
+// listed for the collector, and the failure is reported for daily (#187) —
+// a day's directory and a month's alike, each the only one unreadable.
 func TestListRolloutsKeepsWalkingPastUnreadableDir(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a directory that permission bits make unreadable")
 	}
-	sessions := filepath.Join(t.TempDir(), "sessions")
-	d23 := filepath.Join(sessions, "2026", "05", "23")
-	d24 := filepath.Join(sessions, "2026", "05", "24")
-	june := filepath.Join(sessions, "2026", "06")
-	d0601 := filepath.Join(june, "01")
-	mkdirs(t, d23, d24, d0601)
-	mod := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
-	writeRollout(t, d23, "a.jsonl", "{}", mod)
-	writeRollout(t, d24, "b.jsonl", "{}", mod)
-	writeRollout(t, d0601, "c.jsonl", "{}", mod)
-	for _, d := range []string{d23, june} {
-		if err := os.Chmod(d, 0); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(d, 0o755) })
-	}
+	for _, c := range []struct {
+		level, dir string   // the unreadable directory, under sessions
+		want       []string // the rollouts still listed, under sessions
+	}{
+		{"day", "2026/05/23", []string{"2026/05/24/b.jsonl", "2026/06/01/c.jsonl"}},
+		{"month", "2026/06", []string{"2026/05/23/a.jsonl", "2026/05/24/b.jsonl"}},
+	} {
+		t.Run(c.level, func(t *testing.T) {
+			sessions := filepath.Join(t.TempDir(), "sessions")
+			mod := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
+			for _, f := range []string{"2026/05/23/a.jsonl", "2026/05/24/b.jsonl", "2026/06/01/c.jsonl"} {
+				day := filepath.Join(sessions, filepath.Dir(filepath.FromSlash(f)))
+				mkdirs(t, day)
+				writeRollout(t, day, filepath.Base(f), "{}", mod)
+			}
+			dir := filepath.Join(sessions, filepath.FromSlash(c.dir))
+			if err := os.Chmod(dir, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	files, err := ListRollouts(sessions)
-	if err == nil {
-		t.Error("err = nil, want the failure to list an unreadable directory")
-	}
-	if len(files) != 1 || files[0].Path != filepath.Join(d24, "b.jsonl") {
-		t.Errorf("files = %v, want only the readable day's b.jsonl", files)
+			files, err := ListRollouts(sessions)
+			if err == nil {
+				t.Errorf("err = nil, want the failure to list %s", c.dir)
+			}
+			var got []string
+			for _, f := range files {
+				rel, _ := filepath.Rel(sessions, f.Path)
+				got = append(got, filepath.ToSlash(rel))
+			}
+			if strings.Join(got, " ") != strings.Join(c.want, " ") {
+				t.Errorf("files = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 
