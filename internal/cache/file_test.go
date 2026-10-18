@@ -78,9 +78,6 @@ func TestCacheFilesAreOwnerOnly(t *testing.T) {
 // (#413), so one planted in a shared cache dir can't steer a write
 // elsewhere. Every cache file goes through the same write.
 func TestCacheReplacesPlantedLink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on windows")
-	}
 	dir := setCacheDir(t)
 	victim := filepath.Join(t.TempDir(), "victim")
 	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
@@ -88,6 +85,9 @@ func TestCacheReplacesPlantedLink(t *testing.T) {
 	}
 	path := filepath.Join(dir, "status.json")
 	if err := os.Symlink(victim, path); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 	if err := WriteStatus(&schema.Status{SchemaVersion: schema.Version}, testRoots); err != nil {

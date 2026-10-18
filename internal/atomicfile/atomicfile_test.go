@@ -75,14 +75,15 @@ func TestWriteRemovesTempWhenRenameFails(t *testing.T) {
 	noTempFiles(t, dir)
 }
 
-// symlinkOrSkip makes link a symlink to dest, skipping the test on Windows,
-// where creating one needs privileges.
+// symlinkOrSkip makes link a symlink to dest. Windows lets only privileged
+// accounts (or developer mode) create one, so there a refusal skips the test
+// instead of failing it.
 func symlinkOrSkip(t *testing.T, dest, link string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on windows")
-	}
 	if err := os.Symlink(dest, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 }
@@ -147,8 +148,10 @@ func TestWriteThroughFollowsLinks(t *testing.T) {
 			if b, err := os.ReadFile(target); err != nil || string(b) != "new" {
 				t.Errorf("target = %q, %v; want %q", b, err, "new")
 			}
-			if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o600 {
-				t.Errorf("target mode = %v, %v; want 0600", fi, err)
+			if fi, err := os.Stat(target); err != nil {
+				t.Error(err)
+			} else if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 { // no Unix permission bits there
+				t.Errorf("target mode = %v; want 0600", fi.Mode().Perm())
 			}
 			noTempFiles(t, dotfiles)
 			noTempFiles(t, home)

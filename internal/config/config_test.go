@@ -153,9 +153,6 @@ func TestSaveIsOwnerOnly(t *testing.T) {
 // is saved through the link: the file it leads to gets the new config, and
 // the link stays (#413).
 func TestSaveWritesThroughSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on windows")
-	}
 	dir, dotfiles := t.TempDir(), t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
 	target := filepath.Join(dotfiles, "config.json")
@@ -164,6 +161,9 @@ func TestSaveWritesThroughSymlink(t *testing.T) {
 	}
 	link := filepath.Join(dir, "config.json")
 	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 	if err := Save(Config{Tools: []string{schema.ToolCodex}}); err != nil {

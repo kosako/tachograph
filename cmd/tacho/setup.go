@@ -138,6 +138,19 @@ func runSetupSwiftBar(args []string) int {
 		return 1
 	}
 	if path == "" {
+		// A tacho plugin linked in from elsewhere is still the installed one
+		// when its link can't be resolved, though tachoPluginIn doesn't count
+		// it: adding tacho.30s.sh beside it would leave two plugins once the
+		// link is mended, so nothing is written (#413).
+		link, err := unresolvedPluginLink(dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tacho: cannot read SwiftBar's plugin folder:", err)
+			return 1
+		}
+		if link != "" {
+			fmt.Fprintln(os.Stderr, "tacho: "+link+" is a symlink whose target can't be resolved; fix or remove it, then run this again")
+			return 1
+		}
 		path = filepath.Join(dir, "tacho.30s.sh")
 	}
 	existing, err := os.ReadFile(path)
@@ -172,6 +185,26 @@ func runSetupSwiftBar(args []string) int {
 	fmt.Println("Wrote the SwiftBar plugin to " + path + " (runs " + exe + ")")
 	fmt.Println("SwiftBar picks it up on its next refresh.")
 	return 0
+}
+
+// unresolvedPluginLink returns the first tacho plugin name (tacho.*.sh) in
+// dir that is a symlink whose target can't be resolved — it leads nowhere or
+// round in a loop — or "" when there is none.
+func unresolvedPluginLink(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !isTachoPluginName(e.Name()) || e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(p); err != nil {
+			return p, nil
+		}
+	}
+	return "", nil
 }
 
 // resolveExe returns the absolute path to the running binary, following

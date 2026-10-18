@@ -50,9 +50,6 @@ func TestSetupWriteBackupNotClobberedOnRerun(t *testing.T) {
 // other settings, the link stays, and the backup of the old settings is a
 // file of its own next to the link (#413).
 func TestSetupWritesThroughSymlinkedSettings(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on windows")
-	}
 	dir, dotfiles := t.TempDir(), t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	target := filepath.Join(dotfiles, "settings.json")
@@ -61,9 +58,7 @@ func TestSetupWritesThroughSymlinkedSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := filepath.Join(dir, "settings.json")
-	if err := os.Symlink(target, settings); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, target, settings)
 
 	var code int
 	capture(t, &os.Stdout, func() { code = runSetup([]string{"claude", "--write"}) })
@@ -841,9 +836,6 @@ func TestSetupSwiftBarWriteRefusesUnsafe(t *testing.T) {
 // replaced through the link: the file it leads to gets the new plugin,
 // executable, the link stays, and no second plugin is added (#413).
 func TestSetupSwiftBarWritesThroughSymlinkedPlugin(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on windows")
-	}
 	_, setting := isolateSwiftBar(t)
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
 	orig := resolveExe
@@ -856,9 +848,7 @@ func TestSetupSwiftBarWritesThroughSymlinkedPlugin(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(*setting, "tacho.1m.sh")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, target, link)
 	var code int
 	capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
 	if code != 0 {
@@ -873,5 +863,58 @@ func TestSetupSwiftBarWritesThroughSymlinkedPlugin(t *testing.T) {
 	requirePerm(t, target, 0o755)
 	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
 		t.Error("added tacho.30s.sh next to the linked plugin")
+	}
+}
+
+// An installed plugin whose link can't be resolved — it leads nowhere, or
+// round in a loop — isn't found as a plugin, but it is still the installed
+// one: --write refuses rather than add tacho.30s.sh beside it, which would
+// leave two plugins once the link is mended (#413). Nothing is written or
+// backed up.
+func TestSetupSwiftBarRefusesUnresolvedPluginLink(t *testing.T) {
+	_, setting := isolateSwiftBar(t)
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+	for _, loop := range []bool{false, true} {
+		cfgDir := t.TempDir()
+		t.Setenv("TACHO_CONFIG_DIR", cfgDir)
+		*setting = t.TempDir()
+		link := filepath.Join(*setting, "tacho.1m.sh")
+		dest := filepath.Join(t.TempDir(), "tacho.1m.sh") // never created
+		if loop {
+			dest = filepath.Join(*setting, "other.sh")
+			symlinkOrSkip(t, link, dest)
+		}
+		symlinkOrSkip(t, dest, link)
+		var code int
+		stderr := capture(t, &os.Stderr, func() {
+			capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+		})
+		if code != 1 || !strings.Contains(stderr, "can't be resolved") {
+			t.Errorf("loop %v: exit %d, stderr %q; want 1 naming the link", loop, code, stderr)
+		}
+		if got, err := os.Readlink(link); err != nil || got != dest {
+			t.Errorf("loop %v: link now %q, %v; want it unchanged", loop, got, err)
+		}
+		if _, err := os.Lstat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
+			t.Errorf("loop %v: added tacho.30s.sh beside the unresolved link", loop)
+		}
+		if _, err := os.Lstat(filepath.Join(cfgDir, "swiftbar-plugin.bak")); !os.IsNotExist(err) {
+			t.Errorf("loop %v: wrote a backup", loop)
+		}
+	}
+}
+
+// symlinkOrSkip makes link a symlink to dest. Windows lets only privileged
+// accounts (or developer mode) create one, so there a refusal skips the test
+// instead of failing it.
+func symlinkOrSkip(t *testing.T, dest, link string) {
+	t.Helper()
+	if err := os.Symlink(dest, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
+		t.Fatal(err)
 	}
 }
