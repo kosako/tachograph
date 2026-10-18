@@ -46,7 +46,9 @@
     notification record, and the cross-process locks.
   - `internal/atomicfile` replaces a file through a temp file and a rename
     (retried on Windows while another process has the file open). The cache,
-    `config.json`, and the files `tacho setup --write` writes all use it.
+    `config.json`, and the files `tacho setup --write` writes all use it;
+    the latter two write through a symlink to the file it leads to, the
+    cache never does.
   - `internal/render`, `internal/swiftbar`, and `internal/menubar` (the menu
     bar gauge image) render views. The preset catalog in
     `internal/render/presets.go` is mirrored by hand in the preset tables of

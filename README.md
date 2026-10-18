@@ -229,6 +229,8 @@ tacho config set menubar.history hide      # 直近 7 日をドロップダウ�
 tacho config set tools codex               # Codexだけ表示(claude-code / codex をカンマ区切り、書いた順に表示)
 ```
 
+`config.json`・Claude Code の `settings.json`・SwiftBar のプラグインが dotfiles などからの symlink なら、tacho(`tacho config set`・ドロップダウンの Settings・`tacho setup ... --write`)は link 先の file を書き換え、link はそのまま残します。link 先が見つからないときや、link 先の場所に書けないとき(読み取り専用の場所など)は、link も link 先の file もそのままで、エラーになります。
+
 #### 残量の通知(既定オフ)
 
 5h / weekly の残量が設定した % まで下がったら、macOS の通知で知らせます。常駐プロセスはなく、SwiftBar がプラグインを実行するたび(同梱の `tacho.30s.sh` なら 30 秒ごと)に便乗して判定するので、**SwiftBar でプラグインが動いているときだけ**通知されます(ステータスラインや `tacho` からは通知しません)。通知は SwiftBar のアプリ通知として届くので、macOS の通知設定で SwiftBar を許可しておいてください。

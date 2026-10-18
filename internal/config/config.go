@@ -307,7 +307,8 @@ func parse(b []byte) (Config, error) {
 	return c, nil
 }
 
-// Save writes the config atomically (tmp file + rename, see atomicfile).
+// Save writes the config atomically (tmp file + rename, see atomicfile),
+// through a symlink to the file it leads to (#413).
 func Save(c Config) error {
 	dir := Dir()
 	if dir == "" {
@@ -321,7 +322,7 @@ func Save(c Config) error {
 		return err
 	}
 	b = append(b, '\n')
-	return atomicfile.Write(Path(), b, 0o600)
+	return atomicfile.WriteThrough(Path(), b, 0o600)
 }
 
 // ToolEnabled reports whether a tool should be shown.

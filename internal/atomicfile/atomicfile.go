@@ -1,10 +1,15 @@
 // Package atomicfile replaces a file through a temp file and a rename, so a
 // reader sees the old content or the new, never a partial write. The cache,
 // the config, and the files `tacho setup --write` writes all go through it,
-// so a failed write is handled the same way everywhere (#379).
+// so a failed write is handled the same way everywhere (#379). The config and
+// the setup files follow a symlink to the file it leads to (WriteThrough);
+// the cache doesn't (#413).
 package atomicfile
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -37,6 +42,38 @@ func Write(path string, b []byte, perm os.FileMode) error {
 		os.Remove(tmp.Name())
 	}
 	return err
+}
+
+// WriteThrough is Write for a file the user may keep elsewhere and link into
+// place — settings.json, config.json, or the SwiftBar plugin in a dotfiles
+// repository: when path is a symlink, it replaces the file the link leads to,
+// in that file's directory, and the link stays as it is, as git writes
+// through a link (#413). A link whose target can't be resolved (it leads
+// nowhere, or round in a loop) is an error, and so is a target whose
+// directory can't take the temp file (a read-only store); either way
+// nothing is changed. tacho's own cache files go through Write instead: a
+// link planted in the cache dir is replaced, never followed elsewhere.
+func WriteThrough(path string, b []byte, perm os.FileMode) error {
+	// Only a path known not to exist, or known not to be a link, is written
+	// in place: after any other failure to look, it may be a link that a
+	// rename would replace.
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return Write(path, b, perm) // a missing path is created
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink == 0:
+		return Write(path, b, perm)
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("%s is a symlink whose target can't be resolved: %w", path, err)
+	}
+	if err := Write(target, b, perm); err != nil {
+		return fmt.Errorf("%s is a symlink to %s: %w", path, target, err)
+	}
+	return nil
 }
 
 // replaceFile renames tmp over path. A rename that fails with an error

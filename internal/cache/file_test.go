@@ -72,3 +72,31 @@ func TestCacheFilesAreOwnerOnly(t *testing.T) {
 		}
 	}
 }
+
+// A symlink planted where a cache file goes is replaced by the file, and
+// what it led to is left alone: the cache never writes through a link
+// (#413), so one planted in a shared cache dir can't steer a write
+// elsewhere. Every cache file goes through the same write.
+func TestCacheReplacesPlantedLink(t *testing.T) {
+	dir := setCacheDir(t)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "status.json")
+	if err := os.Symlink(victim, path); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if err := WriteStatus(&schema.Status{SchemaVersion: schema.Version}, testRoots); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
+		t.Errorf("status.json = %v, %v; want a regular file in the link's place", fi, err)
+	}
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "keep" {
+		t.Errorf("the planted link's target = %q, %v; want it untouched", b, err)
+	}
+}
