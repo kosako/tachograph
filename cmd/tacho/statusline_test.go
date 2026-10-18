@@ -39,6 +39,7 @@ func TestRunStatuslineUsesLiveInputAndPreservesDaily(t *testing.T) {
 	if err := cache.WriteStatus(cached, core.Roots(core.Options{})); err != nil {
 		t.Fatal(err)
 	}
+	stampStatusCache(t, now)
 
 	input, err := os.ReadFile(filepath.Join("..", "..", "internal", "collector", "claude", "testdata", "statusline_input.json"))
 	if err != nil {
@@ -505,6 +506,21 @@ func subscriptionStatuslineEnv(t *testing.T) string {
 	}
 	t.Setenv("CODEX_HOME", t.TempDir())
 	return isolateClaudeRoot(t)
+}
+
+// stampStatusCache sets status.json's modification time to at. A test that
+// has the cache read at a fixed now needs the file written at that now:
+// written at the real time the test runs, it lies in that now's future and is
+// never served (#415).
+func stampStatusCache(t *testing.T, at time.Time) {
+	t.Helper()
+	dir, err := cache.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "status.json"), at, at); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // transcriptRespondedAt writes a session transcript whose last API response

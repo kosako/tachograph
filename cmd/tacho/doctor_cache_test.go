@@ -12,7 +12,8 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// status.json is judged by its modification time against the TTL.
+// status.json is judged by its modification time as the reader judges it:
+// against the TTL, and not used when modified in the future (#415).
 func TestReportCacheFile(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	path := filepath.Join(t.TempDir(), "status.json")
@@ -33,6 +34,8 @@ func TestReportCacheFile(t *testing.T) {
 	}{
 		{10 * time.Second, "present (modified 10s ago, fresh)"},
 		{cache.StatusTTL + time.Second, "present (modified 31s ago, expired)"},
+		{-time.Second, "present (modified in the future, fresh)"}, // within the slack
+		{-15 * time.Minute, "present (modified in the future, not used)"},
 	} {
 		if err := os.Chtimes(path, now.Add(-c.age), now.Add(-c.age)); err != nil {
 			t.Fatal(err)

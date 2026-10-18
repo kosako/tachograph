@@ -38,10 +38,26 @@ func TestStatusAssemblesBothTools(t *testing.T) {
 	}
 }
 
+// stampStatusCache sets status.json's modification time to at. A test that
+// reads the cache at a fixed now needs the file written at that now: written
+// at the real time the test runs, it lies in that now's future and is never
+// served (#415).
+func stampStatusCache(t *testing.T, at time.Time) {
+	t.Helper()
+	dir, err := cache.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "status.json"), at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStatusServesFromCache(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now})
+	stampStatusCache(t, now)
 
 	// The same roots within the TTL are served from the cache (the cache is
 	// keyed by the roots, #321 — another root's miss is covered in
