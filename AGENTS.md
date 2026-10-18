@@ -81,8 +81,8 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run
 ```
 
 - CI runs `node test.js` on the Node floor that `engines.node` in
-  `npm/package.json` declares (`>=N`, read from the file) and on the current
-  LTS. When raising the floor, update the Node version in `npm/README.md`
+  `npm/package.json` declares (`>=N`, read from the file and run as exactly
+  `N.0.0`) and on the current LTS. When raising the floor, update the Node version in `npm/README.md`
   too.
 
 ## Release Notes
