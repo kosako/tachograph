@@ -90,7 +90,7 @@ func runSetup(args []string) int {
 			fmt.Println("Backed up existing settings to " + bak)
 		}
 	}
-	if err := atomicfile.Write(path, merged, 0o600); err != nil {
+	if err := atomicfile.WriteThrough(path, merged, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
@@ -165,7 +165,7 @@ func runSetupSwiftBar(args []string) int {
 		fmt.Println("Backed up the previous plugin to " + bak + " (copy back any export lines you added)")
 	}
 	// 0755: SwiftBar runs the plugin, so it must be executable.
-	if err := atomicfile.Write(path, []byte(plugin), 0o755); err != nil {
+	if err := atomicfile.WriteThrough(path, []byte(plugin), 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}

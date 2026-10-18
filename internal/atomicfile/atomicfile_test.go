@@ -75,6 +75,196 @@ func TestWriteRemovesTempWhenRenameFails(t *testing.T) {
 	noTempFiles(t, dir)
 }
 
+// symlinkOrSkip makes link a symlink to dest, skipping the test on Windows,
+// where creating one needs privileges.
+func symlinkOrSkip(t *testing.T, dest, link string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	if err := os.Symlink(dest, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// readLink returns where the symlink at path leads, failing the test when
+// path is no longer a symlink.
+func readLink(t *testing.T, path string) string {
+	t.Helper()
+	dest, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("%s is no longer a symlink: %v", path, err)
+	}
+	return dest
+}
+
+// WriteThrough replaces the file a symlink leads to — by an absolute link, a
+// relative one, or a chain of them — in that file's own directory, with the
+// mode it is given, and leaves every link as it was: settings kept in a
+// dotfiles repository and linked into place stay linked (#413).
+func TestWriteThroughFollowsLinks(t *testing.T) {
+	for _, c := range []struct {
+		name            string
+		relative, chain bool
+	}{
+		{"absolute link", false, false},
+		{"relative link", true, false},
+		{"chain of links", false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dotfiles, home := t.TempDir(), t.TempDir()
+			target := filepath.Join(dotfiles, "config.json")
+			if err := os.WriteFile(target, []byte("an older and longer content"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dest := target
+			if c.relative {
+				rel, err := filepath.Rel(home, target) // ../<dotfiles>/config.json: both sit in one test dir
+				if err != nil {
+					t.Fatal(err)
+				}
+				dest = rel
+			}
+			if c.chain {
+				mid := filepath.Join(home, "mid.json")
+				symlinkOrSkip(t, dest, mid)
+				dest = mid
+			}
+			link := filepath.Join(home, "config.json")
+			symlinkOrSkip(t, dest, link)
+
+			if err := WriteThrough(link, []byte("new"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := readLink(t, link); got != dest {
+				t.Errorf("link now leads to %q, want %q", got, dest)
+			}
+			if c.chain {
+				if got := readLink(t, dest); got != target {
+					t.Errorf("middle link now leads to %q, want %q", got, target)
+				}
+			}
+			if b, err := os.ReadFile(target); err != nil || string(b) != "new" {
+				t.Errorf("target = %q, %v; want %q", b, err, "new")
+			}
+			if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o600 {
+				t.Errorf("target mode = %v, %v; want 0600", fi, err)
+			}
+			noTempFiles(t, dotfiles)
+			noTempFiles(t, home)
+		})
+	}
+}
+
+// Without a link in the way, WriteThrough is Write: it creates a missing
+// file and replaces an existing one.
+func TestWriteThroughWithoutLink(t *testing.T) {
+	dir := t.TempDir()
+	for _, old := range []string{"", "an older and longer content"} {
+		path := filepath.Join(dir, "config.json")
+		if old != "" {
+			if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := WriteThrough(path, []byte("new"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if b, err := os.ReadFile(path); err != nil || string(b) != "new" {
+			t.Errorf("after replacing %q: %q, %v; want %q", old, b, err, "new")
+		}
+	}
+	noTempFiles(t, dir)
+}
+
+// A link WriteThrough can't write through is an error that changes nothing:
+// one leading nowhere or round in a loop (no file is created where it
+// points), or one to a file in a directory that can't take the temp file,
+// such as a read-only store (#413).
+func TestWriteThroughFailsWithoutChanges(t *testing.T) {
+	t.Run("leads nowhere", func(t *testing.T) {
+		dotfiles, home := t.TempDir(), t.TempDir()
+		target := filepath.Join(dotfiles, "config.json")
+		link := filepath.Join(home, "config.json")
+		symlinkOrSkip(t, target, link)
+		if err := WriteThrough(link, []byte("new"), 0o600); err == nil {
+			t.Fatal("WriteThrough through a dangling link succeeded")
+		}
+		if got := readLink(t, link); got != target {
+			t.Errorf("link now leads to %q, want %q", got, target)
+		}
+		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the link's target was created (stat err %v)", err)
+		}
+		noTempFiles(t, dotfiles)
+		noTempFiles(t, home)
+	})
+	t.Run("loop", func(t *testing.T) {
+		home := t.TempDir()
+		a, b := filepath.Join(home, "a.json"), filepath.Join(home, "b.json")
+		symlinkOrSkip(t, b, a)
+		symlinkOrSkip(t, a, b)
+		if err := WriteThrough(a, []byte("new"), 0o600); err == nil {
+			t.Fatal("WriteThrough through a loop of links succeeded")
+		}
+		if readLink(t, a) != b || readLink(t, b) != a {
+			t.Error("the links changed")
+		}
+		noTempFiles(t, home)
+	})
+	t.Run("read-only directory", func(t *testing.T) {
+		dotfiles, home := t.TempDir(), t.TempDir()
+		target := filepath.Join(dotfiles, "config.json")
+		if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(home, "config.json")
+		symlinkOrSkip(t, target, link)
+		if err := os.Chmod(dotfiles, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(dotfiles, 0o755) })
+		if f, err := os.CreateTemp(dotfiles, "probe-*"); err == nil {
+			f.Close()
+			os.Remove(f.Name())
+			t.Skip("the directory stays writable (running as root?)")
+		}
+		if err := WriteThrough(link, []byte("new"), 0o600); err == nil {
+			t.Fatal("WriteThrough into a read-only directory succeeded")
+		}
+		if got := readLink(t, link); got != target {
+			t.Errorf("link now leads to %q, want %q", got, target)
+		}
+		if b, err := os.ReadFile(target); err != nil || string(b) != "old" {
+			t.Errorf("target = %q, %v; want it unchanged", b, err)
+		}
+		noTempFiles(t, dotfiles)
+		noTempFiles(t, home)
+	})
+}
+
+// Write, which the cache uses, replaces a symlink at path with the file
+// itself and leaves what it led to alone: a link planted in a shared cache
+// dir can't steer the write elsewhere (#413).
+func TestWriteReplacesLink(t *testing.T) {
+	elsewhere, dir := t.TempDir(), t.TempDir()
+	target := filepath.Join(elsewhere, "victim")
+	if err := os.WriteFile(target, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "status.json")
+	symlinkOrSkip(t, target, path)
+	if err := Write(path, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(path); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("%s = %v, %v; want a regular file", path, fi, err)
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != "keep" {
+		t.Errorf("the link's old target = %q, %v; want it untouched", b, err)
+	}
+}
+
 func TestRetry(t *testing.T) {
 	errTransient := errors.New("in the way")
 	errOther := errors.New("broken")

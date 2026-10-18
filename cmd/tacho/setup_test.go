@@ -45,6 +45,47 @@ func TestSetupWriteBackupNotClobberedOnRerun(t *testing.T) {
 	}
 }
 
+// A settings.json linked into place from a dotfiles repository is written
+// through the link: the file it leads to gets the statusLine and keeps the
+// other settings, the link stays, and the backup of the old settings is a
+// file of its own next to the link (#413).
+func TestSetupWritesThroughSymlinkedSettings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	dir, dotfiles := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	target := filepath.Join(dotfiles, "settings.json")
+	original := []byte(`{"theme":"dark"}`)
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(dir, "settings.json")
+	if err := os.Symlink(target, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	var code int
+	capture(t, &os.Stdout, func() { code = runSetup([]string{"claude", "--write"}) })
+	if code != 0 {
+		t.Fatalf("--write returned %d", code)
+	}
+	if dest, err := os.Readlink(settings); err != nil || dest != target {
+		t.Errorf("settings.json now %q, %v; want the link to %s kept", dest, err, target)
+	}
+	if b, err := os.ReadFile(target); err != nil || !strings.Contains(string(b), `"statusLine"`) || !strings.Contains(string(b), `"theme"`) {
+		t.Errorf("the link's target = %s (err %v); want the statusLine merged into the settings", b, err)
+	}
+	requirePerm(t, target, 0o600)
+	bak := settings + ".bak"
+	if fi, err := os.Lstat(bak); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf(".bak = %v, %v; want a file next to the link", fi, err)
+	}
+	if b, _ := os.ReadFile(bak); !bytes.Equal(b, original) {
+		t.Errorf(".bak = %s, want the original settings", b)
+	}
+}
+
 func requirePerm(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 
@@ -793,5 +834,44 @@ func TestSetupSwiftBarWriteRefusesUnsafe(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
 		t.Error("unlistable folder: added tacho.30s.sh next to the installed plugin")
+	}
+}
+
+// An installed plugin linked into the plugin folder from elsewhere is
+// replaced through the link: the file it leads to gets the new plugin,
+// executable, the link stays, and no second plugin is added (#413).
+func TestSetupSwiftBarWritesThroughSymlinkedPlugin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	_, setting := isolateSwiftBar(t)
+	t.Setenv("TACHO_CONFIG_DIR", t.TempDir())
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+
+	*setting = t.TempDir()
+	target := filepath.Join(t.TempDir(), "tacho.1m.sh")
+	if err := os.WriteFile(target, []byte("#!/bin/bash\nexec tacho swiftbar\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(*setting, "tacho.1m.sh")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+	if code != 0 {
+		t.Fatalf("--write returned %d", code)
+	}
+	if dest, err := os.Readlink(link); err != nil || dest != target {
+		t.Errorf("%s now %q, %v; want the link to %s kept", link, dest, err, target)
+	}
+	if b, _ := os.ReadFile(target); string(b) != setup.SwiftBarPlugin("/opt/tools/tacho") {
+		t.Errorf("the link's target = %q, want the plugin", b)
+	}
+	requirePerm(t, target, 0o755)
+	if _, err := os.Stat(filepath.Join(*setting, "tacho.30s.sh")); !os.IsNotExist(err) {
+		t.Error("added tacho.30s.sh next to the linked plugin")
 	}
 }

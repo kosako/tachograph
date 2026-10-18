@@ -149,6 +149,35 @@ func TestSaveIsOwnerOnly(t *testing.T) {
 	}
 }
 
+// A config.json linked into place from elsewhere — a dotfiles repository —
+// is saved through the link: the file it leads to gets the new config, and
+// the link stays (#413).
+func TestSaveWritesThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	dir, dotfiles := t.TempDir(), t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	target := filepath.Join(dotfiles, "config.json")
+	if err := os.WriteFile(target, []byte(`{"tools":["claude_code"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(Config{Tools: []string{schema.ToolCodex}}); err != nil {
+		t.Fatal(err)
+	}
+	if dest, err := os.Readlink(link); err != nil || dest != target {
+		t.Errorf("config.json now %q, %v; want the link to %s kept", dest, err, target)
+	}
+	var saved Config
+	if b, err := os.ReadFile(target); err != nil || json.Unmarshal(b, &saved) != nil || !slices.Equal(saved.Tools, []string{schema.ToolCodex}) {
+		t.Errorf("the link's target = %s (err %v); want the saved config", b, err)
+	}
+}
+
 // A Save whose rename fails returns the error and leaves no temp file in the
 // config dir (#379): here a directory takes config.json's place, which no
 // rename can replace.

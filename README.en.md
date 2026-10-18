@@ -401,6 +401,13 @@ tacho config set menubar.history hide   # drop the last 7 days from the dropdown
 tacho config set tools codex            # show only Codex (comma-separated claude-code / codex, shown in the order you list them)
 ```
 
+If `config.json`, Claude Code's `settings.json`, or the SwiftBar plugin is a
+symlink (from a dotfiles repository, say), tacho — `tacho config set`, the
+dropdown's Settings, `tacho setup ... --write` — rewrites the file the link
+leads to and leaves the link in place. When the link leads nowhere, or the
+place it leads to can't be written (a read-only location, say), it reports
+an error and leaves the link and that file as they are.
+
 #### Headroom notifications (off by default)
 
 When a 5h / weekly window's headroom drops to a percentage you set, tacho
