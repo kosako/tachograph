@@ -421,7 +421,9 @@ tacho config set notify.thresholds ""         # off (the default)
 - One list applies to every shown tool (`tools`) × 5h / weekly. The text names
   both, e.g. `Claude weekly: 28% left · resets ↻09/20`.
 - Each (tool, window, threshold) fires **once per reset cycle**; it re-arms
-  when the headroom rises back above the threshold or the reset time changes.
+  when the headroom rises back above the threshold or a new cycle changes the
+  reset time (Codex can record one cycle's reset time a few seconds apart, so a
+  reset time within 5 minutes of the recorded one counts as the same cycle).
   Dropping past several thresholds at once fires only the deepest one.
 - Stale values never fire — not only when the whole tool is stale but also
   for a 5h / weekly window whose observation is old (the ones SwiftBar marks

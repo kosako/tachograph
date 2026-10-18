@@ -83,6 +83,46 @@ func TestEvaluateFiresOncePerThresholdPerCycle(t *testing.T) {
 	}
 }
 
+// Codex writes the same cycle's reset time a few seconds apart from one
+// token_count to the next (up to 10 s in the rollouts seen, #412). A reset
+// time within cycleJitter of the recorded one — the same instant written
+// with another offset included — is the same cycle: nothing fires again and
+// the record keeps its reset time. One further off is another cycle.
+func TestEvaluateTreatsResetJitterAsSameCycle(t *testing.T) {
+	th := []int{50, 30}
+	r := time.Date(2026, 9, 20, 3, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) string { return r.Add(d).Format(time.RFC3339) }
+	key := keyOf(schema.ToolCodex, schema.WindowFiveHour)
+	ev, st := Evaluate(status(limitsTool(schema.ToolCodex, false, 79, 0, at(0))), th, State{}, testRoots, testNow)
+	if len(ev) != 1 || ev[0].Threshold != 30 {
+		t.Fatalf("first crossing: events = %+v, want one at 30", ev)
+	}
+	for _, resets := range []string{
+		at(time.Second), at(0), at(-time.Second), at(3 * time.Second), at(10 * time.Second),
+		at(cycleJitter), at(-cycleJitter),
+		r.In(time.FixedZone("JST", 9*60*60)).Format(time.RFC3339),
+	} {
+		ev, st = Evaluate(status(limitsTool(schema.ToolCodex, false, 79, 0, resets)), th, st, testRoots, testNow)
+		if len(ev) != 0 {
+			t.Errorf("resets_at %s: events = %+v, want none (same cycle)", resets, ev)
+		}
+		if got := st[key].ResetsAt; got != at(0) {
+			t.Errorf("resets_at %s: recorded %q, want %q kept", resets, got, at(0))
+		}
+	}
+	// An unknown reset time ("") can't be placed in time, so it's another
+	// cycle too, as before.
+	for _, resets := range []string{at(cycleJitter + time.Second), at(-cycleJitter - time.Second), at(5 * time.Hour), ""} {
+		ev, next := Evaluate(status(limitsTool(schema.ToolCodex, false, 79, 0, resets)), th, st, testRoots, testNow)
+		if len(ev) != 1 || ev[0].Threshold != 30 {
+			t.Errorf("resets_at %q: events = %+v, want 30 again (new cycle)", resets, ev)
+		}
+		if got := next[key].ResetsAt; got != resets {
+			t.Errorf("resets_at %q: recorded %q, want the new cycle's", resets, got)
+		}
+	}
+}
+
 // Headroom exactly at a threshold has dropped "to or below" it: it fires
 // once, and the same reading on the next tick stays quiet instead of
 // re-arming it (only headroom above a threshold re-arms it).

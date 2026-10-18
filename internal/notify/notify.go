@@ -34,8 +34,36 @@ func Key(tool, window, root string) string {
 
 // Window is one rate-limit window's announcement record.
 type Window struct {
-	ResetsAt string `json:"resets_at"` // cycle identity; a new value re-arms everything
+	ResetsAt string `json:"resets_at"` // cycle identity (sameCycle); another cycle's re-arms everything
 	Notified []int  `json:"notified"`  // thresholds announced this cycle
+}
+
+// cycleJitter is how far a window's reset time may move within one cycle.
+// Codex writes one cycle's a few seconds apart from one token_count to the
+// next (up to 10 s in the rollouts seen, #412); the next cycle's normally
+// lies a window (5 h at the least) later. One that doesn't — the provider
+// reset the limits early and the next cycle started within 5 minutes of the
+// old one's start — is taken for the old cycle, and only a tick that sees its
+// near-0% use re-arms the thresholds (as headroom back above them).
+const cycleJitter = 5 * time.Minute
+
+// sameCycle reports whether the reset time current belongs to the cycle the
+// record of recorded is for: an instant within cycleJitter of it, or, when
+// either isn't a time (an unknown one is ""), the same string.
+func sameCycle(recorded, current string) bool {
+	if recorded == current {
+		return true
+	}
+	r, err := time.Parse(time.RFC3339, recorded)
+	if err != nil {
+		return false
+	}
+	c, err := time.Parse(time.RFC3339, current)
+	if err != nil {
+		return false
+	}
+	d := c.Sub(r)
+	return -cycleJitter <= d && d <= cycleJitter
 }
 
 // Event is one crossing to announce.
@@ -53,8 +81,10 @@ type Event struct {
 // event — for the deepest newly crossed threshold — and marks every crossed
 // threshold as announced, so a jump from 60% to 5% left says "5%" once
 // rather than once per threshold. A threshold re-arms when the headroom
-// rises back above it or the window's reset time changes. Only the 5h and
-// weekly windows are watched (a collector can report other window sizes).
+// rises back above it or the window's reset time moves to another cycle's
+// (sameCycle; the record keeps the reset time it started with, #412). Only
+// the 5h and weekly windows are watched (a collector can report other window
+// sizes).
 // Tools that are absent, errored, or stale are skipped and keep their
 // record, and so is a window observed longer ago than its tool's stale
 // threshold at now — the reading SwiftBar marks ⚠ (schema.ObservedStale) —
@@ -95,7 +125,7 @@ func Evaluate(s schema.Status, thresholds []int, st State, roots map[string]stri
 				resetsAt = *l.ResetsAt
 			}
 			w := next[key]
-			if w.ResetsAt != resetsAt {
+			if !sameCycle(w.ResetsAt, resetsAt) {
 				w = Window{ResetsAt: resetsAt}
 			}
 			remaining := render.RemainingPct(*l.UsedPct)
