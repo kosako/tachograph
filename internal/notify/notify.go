@@ -41,8 +41,10 @@ type Window struct {
 // cycleJitter is how far a window's reset time may move within one cycle.
 // Codex writes one cycle's a few seconds apart from one token_count to the
 // next (up to 10 s in the rollouts seen, #412); the next cycle's normally
-// lies a window (5 h at the least) later, and one that doesn't still starts
-// near 0% used, which re-arms the thresholds anyway.
+// lies a window (5 h at the least) later. One that doesn't — the provider
+// reset the limits early and the next cycle started within 5 minutes of the
+// old one's start — is taken for the old cycle, and only a tick that sees its
+// near-0% use re-arms the thresholds (as headroom back above them).
 const cycleJitter = 5 * time.Minute
 
 // sameCycle reports whether the reset time current belongs to the cycle the
