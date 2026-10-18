@@ -22,6 +22,22 @@ import (
 // StatusTTL is how long an assembled status document stays fresh.
 const StatusTTL = 30 * time.Second
 
+// statusClockSlack is how far after now a status.json may have been modified
+// and still be served: a file another run has just written can carry a
+// timestamp a little past the now this run took before reading it, or one the
+// file system stamped from a clock a tick ahead. Any further, the clock has
+// been set back since the write, and the file's age can't be told (#415).
+const statusClockSlack = 2 * time.Second
+
+// StatusFresh reports whether a status.json modified at mod is still served
+// at now for ttl: modified at most ttl ago, and not after now beyond a little
+// slack. A file from the future would otherwise pass however old its document
+// is, until the clock caught up with it (#415).
+func StatusFresh(mod, now time.Time, ttl time.Duration) bool {
+	age := now.Sub(mod)
+	return age <= ttl && age >= -statusClockSlack
+}
+
 // SnapshotMaxAge is how long a statusline snapshot is still used. It carries
 // rate limits and context the transcript route can't see. Once it goes stale
 // by age (see schema.StaleAfter), its rate limits are still served as
@@ -69,8 +85,8 @@ type statusFile struct {
 	schema.Status
 }
 
-// ReadStatus returns the cached status if its file is younger than ttl and
-// it was assembled from the same config roots.
+// ReadStatus returns the cached status if its file is fresh for ttl (see
+// StatusFresh) and it was assembled from the same config roots.
 func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*schema.Status, bool) {
 	dir, err := Dir()
 	if err != nil {
@@ -78,7 +94,7 @@ func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*sch
 	}
 	path := filepath.Join(dir, "status.json")
 	st, err := os.Stat(path)
-	if err != nil || now.Sub(st.ModTime()) > ttl {
+	if err != nil || !StatusFresh(st.ModTime(), now, ttl) {
 		return nil, false
 	}
 	b, err := os.ReadFile(path)

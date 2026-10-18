@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
@@ -249,9 +250,20 @@ func shownStale(t schema.Tool, now time.Time, metric string) bool {
 // staleMark is appended to a menu bar value that is an old reading.
 const staleMark = "⚠"
 
+// MenubarImage is the image (base64 PNG) the menu bar shows for s under cfg,
+// as `tacho swiftbar --png` previews it: the title line Render writes, when
+// that is an image. It's false when the menu bar shows text instead — the
+// number style, a metric with no gauge (cost or tokens, including a limit
+// window replaced by cost while the limits are hidden), one the menu bar
+// doesn't offer, or TACHO_SWIFTBAR_TEXT (#415).
+func MenubarImage(s schema.Status, now time.Time, dark bool, cfg config.Config) (string, bool) {
+	line := titleLine(cfg.FilterStatus(s), now, dark, cfg, render.LimitDisplay(cfg.Limits.Display), effectiveMetric(cfg, cfg.LimitsHidden()))
+	return strings.CutPrefix(line, "| image=")
+}
+
 // GaugePNG is the meter style's gauge image (base64 PNG) for s, with the
 // ring of each tool whose shown limit is an old reading grayed: the image the
-// menu bar shows and `tacho swiftbar --png` previews (#331).
+// menu bar shows for a gauge metric (#331).
 func GaugePNG(s schema.Status, now time.Time, dark bool, metric string, limits render.LimitDisplay) (string, bool) {
 	return menubar.PNGBase64(gaugeStatus(s, now, metric), now, dark, metric, limits)
 }
@@ -396,9 +408,11 @@ func (r Renderer) history(b *strings.Builder, h core.DailyHistory, cfg config.Co
 	b.WriteString("---\n")
 	fmt.Fprintf(b, "直近 %d 日の cost/tokens(青 = cost 上位 %d 日) | color=%s size=11 %s\n", len(h.Days), historyTop, colorGray, enableParams)
 	top := map[string]map[int]bool{}
+	widths := map[string]historyWidth{}
 	for _, name := range cfg.Tools {
 		if col, ok := h.Tools[name]; ok {
 			top[name] = topCostDays(col, historyTop)
+			widths[name] = historyWidths(col)
 		}
 	}
 	for i, day := range h.Days {
@@ -408,7 +422,7 @@ func (r Renderer) history(b *strings.Builder, h core.DailyHistory, cfg config.Co
 			if !ok {
 				continue
 			}
-			cell := historyCell(col[i])
+			cell := historyCell(col[i], widths[name])
 			if top[name][i] {
 				cell = ansiBlue + cell + ansiReset
 			}
@@ -472,13 +486,30 @@ func historyDay(day string) string {
 	return t.Format("01/02")
 }
 
-// historyCell is one tool's cost/tokens for a day, padded so the columns
-// line up in the data font; nil (unknown) reads "--".
-func historyCell(d *schema.Daily) string {
-	if d == nil {
-		return fmt.Sprintf("%-14s", render.Missing)
+// historyWidth is the width of one tool's cost and tokens columns.
+type historyWidth struct{ cost, tokens int }
+
+// historyWidths sizes a tool's columns for the days shown: 7 and 6
+// characters, widened to the longest value so a day of $1000 or 1000M tokens
+// doesn't push the columns after it out of line (#415).
+func historyWidths(col []*schema.Daily) historyWidth {
+	w := historyWidth{cost: 7, tokens: 6}
+	for _, d := range col {
+		if d != nil {
+			w.cost = max(w.cost, utf8.RuneCountInString(render.DailyCost(d)))
+			w.tokens = max(w.tokens, utf8.RuneCountInString(render.FormatTokens(d.Tokens)))
+		}
 	}
-	return fmt.Sprintf("%7s/%-6s", render.DailyCost(d), render.FormatTokens(d.Tokens))
+	return w
+}
+
+// historyCell is one tool's cost/tokens for a day, padded to w so the
+// columns line up in the data font; nil (unknown) reads "--".
+func historyCell(d *schema.Daily, w historyWidth) string {
+	if d == nil {
+		return fmt.Sprintf("%-*s", w.cost+1+w.tokens, render.Missing)
+	}
+	return fmt.Sprintf("%*s/%-*s", w.cost, render.DailyCost(d), w.tokens, render.FormatTokens(d.Tokens))
 }
 
 func toolInitial(name string) string {

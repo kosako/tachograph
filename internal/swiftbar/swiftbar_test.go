@@ -126,8 +126,9 @@ func TestRenderMeterCostFallsBackToNumber(t *testing.T) {
 
 // A menubar.metric written by hand that the menu bar doesn't offer — context
 // included — reads "--" in every style, as config's warning says, instead of
-// the context reading or a gauge of it (#381). The --png preview draws no
-// value either.
+// the context reading or a gauge of it (#381). The --png preview, which
+// writes the menu bar's image, has none to write (#415), and the gauge image
+// itself draws no value for such a metric.
 func TestRenderUnofferedMetricReadsMissing(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
 	s := schema.Status{Tools: []schema.Tool{
@@ -148,6 +149,9 @@ func TestRenderUnofferedMetricReadsMissing(t *testing.T) {
 			if want := "C --  X --"; title != want {
 				t.Errorf("%s, style %s, TACHO_SWIFTBAR_TEXT=%q: title = %q, want %q", metric, c.style, c.textEnv, title, want)
 			}
+			if _, ok := MenubarImage(s, now, true, cfg); ok {
+				t.Errorf("%s, style %s, TACHO_SWIFTBAR_TEXT=%q: the --png preview has an image to write", metric, c.style, c.textEnv)
+			}
 		}
 	}
 
@@ -159,10 +163,52 @@ func TestRenderUnofferedMetricReadsMissing(t *testing.T) {
 		return b64
 	}
 	if png(render.MetricContext) != png("bogus") {
-		t.Error("the --png preview drew a value for context")
+		t.Error("the gauge image drew a value for context")
 	}
 	if png(render.MetricLimit5h) == png("bogus") {
-		t.Error("the --png preview drew no value for limit_5h")
+		t.Error("the gauge image drew no value for limit_5h")
+	}
+}
+
+// `tacho swiftbar --png` writes the image the menu bar shows, decided as the
+// title line is (#415): the gauge of the shown metric for the shown tools,
+// and no image when the menu bar shows text — a limit window replaced by cost
+// while the limits are hidden, the number style, cost, or the moon-dial text.
+func TestMenubarImageMatchesTitle(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-13T11:00:00+09:00") // before tool()'s 5h reset
+	s := schema.Status{Tools: []schema.Tool{
+		tool(schema.ToolClaudeCode, false, 24, 41),
+		tool(schema.ToolCodex, false, 7, 2),
+	}}
+	for _, c := range []struct {
+		name    string
+		set     func(*config.Config)
+		textEnv string
+		image   bool
+	}{
+		{"meter 5h", func(*config.Config) {}, "", true},
+		{"meter weekly", func(c *config.Config) { c.Menubar.Metric = render.MetricLimitWeekly }, "", true},
+		{"one tool shown", func(c *config.Config) { c.Tools = []string{schema.ToolCodex} }, "", true},
+		{"limits hidden", func(c *config.Config) { c.Menubar.Limits = config.VisibilityHide }, "", false},
+		{"number style", func(c *config.Config) { c.Menubar.Style = config.StyleNumber }, "", false},
+		{"cost", func(c *config.Config) { c.Menubar.Metric = render.MetricCost }, "", false},
+		{"moon-dial text", func(*config.Config) {}, "1", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TACHO_SWIFTBAR_TEXT", c.textEnv)
+			cfg := config.Default()
+			c.set(&cfg)
+			title := strings.SplitN((Renderer{}).Render(s, now, true, cfg, core.DailyHistory{}), "\n", 2)[0]
+			b64, ok := MenubarImage(s, now, true, cfg)
+			switch {
+			case ok != c.image:
+				t.Fatalf("MenubarImage ok = %v, want %v (title %q)", ok, c.image, title)
+			case ok && title != "| image="+b64:
+				t.Error("the --png preview and the menu bar image differ")
+			case !ok && strings.HasPrefix(title, "| image="):
+				t.Error("no --png image, but the menu bar shows one")
+			}
+		})
 	}
 }
 
@@ -582,6 +628,35 @@ func TestRenderHistory(t *testing.T) {
 
 	if none := (Renderer{}).Render(s, now, true, config.Default(), core.DailyHistory{}); strings.Contains(none, "日の cost/tokens") || strings.Contains(none, "日計") {
 		t.Errorf("empty history should add no section:\n%s", none)
+	}
+}
+
+// A day of $1000 or 1000M tokens widens its tool's columns on every row, so
+// the next tool's column still lines up (#415); a week without one keeps the
+// usual widths (TestRenderHistory).
+func TestRenderHistoryWideValuesLineUp(t *testing.T) {
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "1")
+	now, _ := time.Parse(time.RFC3339, "2026-07-04T11:00:00+09:00")
+	s := schema.Status{Tools: []schema.Tool{tool(schema.ToolClaudeCode, false, 24, 41), tool(schema.ToolCodex, false, 7, 2)}}
+	hist := core.DailyHistory{
+		Days: []string{"2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"},
+		Tools: map[string][]*schema.Daily{
+			schema.ToolClaudeCode: {{Tokens: 1_006_100_000, CostUSD: usd(812.5)}, {Tokens: 12_300_000, CostUSD: usd(1234.56)}, nil, {}},
+			schema.ToolCodex:      {{Tokens: 900_000}, nil, {Tokens: 20_400_000, CostUSD: usd(4.1)}, {}},
+		},
+	}
+
+	out := (Renderer{}).Render(s, now, true, config.Default(), hist)
+	plain := strings.NewReplacer(ansiBlue, "", ansiReset, "").Replace(out)
+	for _, want := range []string{
+		"07/01  C  $812.50/1006.1M  X      --/900k   | font=",
+		"07/02  C $1234.56/12.3M    X --             | font=",
+		"07/03  C --                X   $4.10/20.4M  | font=",
+		"07/04  C    $0.00/0        X   $0.00/0      | font=",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("history row %q missing in:\n%s", want, plain)
+		}
 	}
 }
 

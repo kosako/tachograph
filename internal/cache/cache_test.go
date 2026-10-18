@@ -54,6 +54,36 @@ func TestStatusRoundTripAndTTL(t *testing.T) {
 	}
 }
 
+// A status.json modified in the future — the clock set back since it was
+// written — isn't served, however old its document is; one a moment ahead of
+// now, as another run may have just written it, still is (#415).
+func TestReadStatusModifiedInFuture(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now()
+	s := &schema.Status{SchemaVersion: schema.Version, GeneratedAt: now.Add(-time.Hour).Format(time.RFC3339)}
+	if err := WriteStatus(s, testRoots); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "status.json")
+	for _, c := range []struct {
+		ahead time.Duration
+		hit   bool
+	}{
+		{time.Second, true},
+		{statusClockSlack, true},
+		{statusClockSlack + time.Second, false},
+		{15 * time.Minute, false},
+	} {
+		mod := now.Add(c.ahead)
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := ReadStatus(StatusTTL, now, testRoots); ok != c.hit {
+			t.Errorf("modified %v after now: hit = %v, want %v", c.ahead, ok, c.hit)
+		}
+	}
+}
+
 // TestWriteStatusConcurrent exercises the tmp-file + atomic-rename contract:
 // many writers racing on one path never corrupt it or fail, a reader racing
 // them never sees a partial file, the survivor is exactly one writer's

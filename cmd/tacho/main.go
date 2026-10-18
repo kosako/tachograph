@@ -171,7 +171,7 @@ func runSwiftbar(args []string) int {
 	s := core.Status(core.Options{Now: now})
 	shown := cfg.FilterStatus(s)
 	if *pngOut != "" {
-		b64, ok := swiftbar.GaugePNG(shown, now, dark, cfg.Menubar.Metric, render.LimitDisplay(cfg.Limits.Display))
+		b64, ok := swiftbar.MenubarImage(s, now, dark, cfg)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "tacho: nothing to render")
 			return 1
@@ -505,11 +505,13 @@ func dailyRange(now time.Time, days int) (from, to time.Time) {
 
 func runWatch(args []string) int {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	interval := fs.Int("n", 5, "refresh interval in seconds")
+	interval := fs.Int("n", 5, "refresh interval in seconds (at most 86400)")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fs.Parse(args)
-	if *interval < 1 {
-		*interval = 1
+	every, err := watchInterval(*interval)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tacho:", err)
+		return 2
 	}
 
 	for {
@@ -517,10 +519,24 @@ func runWatch(args []string) int {
 		s, cfg := watchStatus(now)
 		// Clear screen and home the cursor between refreshes.
 		fmt.Print("\x1b[H\x1b[2J")
-		fmt.Printf("tachograph  %s  (every %ds, ctrl-c to quit)\n\n", now.Format("15:04:05"), *interval)
+		fmt.Printf("tachograph  %s  (every %ds, ctrl-c to quit)\n\n", now.Format("15:04:05"), int(every/time.Second))
 		fmt.Println(render.StatusLines(s, now, style(*noColor, cfg)))
-		time.Sleep(time.Duration(*interval) * time.Second)
+		time.Sleep(every)
 	}
+}
+
+// maxWatchInterval is the longest `tacho watch -n` accepts, in seconds.
+const maxWatchInterval = 24 * 60 * 60
+
+// watchInterval is the refresh interval for `-n sec`: at least a second, and
+// an error past a day, which is most likely a mistyped value. Far past it,
+// the seconds would overflow time.Duration into a negative sleep that redraws
+// without pause (#415).
+func watchInterval(sec int) (time.Duration, error) {
+	if sec > maxWatchInterval {
+		return 0, fmt.Errorf("-n must be at most %d (24 hours)", maxWatchInterval)
+	}
+	return time.Duration(max(sec, 1)) * time.Second, nil
 }
 
 // watchStatus reloads the config each tick, so a display setting changed

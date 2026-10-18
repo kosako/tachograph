@@ -190,9 +190,14 @@ func reportCacheFile(label, path string, maxAge time.Duration, now time.Time, hi
 		return
 	}
 
+	// Judged as the reader does: a file modified in the future (the clock
+	// was set back since) isn't served however recent it looks (#415).
 	state := "fresh"
-	if now.Sub(info.ModTime()) > maxAge {
+	if !cache.StatusFresh(info.ModTime(), now, maxAge) {
 		state = "expired"
+		if info.ModTime().After(now) {
+			state = "not used"
+		}
 	}
 	fmt.Printf("  %-16s present (modified %s, %s)\n", key, doctorAge(info.ModTime(), now), state)
 }

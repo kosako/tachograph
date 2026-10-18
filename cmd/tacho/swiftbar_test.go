@@ -64,6 +64,45 @@ func TestRunSwiftbarHistoryHiddenSkipsCache(t *testing.T) {
 	}
 }
 
+// `tacho swiftbar --png` writes the image the menu bar shows (#415): the
+// gauge by default, and with the limits hidden — where the menu bar shows
+// the cost text instead of the 5h ring — no file, "nothing to render", and
+// exit 1. The agents' data dirs, the cache and config dirs, and the PNG's dir
+// are temp dirs, and the system appearance is a stand-in.
+func TestRunSwiftbarPNGFollowsMenubar(t *testing.T) {
+	stubSystemDark(t, false)
+	cfgDir := t.TempDir()
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("TACHO_CONFIG_DIR", cfgDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("SWIFTBAR_PLUGIN_PATH", "")
+	t.Setenv("TACHO_SWIFTBAR_TEXT", "") // the meter style draws the image, not the moon text
+	for _, c := range []struct {
+		limits string
+		code   int
+	}{
+		{config.VisibilityShow, 0},
+		{config.VisibilityHide, 1},
+	} {
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(`{"menubar":{"limits":"`+c.limits+`"}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		png := filepath.Join(t.TempDir(), "gauge.png")
+		var code int
+		stderr := capture(t, &os.Stderr, func() { code = runSwiftbar([]string{"--png", png}) })
+		_, err := os.Stat(png)
+		switch {
+		case code != c.code:
+			t.Errorf("limits %s: exit %d, want %d (stderr %q)", c.limits, code, c.code, stderr)
+		case code == 0 && err != nil:
+			t.Errorf("limits %s: no PNG written: %v", c.limits, err)
+		case code != 0 && (!errors.Is(err, fs.ErrNotExist) || !strings.Contains(stderr, "tacho: nothing to render")):
+			t.Errorf("limits %s: PNG stat err %v, stderr %q; want no file and nothing to render", c.limits, err, stderr)
+		}
+	}
+}
+
 // stubSystemDark stands in for the system appearance the dropdown follows,
 // so a SwiftBar tick in a test doesn't read the machine's real preferences.
 func stubSystemDark(t *testing.T, dark bool) {

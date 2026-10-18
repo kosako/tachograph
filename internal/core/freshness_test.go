@@ -269,11 +269,18 @@ func TestStatusCacheNotServedToAnotherRoot(t *testing.T) {
 	clearClaudeBackendEnv(t)
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 
-	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now}).Tools[0]
-	if !first.Available || first.Model == nil {
-		t.Fatalf("fixture root should yield an available Claude tool: %+v", first)
+	first := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now})
+	if c := first.Tools[0]; !c.Available || c.Model == nil {
+		t.Fatalf("fixture root should yield an available Claude tool: %+v", c)
 	}
-	second := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: codexRoot, Now: now}).Tools[0]
+	// Fresh at now and served to its own root, so only the root can keep it
+	// from the run against another.
+	stampStatusCache(t, now)
+	later := now.Add(5 * time.Second)
+	if same := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: later}); same.GeneratedAt != first.GeneratedAt {
+		t.Fatalf("the cache wasn't served to its own root: %q vs %q", same.GeneratedAt, first.GeneratedAt)
+	}
+	second := Status(Options{ClaudeRoot: t.TempDir(), CodexRoot: codexRoot, Now: later}).Tools[0]
 	if second.Available {
 		t.Errorf("an empty root was served the cached document of another root: %+v", second)
 	}
