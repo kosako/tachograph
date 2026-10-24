@@ -1,0 +1,63 @@
+# Dependabot version updates (#423). Each ecosystem is checked weekly; minor
+# and patch bumps share one PR, majors get their own, and security updates
+# (turned on in the repository settings) are grouped too.
+#
+# cooldown: propose a release only once it is 7 days old (Dependabot's default
+# is 3), so a hijacked release has time to be caught before it runs in CI or in
+# the release workflow, whose npm-publish job holds an OIDC token. Security
+# updates never wait.
+#
+# commit-message: GitHub Actions bumps change only CI and the release steps,
+# so they take a plain `chore:` prefix, which GoReleaser drops from the release
+# notes. Go and npm bumps change what users install, so they keep Dependabot's
+# default prefix (it follows this repository's commits, e.g. `chore(deps):`),
+# which the release notes keep.
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "npm"
+    directory: "/npm"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
