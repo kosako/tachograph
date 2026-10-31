@@ -170,8 +170,9 @@ type TokenCount struct {
 	} `json:"rate_limits"`
 }
 
-// TokenUsage is one cumulative token-usage snapshot. Codex reports usage as a
-// running per-session total, not per turn.
+// TokenUsage is one token-usage figure of a token_count event. Whether it is
+// cumulative depends on the field holding it: TotalTokenUsage is the running
+// per-session total, LastTokenUsage the latest request's.
 type TokenUsage struct {
 	InputTokens       int64 `json:"input_tokens"`
 	CachedInputTokens int64 `json:"cached_input_tokens"`

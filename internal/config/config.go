@@ -141,7 +141,9 @@ type Limits struct {
 // Notify configures the rate-limit headroom notifications raised from the
 // SwiftBar refresh (#244). Thresholds are "% left" figures: a notification
 // fires when a 5h / weekly window's headroom drops to or below one of them,
-// once per reset cycle. Empty (the default) means off.
+// once per reset cycle; a threshold that has fired fires again in the same
+// cycle only after the headroom rises back above it. Empty (the default)
+// means off.
 type Notify struct {
 	Thresholds []int `json:"thresholds"`
 }
