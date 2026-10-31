@@ -109,6 +109,7 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"gpt-6-sol", Rate{2, 10, 0.2, 2.5}},                    // GPT-6 Sol, launched 2026-09-23; previously unpriced (#252)
 		{"gpt-6-luna", Rate{0.1, 0.5, 0.01, 0.125}},             // GPT-6 Luna, launched 2026-09-23; previously unpriced (#252)
 		{"gpt-6.1-sol", Rate{2, 10, 0.1, 2.5}},                  // GPT-6.1 Sol, launched 2026-09-29; previously unpriced (#296)
+		{"gpt-6.1-terra", Rate{1, 5, 0.05, 1.25}},               // GPT-6.1 Terra, launched 2026-10-26; previously unpriced (#431)
 		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                        // Sol (default tier), promo price since 2026-08-21 (#216)
 		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},                    // full Sol id → base alias
 		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},                // 2026-07-30 cut
