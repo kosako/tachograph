@@ -303,9 +303,11 @@ function runLauncher(script, { mode = 0o755, args = [] } = {}) {
 const noShell = process.platform === "win32" && "the stand-in binary is a shell script";
 
 test("launcher forwards the arguments, the output, and a non-zero exit status", { skip: noShell }, () => {
-  const r = runLauncher('echo "args: $*"; echo "to stderr" >&2; exit 3', { args: ["a", "b c"] });
+  // The count, then each argument on its own line, so a split or joined
+  // argument shows.
+  const r = runLauncher('printf "%s\\n" "$#" "$@"; echo "to stderr" >&2; exit 3', { args: ["a", "b c"] });
   assert.strictEqual(r.status, 3, r.stderr);
-  assert.strictEqual(r.stdout, "args: a b c\n");
+  assert.strictEqual(r.stdout, "2\na\nb c\n");
   assert.strictEqual(r.stderr, "to stderr\n");
 });
 
