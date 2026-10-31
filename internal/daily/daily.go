@@ -553,7 +553,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 			if !ok {
 				return
 			}
-			ro.events = []codexTC{{ts: DayStartFrom(day, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model}}
+			ro.events = []codexTC{{ts: DayStartFrom(day, 1).Add(-time.Nanosecond), usage: *ro.last, model: ro.model, src: f.Path}}
 		}
 		key, ok := codex.SessionID(filepath.Base(f.Path))
 		if !ok {
@@ -640,7 +640,9 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 // before it (the pre-window base, then earlier days' snapshots), its last is
 // the largest snapshot within the day, and its events are the day's
 // snapshots. Snapshots are walked in emission order so a base carries the
-// model current at that point (#191). Days without a snapshot are absent.
+// model current at that point (#191); of equal totals the later wins, so a
+// model switch without growth carries into the next day (#436). Days
+// without a snapshot are absent.
 func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 	events := append([]codexTC(nil), ro.events...)
 	sortCodexTC(events)
@@ -659,13 +661,13 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 			if e.model != "" {
 				model = e.model
 			}
-			if last == nil || e.usage.TotalTokens > last.TotalTokens {
+			if last == nil || e.usage.TotalTokens >= last.TotalTokens {
 				u := e.usage
 				last, lastModel = &u, model
 			}
 		}
 		out[day] = codexRollout{model: model, before: base, beforeModel: baseModel, last: last, tsParsed: true, events: events[i:j]}
-		if base == nil || last.TotalTokens > base.TotalTokens {
+		if base == nil || last.TotalTokens >= base.TotalTokens {
 			base, baseModel = last, lastModel
 		}
 		i = j
@@ -675,16 +677,17 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 
 // mergeCodexRollout folds one rollout into its session's entry. Cumulative
 // usage only grows within a session (resumed files carry the total forward),
-// so the largest snapshot on each side of midnight is that side's latest.
+// so the largest snapshot on each side of midnight is that side's latest. The
+// pre-midnight side is resolved over every file's last pre-midnight snapshot
+// at once (resolveCodexBefore), so the merge order doesn't decide it.
 func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRollout) {
 	prev, ok := bySession[id]
 	if !ok {
 		bySession[id] = &ro
 		return
 	}
-	if ro.before != nil && (prev.before == nil || ro.before.TotalTokens > prev.before.TotalTokens) {
-		prev.before, prev.beforeModel = ro.before, ro.beforeModel
-	}
+	prev.befores = append(prev.befores, ro.befores...)
+	resolveCodexBefore(prev)
 	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
 	}
@@ -692,6 +695,29 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 	// timestamp (cumulative total as the tie-break for equal times), which
 	// restores emission order within a session.
 	prev.events = append(prev.events, ro.events...)
+}
+
+// resolveCodexBefore picks a session's delta base from its files' last
+// pre-midnight snapshots by the rule splitCodexRolloutByDay applies within a
+// day: walked in emission order (sortCodexTC), the model carried from the
+// last turn_context seen so a resumed file's model-less snapshot inherits it,
+// and of equal totals the later wins — a model switch without growth carries
+// past midnight (#436).
+func resolveCodexBefore(ro *codexRollout) {
+	befores := append([]codexTC(nil), ro.befores...)
+	sortCodexTC(befores)
+	var before *codex.TokenUsage
+	var beforeModel, model string
+	for _, b := range befores {
+		if b.model != "" {
+			model = b.model
+		}
+		if before == nil || b.usage.TotalTokens >= before.TotalTokens {
+			u := b.usage
+			before, beforeModel = &u, model
+		}
+	}
+	ro.before, ro.beforeModel = before, beforeModel
 }
 
 // codexRolloutTotals turns one session's (or standalone rollout's) merged
@@ -781,13 +807,20 @@ func codexEventCost(events []codexTC, base *codex.TokenUsage, baseModel string, 
 }
 
 // sortCodexTC restores emission order across resumed files: by timestamp,
-// with the cumulative total as the tie-break for equal times.
+// with the cumulative total as the tie-break for equal times. Snapshots equal
+// in both go in their files' path order (a file's own keep their order), not
+// the order the files were merged in, which depends on the window: so every
+// window breaks such a tie alike (#436).
 func sortCodexTC(events []codexTC) {
 	sort.SliceStable(events, func(i, j int) bool {
-		if events[i].ts.Equal(events[j].ts) {
-			return events[i].usage.TotalTokens < events[j].usage.TotalTokens
+		a, b := events[i], events[j]
+		if !a.ts.Equal(b.ts) {
+			return a.ts.Before(b.ts)
 		}
-		return events[i].ts.Before(events[j].ts)
+		if a.usage.TotalTokens != b.usage.TotalTokens {
+			return a.usage.TotalTokens < b.usage.TotalTokens
+		}
+		return a.src < b.src
 	})
 }
 
@@ -798,12 +831,14 @@ func clamp0(v int64) int64 {
 	return v
 }
 
-// codexTC is one today token_count snapshot with its emission time and the
-// model that was current when it was emitted.
+// codexTC is one today token_count snapshot with its emission time, the
+// model that was current when it was emitted, and the rollout file it was
+// read from (sortCodexTC's last tie-break).
 type codexTC struct {
 	ts    time.Time
 	usage codex.TokenUsage
 	model string
+	src   string
 }
 
 // codexRollout is what one rollout file contributes to today's totals: the
@@ -813,7 +848,8 @@ type codexTC struct {
 type codexRollout struct {
 	model       string
 	before      *codex.TokenUsage
-	beforeModel string // model current at the before snapshot
+	beforeModel string    // model current at the before snapshot
+	befores     []codexTC // each merged file's before snapshot, for resolveCodexBefore
 	last        *codex.TokenUsage
 	tsParsed    bool // at least one token_count carried a parsable timestamp
 	events      []codexTC
@@ -830,6 +866,7 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 		return codexRollout{}, err
 	}
 	var ro codexRollout
+	var beforeTS time.Time
 	for _, raw := range bytes.Split(b, []byte("\n")) {
 		// Cheap substring prefilter; the full envelope decode runs only for
 		// candidate lines.
@@ -855,14 +892,17 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
 				ro.tsParsed = true
 				if ts.Before(dayStart) {
-					ro.before, ro.beforeModel = ro.last, ro.model
+					ro.before, ro.beforeModel, beforeTS = ro.last, ro.model, ts
 				} else {
 					// ro.model is the running last-seen turn_context, i.e.
 					// the model this snapshot's growth was produced under.
-					ro.events = append(ro.events, codexTC{ts: ts, usage: *ro.last, model: ro.model})
+					ro.events = append(ro.events, codexTC{ts: ts, usage: *ro.last, model: ro.model, src: path})
 				}
 			}
 		}
+	}
+	if ro.before != nil {
+		ro.befores = []codexTC{{ts: beforeTS, usage: *ro.before, model: ro.beforeModel, src: path}}
 	}
 	return ro, nil
 }

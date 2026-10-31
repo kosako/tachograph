@@ -339,3 +339,90 @@ func TestCodexTotalsResumeBeforeMidnightUsesLargerBase(t *testing.T) {
 		}
 	}
 }
+
+// A model switch at an unchanged cumulative total carries into the next day
+// when that day's resumed file emits a token_count before any turn_context:
+// the switched-to model prices the next day's growth. That holds whether the
+// switch shares a file with the snapshot before it or sits in a resumed one,
+// and over a one-day window (CodexTotals) and a two-day one (CodexDays), so
+// `tacho daily`'s today row agrees with `tacho status` (#436).
+func TestCodexEqualTotalModelSwitchCarriesAcrossMidnight(t *testing.T) {
+	now, dayStart := codexDayClock()
+	y1 := dayStart.Add(-3 * time.Hour)
+	y2 := dayStart.Add(-1 * time.Hour)
+	after := dayStart.Add(90 * time.Minute).Format(time.RFC3339)
+	prices := pricing.Table{"gpt-a": {In: 1}, "gpt-b": {In: 10}}
+	const id = "019e5933-2289-7e72-88fd-436436436436"
+	for _, c := range []struct {
+		name  string
+		write func(root string)
+	}{
+		{"in one file", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession(
+					[]any{"ctx", "gpt-a"}, []any{"tc", y1.Format(time.RFC3339), int64(100_000)},
+					[]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)},
+				), y2)
+		}},
+		{"in a resumed file", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y1.Format(time.RFC3339), int64(100_000)}), y1)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
+		// The later snapshot's file listed first: its timestamp, not the order
+		// the files are read in, decides which model the equal total keeps.
+		{"in a resumed file listed first", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T23-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y1.Format(time.RFC3339), int64(100_000)}), y1)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T19-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
+		// The later equal snapshot sits in a resumed file before any
+		// turn_context: it inherits gpt-b instead of blanking the model
+		// (review DAILY-436-01).
+		{"after a model-less resumed snapshot", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y1.Format(time.RFC3339), int64(100_000)}), y1)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
+		// The same time and total in two files: both windows break the tie
+		// alike, in the order the files are read (review DAILY-436-02).
+		{"at the same time in two files", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
+		// As above with the gpt-b file appended to since midnight: its mtime
+		// changes the order the one-day window merges the files in, but not
+		// how the tie is broken (review DAILY-436-03).
+		{"at the same time in two files, one written today", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), now)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			c.write(root)
+			// Resumed today: a token_count before any turn_context.
+			writeFile(t, filepath.Join(codexDayDir(root, now, 0), "rollout-2026-07-04T01-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"tc", after, int64(150_000)}), now)
+
+			const want = 50_000 * 10.0 / 1e6 // the 50k on gpt-b
+			if got := mustCodexTotals(t, root, now, prices); got.Cost != want {
+				t.Errorf("CodexTotals.Cost = %v, want %v (gpt-b's rate)", got.Cost, want)
+			}
+			days, err := CodexDays(root, DayStartFrom(dayStart, -1), DayStartFrom(dayStart, 1), prices)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := days[DayKey(now)]; got.Cost != want {
+				t.Errorf("CodexDays' today Cost = %v, want %v (gpt-b's rate)", got.Cost, want)
+			}
+		})
+	}
+}
