@@ -1,0 +1,10 @@
+{
+  "required_checks": [
+    "test",
+    "test-windows",
+    "release-snapshot",
+    "npm-smoke / smoke (ubuntu-latest)",
+    "npm-smoke / smoke (macos-latest)",
+    "npm-smoke / smoke (windows-latest)"
+  ]
+}
