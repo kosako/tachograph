@@ -112,7 +112,7 @@ jobs:
   npm-publish:
     needs: [verify-npm-install, verify-assets]
     runs-on: ubuntu-latest
-    # Short: this job holds an OIDC token (id-token: write) while it runs.
+    # Short: this job can request an OIDC token (id-token: write).
     timeout-minutes: 10
     permissions:
       contents: read
