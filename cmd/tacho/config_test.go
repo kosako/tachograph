@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -281,5 +282,62 @@ func TestConfigEditsWaitForTheConfigLock(t *testing.T) {
 	}
 	if c := config.Load(); c.Menubar.Style != "number" {
 		t.Errorf("style %q after the lock was let go, want number", c.Menubar.Style)
+	}
+}
+
+// A config.json linked into place locks beside the file the link leads to,
+// where the save writes: two config dirs linked to one file share the lock,
+// and a read-only directory holding the link doesn't stop the save (#439).
+func TestConfigLockFollowsALinkedConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges, and directory modes don't bind, on Windows")
+	}
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.json")
+	if err := os.WriteFile(target, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkedDir := func() string {
+		dir := t.TempDir()
+		if err := os.Symlink(target, filepath.Join(dir, "config.json")); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	a, b := linkedDir(), linkedDir()
+
+	t.Setenv("TACHO_CONFIG_DIR", a)
+	unlock, err := cache.LockConfig(config.Path())
+	if err != nil {
+		t.Fatalf("hold the lock through %s: %v", a, err)
+	}
+	t.Setenv("TACHO_CONFIG_DIR", b)
+	var code int
+	capture(t, &os.Stderr, func() { code = configSet("menubar.style", "number") })
+	if code != 1 {
+		t.Errorf("config set through another link to the locked file: exit %d, want 1", code)
+	}
+	unlock()
+
+	if _, err := os.Lstat(filepath.Join(b, "config.json.lock")); !os.IsNotExist(err) {
+		t.Errorf("a lock file beside the link (%v), want it beside the target only", err)
+	}
+
+	// A fresh link, so no lock file is already there to reuse.
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through a read-only directory")
+	}
+	c := linkedDir()
+	if err := os.Chmod(c, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(c, 0o755) })
+	t.Setenv("TACHO_CONFIG_DIR", c)
+	if code := configSet("menubar.style", "number"); code != 0 {
+		t.Fatalf("config set with the link in a read-only directory: exit %d, want 0", code)
+	}
+	if cfg := config.Load(); cfg.Menubar.Style != "number" {
+		t.Errorf("style %q through the link, want number", cfg.Menubar.Style)
 	}
 }

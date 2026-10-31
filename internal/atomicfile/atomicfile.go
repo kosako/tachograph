@@ -54,26 +54,42 @@ func Write(path string, b []byte, perm os.FileMode) error {
 // nothing is changed. tacho's own cache files go through Write instead: a
 // link planted in the cache dir is replaced, never followed elsewhere.
 func WriteThrough(path string, b []byte, perm os.FileMode) error {
+	target, err := Target(path)
+	if err != nil {
+		return err
+	}
+	if err := Write(target, b, perm); err != nil {
+		if target != path {
+			return fmt.Errorf("%s is a symlink to %s: %w", path, target, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// Target is the file WriteThrough writes for path: path itself when it is
+// missing or not a link, else the file the link leads to. A link whose target
+// can't be resolved is an error, as is any other failure to look at path.
+// Whatever guards a WriteThrough (a lock beside the file) keys on Target, so
+// two paths linked to one file share it (#439).
+func Target(path string) (string, error) {
 	// Only a path known not to exist, or known not to be a link, is written
 	// in place: after any other failure to look, it may be a link that a
 	// rename would replace.
 	info, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return Write(path, b, perm) // a missing path is created
+		return path, nil // a missing path is created
 	case err != nil:
-		return err
+		return "", err
 	case info.Mode()&fs.ModeSymlink == 0:
-		return Write(path, b, perm)
+		return path, nil
 	}
 	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("%s is a symlink whose target can't be resolved: %w", path, err)
+		return "", fmt.Errorf("%s is a symlink whose target can't be resolved: %w", path, err)
 	}
-	if err := Write(target, b, perm); err != nil {
-		return fmt.Errorf("%s is a symlink to %s: %w", path, target, err)
-	}
-	return nil
+	return target, nil
 }
 
 // replaceFile renames tmp over path. A rename that fails with an error

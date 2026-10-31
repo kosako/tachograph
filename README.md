@@ -217,7 +217,7 @@ tacho setup swiftbar --write   # プラグインフォルダに tacho.30s.sh を
 - **表示するツール**: Claude / Codex(チェックボックス)。メニューバー・ドロップダウン・通知に加え、`tacho` / `tacho watch` / `tacho daily` もこの設定で絞り込まれ、`tools` に書いた順に並ぶ。ステータスライン(テンプレートに書いたツールがそのまま出る。既定のテンプレートは Codex も含む)と `tacho status --json`(常に両ツール)には効かない
 - **表示する項目**: リミット(5h / weekly)/ 直近 7 日(チェックボックス)。リミットを外すと、各ツールの 5h / weekly の行と「リミット表示」、指標の 5h / weekly をドロップダウンから消します。指標が 5h / weekly のままのときはメニューバーに cost を出します(設定値は書き換えないので、戻せば元の指標に戻ります)。Bedrock / Vertex / API キーのようにサブスクリプションの枠が無い環境向けです。ステータスライン・`tacho`・`tacho status --json`・残量通知には効きません。直近 7 日を外すと、その節が消え、履歴の集計も `daily-history.json` の読み書きもしません(`tacho daily` には効きません)
 
-CLI でも設定できます(設定は `~/.config/tachograph/config.json`。`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/tachograph/` の下になり、`statusline.tmpl` / `pricing.json` も同じ場所です。実際のパスは `tacho config path` で確認できます。`tacho config` の変更は、同時に走っても片方が失われないよう、同じ場所の `config.json.lock` で 1 つずつ行います):
+CLI でも設定できます(設定は `~/.config/tachograph/config.json`。`XDG_CONFIG_HOME` を設定していれば `$XDG_CONFIG_HOME/tachograph/` の下になり、`statusline.tmpl` / `pricing.json` も同じ場所です。実際のパスは `tacho config path` で確認できます。`tacho config` の変更は、同時に走っても片方が失われないよう、`config.json` の隣(link なら link 先の隣)の `config.json.lock` で 1 つずつ行います):
 
 ```sh
 tacho config show
