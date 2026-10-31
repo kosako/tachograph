@@ -677,19 +677,17 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 
 // mergeCodexRollout folds one rollout into its session's entry. Cumulative
 // usage only grows within a session (resumed files carry the total forward),
-// so the largest snapshot on each side of midnight is that side's latest; of
-// equal pre-midnight totals in different files (a model switch without
-// growth across a resume), the later by timestamp keeps its model (#436).
+// so the largest snapshot on each side of midnight is that side's latest. The
+// pre-midnight side is resolved over every file's last pre-midnight snapshot
+// at once (resolveCodexBefore), so the merge order doesn't decide it.
 func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRollout) {
 	prev, ok := bySession[id]
 	if !ok {
 		bySession[id] = &ro
 		return
 	}
-	if ro.before != nil && (prev.before == nil || ro.before.TotalTokens > prev.before.TotalTokens ||
-		ro.before.TotalTokens == prev.before.TotalTokens && ro.beforeTS.After(prev.beforeTS)) {
-		prev.before, prev.beforeModel, prev.beforeTS = ro.before, ro.beforeModel, ro.beforeTS
-	}
+	prev.befores = append(prev.befores, ro.befores...)
+	resolveCodexBefore(prev)
 	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
 	}
@@ -697,6 +695,29 @@ func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRo
 	// timestamp (cumulative total as the tie-break for equal times), which
 	// restores emission order within a session.
 	prev.events = append(prev.events, ro.events...)
+}
+
+// resolveCodexBefore picks a session's delta base from its files' last
+// pre-midnight snapshots by the rule splitCodexRolloutByDay applies within a
+// day: walked in emission order (sortCodexTC, ties in merge order), the model
+// carried from the last turn_context seen so a resumed file's model-less
+// snapshot inherits it, and of equal totals the later wins — a model switch
+// without growth carries past midnight (#436).
+func resolveCodexBefore(ro *codexRollout) {
+	befores := append([]codexTC(nil), ro.befores...)
+	sortCodexTC(befores)
+	var before *codex.TokenUsage
+	var beforeModel, model string
+	for _, b := range befores {
+		if b.model != "" {
+			model = b.model
+		}
+		if before == nil || b.usage.TotalTokens >= before.TotalTokens {
+			u := b.usage
+			before, beforeModel = &u, model
+		}
+	}
+	ro.before, ro.beforeModel = before, beforeModel
 }
 
 // codexRolloutTotals turns one session's (or standalone rollout's) merged
@@ -819,7 +840,7 @@ type codexRollout struct {
 	model       string
 	before      *codex.TokenUsage
 	beforeModel string    // model current at the before snapshot
-	beforeTS    time.Time // when the before snapshot was emitted
+	befores     []codexTC // each merged file's before snapshot, for resolveCodexBefore
 	last        *codex.TokenUsage
 	tsParsed    bool // at least one token_count carried a parsable timestamp
 	events      []codexTC
@@ -836,6 +857,7 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 		return codexRollout{}, err
 	}
 	var ro codexRollout
+	var beforeTS time.Time
 	for _, raw := range bytes.Split(b, []byte("\n")) {
 		// Cheap substring prefilter; the full envelope decode runs only for
 		// candidate lines.
@@ -861,7 +883,7 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
 				ro.tsParsed = true
 				if ts.Before(dayStart) {
-					ro.before, ro.beforeModel, ro.beforeTS = ro.last, ro.model, ts
+					ro.before, ro.beforeModel, beforeTS = ro.last, ro.model, ts
 				} else {
 					// ro.model is the running last-seen turn_context, i.e.
 					// the model this snapshot's growth was produced under.
@@ -869,6 +891,9 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 				}
 			}
 		}
+	}
+	if ro.before != nil {
+		ro.befores = []codexTC{{ts: beforeTS, usage: *ro.before, model: ro.beforeModel}}
 	}
 	return ro, nil
 }

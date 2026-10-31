@@ -378,6 +378,23 @@ func TestCodexEqualTotalModelSwitchCarriesAcrossMidnight(t *testing.T) {
 			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T19-00-00-"+id+".jsonl"),
 				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
 		}},
+		// The later equal snapshot sits in a resumed file before any
+		// turn_context: it inherits gpt-b instead of blanking the model
+		// (review DAILY-436-01).
+		{"after a model-less resumed snapshot", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y1.Format(time.RFC3339), int64(100_000)}), y1)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
+		// The same time and total in two files: both windows break the tie
+		// alike, in the order the files are read (review DAILY-436-02).
+		{"at the same time in two files", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
