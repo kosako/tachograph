@@ -9,6 +9,11 @@ import "time"
 // writeStatuslineSnapshot).
 const snapshotLockWait = time.Second
 
+// lockContended, when set (tests only), is called each time lockFile finds
+// the lock held and is about to wait and retry, so a test can tell the
+// contended path ran before it lets the holder go.
+var lockContended func()
+
 // LockSnapshot holds tool's snapshot across processes for one read-merge-
 // write: every Claude session's statusline rewrites the one file, and a
 // merge read before another session's write would save over it, rolling a

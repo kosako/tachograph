@@ -202,6 +202,29 @@ func TestFromStatuslineBedrockDegradesLimits(t *testing.T) {
 	}
 }
 
+// Vertex has no subscription windows either: its env wins over an ambient
+// ANTHROPIC_API_KEY and over a payload that carries rate_limits, and the
+// limits are dropped as on Bedrock (#445).
+func TestFromStatuslineVertexDegradesLimits(t *testing.T) {
+	input, _ := os.ReadFile("testdata/statusline_input.json")
+	env := func(k string) string {
+		switch k {
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
+		case "ANTHROPIC_API_KEY":
+			return "sk-test"
+		}
+		return ""
+	}
+	got := Collect(Options{Root: "testdata/clauderoot", StatuslineInput: input, Getenv: env})
+	if got.Backend != schema.BackendVertex {
+		t.Errorf("Backend = %q, want vertex", got.Backend)
+	}
+	if got.Limits != nil {
+		t.Errorf("Limits = %+v, want null on vertex", got.Limits)
+	}
+}
+
 func TestFromTranscripts(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
 	got := Collect(Options{Root: "testdata/clauderoot", Now: now, Getenv: noEnv})
