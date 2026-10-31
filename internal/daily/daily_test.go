@@ -559,9 +559,14 @@ func TestTotalsExcludeYesterdayOnLongDay(t *testing.T) {
 		t.Errorf("ClaudeSessionToday.Tokens = %d, want 135 (today's message only)", got)
 	}
 
+	// Day folders from now and yesterday, as in TestCodexTotals, so that one
+	// built from now minus 24 hours would land in today's folder and count.
 	codexRoot := t.TempDir()
-	writeFile(t, filepath.Join(codexRoot, "sessions", "2026", "11", "01", "s1.jsonl"), codexSession(1000), now)
-	writeFile(t, filepath.Join(codexRoot, "sessions", "2026", "10", "31", "old.jsonl"), codexSession(9999), yesterday)
+	dayDir := func(day time.Time) string {
+		return filepath.Join(codexRoot, "sessions", day.Format("2006"), day.Format("01"), day.Format("02"))
+	}
+	writeFile(t, filepath.Join(dayDir(now), "s1.jsonl"), codexSession(1000), now)
+	writeFile(t, filepath.Join(dayDir(yesterday), "old.jsonl"), codexSession(9999), yesterday)
 	if got := mustCodexTotals(t, codexRoot, now, noPrices).Tokens; got != 1000 {
 		t.Errorf("CodexTotals.Tokens = %d, want 1000 (the day before's folder ignored)", got)
 	}
