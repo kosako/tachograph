@@ -248,17 +248,20 @@ func TestConfigSetNotifyThresholds(t *testing.T) {
 	}
 }
 
-// While another process holds the config lock past its wait, `config set` and
-// the dropdown's tool toggle save nothing and exit 1 with the reason, instead
-// of saving over that process's update (#439); once it lets go they save.
+// While another process holds the config file's lock past its wait, `config
+// set` and the dropdown's tool toggle save nothing and exit 1 with the reason,
+// instead of saving over that process's update (#439); once it lets go they
+// save. The lock belongs to the file, so a process with another cache dir is
+// held off too.
 func TestConfigEditsWaitForTheConfigLock(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TACHO_CONFIG_DIR", dir)
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
-	unlock, err := cache.LockConfig()
+	unlock, err := cache.LockConfig(config.Path())
 	if err != nil {
 		t.Fatalf("hold the config lock: %v", err)
 	}
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir()) // the editing process's own cache dir
 	for name, edit := range map[string]func() int{
 		"config set":  func() int { return configSet("menubar.style", "number") },
 		"toggle-tool": func() int { return configToggleTool("codex") },

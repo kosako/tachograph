@@ -36,10 +36,16 @@ func lockFile(name string, wait time.Duration) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	return lockPath(filepath.Join(dir, name), wait)
+}
+
+// lockPath is lockFile on the file at path, wherever it is, making its
+// directory if missing.
+func lockPath(path string, wait time.Duration) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}

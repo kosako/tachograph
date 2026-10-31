@@ -293,7 +293,7 @@ func configToggleTool(name string) int {
 		fmt.Fprintf(os.Stderr, "tacho: unknown tool %q\n", name)
 		return 2
 	}
-	err := config.Update(cache.LockConfig, func(c *config.Config) error {
+	err := config.Update(lockConfig, func(c *config.Config) error {
 		enabled := map[string]bool{}
 		for _, t := range c.Tools {
 			enabled[t] = true
@@ -311,6 +311,9 @@ func configToggleTool(name string) int {
 	})
 	return configUpdateExit(err, 0)
 }
+
+// lockConfig locks the config file config.Update is about to rewrite.
+func lockConfig() (func(), error) { return cache.LockConfig(config.Path()) }
 
 // errConfigRefused stops a config.Update whose edit was refused, and already
 // reported, with the exit code alongside.
@@ -370,10 +373,10 @@ func configStatuslinePreset(args []string) int {
 	return 0
 }
 
-// configSet sets one key under the config lock (config.Update, #439).
+// configSet sets one key under the config file's lock (config.Update, #439).
 func configSet(key, val string) int {
 	code := 0
-	err := config.Update(cache.LockConfig, func(c *config.Config) error {
+	err := config.Update(lockConfig, func(c *config.Config) error {
 		if code = setConfigValue(c, key, val); code != 0 {
 			return errConfigRefused
 		}

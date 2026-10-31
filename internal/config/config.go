@@ -335,8 +335,8 @@ func (e *LoadError) Error() string { return e.Err.Error() }
 func (e *LoadError) Unwrap() error { return e.Err }
 
 // Update reads the config, lets change edit it, and saves it, holding lock
-// (cache.LockConfig) from the read to the write: every `tacho config` edit
-// rewrites the whole file, so two overlapping ones (a `config set` and a
+// (cache.LockConfig on Path) from the read to the write: every `tacho config`
+// edit rewrites the whole file, so two overlapping ones (a `config set` and a
 // SwiftBar Settings click) would otherwise each save over the other's (#439).
 // change's error is returned and nothing saved; a config that can't be read
 // is a *LoadError. When the lock isn't held in time nothing is saved and the

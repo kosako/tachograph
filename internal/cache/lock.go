@@ -1,6 +1,9 @@
 package cache
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // snapshotLockWait bounds the wait for another process's merge of the same
 // snapshot, which takes milliseconds. Past it the caller still draws its line
@@ -41,11 +44,16 @@ func LockNotifyState() (unlock func(), err error) {
 // reads, edits, and rewrites one small file.
 const configLockWait = time.Second
 
-// LockConfig holds the config file across processes for one read-edit-write
-// update (config.Update): every `tacho config` edit rewrites the whole file,
-// so two that overlap — a `config set` and a SwiftBar Settings click — would
-// otherwise each save over the other's edit (#439). One lock in the cache dir
-// serves every config dir. unlock and err as for LockSnapshot.
-func LockConfig() (unlock func(), err error) {
-	return lockFile("config.lock", configLockWait)
+// LockConfig holds the config file at path across processes for one
+// read-edit-write update (config.Update): every `tacho config` edit rewrites
+// the whole file, so two that overlap — a `config set` and a SwiftBar
+// Settings click — would otherwise each save over the other's edit (#439).
+// The lock is the file's sibling, path + ".lock", not one in the cache dir,
+// so every process saving that file takes the same lock whatever its cache
+// dir (TACHO_CACHE_DIR). unlock and err as for LockSnapshot.
+func LockConfig(path string) (unlock func(), err error) {
+	if path == "" {
+		return nil, errors.New("config: no home directory")
+	}
+	return lockPath(path+".lock", configLockWait)
 }
