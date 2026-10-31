@@ -27,6 +27,10 @@ settings.json is ~/.claude/settings.json, or the one under CLAUDE_CONFIG_DIR
 when that is set.
 `
 
+// writeBackup writes the backup of the settings or plugin --write is about to
+// replace; tests make it fail to check that nothing is replaced then (#445).
+var writeBackup = atomicfile.Write
+
 func runSetup(args []string) int {
 	if len(args) > 0 && args[0] == "swiftbar" {
 		return runSetupSwiftBar(args[1:])
@@ -86,7 +90,7 @@ func runSetup(args []string) int {
 	// leave a truncated settings.json behind (#194 L-02), and get 0600.
 	if bak := path + ".bak"; len(existing) > 0 {
 		if _, err := os.Stat(bak); os.IsNotExist(err) {
-			if err := atomicfile.Write(bak, existing, 0o600); err != nil {
+			if err := writeBackup(bak, existing, 0o600); err != nil {
 				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 				return 1
 			}
@@ -174,7 +178,7 @@ func runSetupSwiftBar(args []string) int {
 			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 			return 1
 		}
-		if err := atomicfile.Write(bak, existing, 0o600); err != nil {
+		if err := writeBackup(bak, existing, 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 			return 1
 		}
