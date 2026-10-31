@@ -29,6 +29,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Set here, not on the callers: a job that calls a reusable workflow
+    # can't take timeout-minutes, and this covers both (#432).
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash
