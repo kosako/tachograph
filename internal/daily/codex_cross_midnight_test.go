@@ -395,6 +395,15 @@ func TestCodexEqualTotalModelSwitchCarriesAcrossMidnight(t *testing.T) {
 			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
 				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
 		}},
+		// As above with the gpt-b file appended to since midnight: its mtime
+		// changes the order the one-day window merges the files in, but not
+		// how the tie is broken (review DAILY-436-03).
+		{"at the same time in two files, one written today", func(root string) {
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T20-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-a"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), y2)
+			writeFile(t, filepath.Join(codexDayDir(root, now, 1), "rollout-2026-07-03T22-00-00-"+id+".jsonl"),
+				codexModelSwitchSession([]any{"ctx", "gpt-b"}, []any{"tc", y2.Format(time.RFC3339), int64(100_000)}), now)
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
