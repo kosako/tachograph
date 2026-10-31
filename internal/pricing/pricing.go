@@ -76,7 +76,11 @@ var defaults = map[string]Rate{
 	// GPT-6.1 Sol (2026-09-29, #296) keeps 6 Sol's price except cache hits at
 	// 0.05x input. "gpt-6.1-sol" prefix-matches none of the gpt-6-* keys, so it
 	// needs its own; likewise no bare "gpt-6.1" alias is guessed.
-	"gpt-6.1-sol": {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	// GPT-6.1 Terra (2026-10-26, #431), the successor to GPT-5.6 Terra, has the
+	// same multipliers (0.05x cache hits, 1.25x cache writes); rates are the
+	// Standard tier for inputs up to 272K tokens on OpenAI's API pricing page.
+	"gpt-6.1-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	"gpt-6.1-terra": {In: 1, Out: 5, CacheRead: 0.05, CacheWrite: 1.25},
 	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
 	// the original gpt-5; the more specific keys win by longest-prefix match.
 	// -codex variants aren't separately priced, so they fall to the base.
