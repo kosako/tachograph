@@ -341,7 +341,9 @@ func title(s schema.Status, now time.Time, metric string, limits render.LimitDis
 const enableParams = "bash=/usr/bin/true terminal=false refresh=false"
 
 // section renders one tool's dropdown block. showLimits adds the 5h / weekly
-// rows; they're left out for backends without subscription windows (#301).
+// rows. It comes from menubar.limits alone, not the backend: a user of a
+// backend without subscription windows hides them with menubar.limits=hide
+// (#301).
 func (r Renderer) section(b *strings.Builder, t schema.Tool, now time.Time, limits render.LimitDisplay, showLimits bool) {
 	name := "Codex"
 	if t.Tool == schema.ToolClaudeCode {

@@ -3,8 +3,10 @@ package cache
 import "time"
 
 // snapshotLockWait bounds the wait for another process's merge of the same
-// snapshot, which takes milliseconds; past it the caller goes on without the
-// lock rather than leave the snapshot unwritten.
+// snapshot, which takes milliseconds. Past it the caller still draws its line
+// from its merge but doesn't save it, so as not to roll back what the holder
+// saves; only a system without a file lock saves unlocked (see the statusline's
+// writeStatuslineSnapshot).
 const snapshotLockWait = time.Second
 
 // LockSnapshot holds tool's snapshot across processes for one read-merge-

@@ -18,10 +18,13 @@ import (
 )
 
 const setupUsage = `usage:
-  tacho setup claude            print the ~/.claude/settings.json statusLine snippet
-  tacho setup claude --write    merge it into ~/.claude/settings.json (backs up first)
+  tacho setup claude            print the statusLine snippet for Claude Code's settings.json
+  tacho setup claude --write    merge it into settings.json (backs up first)
   tacho setup swiftbar          print a SwiftBar plugin that runs this tacho by absolute path
   tacho setup swiftbar --write  write it into SwiftBar's plugin folder (backs up first)
+
+settings.json is ~/.claude/settings.json, or the one under CLAUDE_CONFIG_DIR
+when that is set.
 `
 
 func runSetup(args []string) int {
@@ -33,7 +36,7 @@ func runSetup(args []string) int {
 		return 2
 	}
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	write := fs.Bool("write", false, "merge into ~/.claude/settings.json")
+	write := fs.Bool("write", false, "merge into settings.json (~/.claude/settings.json, or the one under CLAUDE_CONFIG_DIR)")
 	fs.Parse(args[1:])
 
 	exe := resolveExe()

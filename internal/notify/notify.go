@@ -20,7 +20,8 @@ import (
 )
 
 // State remembers what was already announced, per tool, config root, and
-// window, so a threshold fires once per reset cycle. Keys are Key's.
+// window, so a threshold fires once per reset cycle, and again in the same
+// cycle only after the headroom rises back above it. Keys are Key's.
 type State map[string]Window
 
 // Key is the State entry of tool's window read from the config root root
