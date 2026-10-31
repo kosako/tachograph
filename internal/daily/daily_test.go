@@ -309,7 +309,7 @@ func TestClaudeTotalsBeforeSkippedMidnight(t *testing.T) {
 func TestClaudeTokens(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 
 	// today.jsonl: two of today's messages + one yesterday (excluded).
 	// New tokens exclude cache reads: msg1=100+5000+400=5500, msg2=2+673+481=1156.
@@ -399,7 +399,7 @@ func TestClaudeCostClampsInconsistentCacheCreationTTL(t *testing.T) {
 func TestClaudeSessionToday(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 
 	// One session file with today's two messages + one from yesterday (excluded).
 	// New tokens exclude cache reads: 100+5000+400=5500, 2+673+481=1156.
@@ -424,7 +424,7 @@ func TestClaudeSessionToday(t *testing.T) {
 func TestClaudeTotalsIncludesSubagentsAndWorkflows(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
+	yesterday := yesterdayOf(now)
 
 	mainPath := filepath.Join(root, "projects", "p", "main.jsonl")
 	writeFile(t, mainPath,
@@ -521,7 +521,7 @@ func TestCodexTotals(t *testing.T) {
 	writeFile(t, filepath.Join(dayDir, "s2.jsonl"), codexSession(500), now)
 
 	// Yesterday's folder must be ignored.
-	y := now.Add(-24 * time.Hour)
+	y := yesterdayOf(now)
 	yDir := filepath.Join(root, "sessions", y.Local().Format("2006"), y.Local().Format("01"), y.Local().Format("02"))
 	writeFile(t, filepath.Join(yDir, "old.jsonl"), codexSession(9999), y)
 
@@ -532,6 +532,38 @@ func TestCodexTotals(t *testing.T) {
 	prices := pricing.Table{"gpt-5": {In: 2}}
 	if cost := mustCodexTotals(t, root, now, prices).Cost; cost != 1500*2.0/1e6 {
 		t.Errorf("CodexTotals.Cost = %v, want %v", cost, 1500*2.0/1e6)
+	}
+}
+
+// The tests above build yesterday's fixtures with yesterdayOf, not now minus
+// 24 hours, which late on a 25-hour day (summer time ending) is still now's day
+// and made them fail in that hour (#443). Pinned to that hour here: the day's
+// totals leave the day before out.
+func TestTotalsExcludeYesterdayOnLongDay(t *testing.T) {
+	setLocal(t, loadLocation(t, "America/New_York"))
+	now := time.Date(2026, 11, 1, 23, 30, 0, 0, time.Local)
+	if !DayStart(now.Add(-24 * time.Hour)).Equal(DayStart(now)) {
+		t.Fatal("precondition: 24 hours before now should still be now's day")
+	}
+	yesterday := yesterdayOf(now)
+
+	root := t.TempDir()
+	path := filepath.Join(root, "projects", "p", "today.jsonl")
+	writeFile(t, path, claudeMsg(now, 10, 20, 100, 5)+"\n"+claudeMsg(yesterday, 9, 9, 9, 9)+"\n", now) // 135 today + 36 the day before
+	writeFile(t, filepath.Join(root, "projects", "p", "old.jsonl"),
+		claudeMsg(yesterday, 1000, 0, 0, 1000)+"\n", yesterday)
+	if got := mustClaudeTotals(t, root, now, noPrices).Tokens; got != 135 {
+		t.Errorf("ClaudeTotals.Tokens = %d, want 135 (today's message only)", got)
+	}
+	if got := ClaudeSessionToday(path, now, noPrices).Tokens; got != 135 {
+		t.Errorf("ClaudeSessionToday.Tokens = %d, want 135 (today's message only)", got)
+	}
+
+	codexRoot := t.TempDir()
+	writeFile(t, filepath.Join(codexRoot, "sessions", "2026", "11", "01", "s1.jsonl"), codexSession(1000), now)
+	writeFile(t, filepath.Join(codexRoot, "sessions", "2026", "10", "31", "old.jsonl"), codexSession(9999), yesterday)
+	if got := mustCodexTotals(t, codexRoot, now, noPrices).Tokens; got != 1000 {
+		t.Errorf("CodexTotals.Tokens = %d, want 1000 (the day before's folder ignored)", got)
 	}
 }
 
