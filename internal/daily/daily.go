@@ -640,7 +640,9 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 // before it (the pre-window base, then earlier days' snapshots), its last is
 // the largest snapshot within the day, and its events are the day's
 // snapshots. Snapshots are walked in emission order so a base carries the
-// model current at that point (#191). Days without a snapshot are absent.
+// model current at that point (#191); of equal totals the later wins, so a
+// model switch without growth carries into the next day (#436). Days
+// without a snapshot are absent.
 func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 	events := append([]codexTC(nil), ro.events...)
 	sortCodexTC(events)
@@ -659,13 +661,13 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 			if e.model != "" {
 				model = e.model
 			}
-			if last == nil || e.usage.TotalTokens > last.TotalTokens {
+			if last == nil || e.usage.TotalTokens >= last.TotalTokens {
 				u := e.usage
 				last, lastModel = &u, model
 			}
 		}
 		out[day] = codexRollout{model: model, before: base, beforeModel: baseModel, last: last, tsParsed: true, events: events[i:j]}
-		if base == nil || last.TotalTokens > base.TotalTokens {
+		if base == nil || last.TotalTokens >= base.TotalTokens {
 			base, baseModel = last, lastModel
 		}
 		i = j
@@ -675,15 +677,18 @@ func splitCodexRolloutByDay(ro codexRollout) map[string]codexRollout {
 
 // mergeCodexRollout folds one rollout into its session's entry. Cumulative
 // usage only grows within a session (resumed files carry the total forward),
-// so the largest snapshot on each side of midnight is that side's latest.
+// so the largest snapshot on each side of midnight is that side's latest; of
+// equal pre-midnight totals in different files (a model switch without
+// growth across a resume), the later by timestamp keeps its model (#436).
 func mergeCodexRollout(bySession map[string]*codexRollout, id string, ro codexRollout) {
 	prev, ok := bySession[id]
 	if !ok {
 		bySession[id] = &ro
 		return
 	}
-	if ro.before != nil && (prev.before == nil || ro.before.TotalTokens > prev.before.TotalTokens) {
-		prev.before, prev.beforeModel = ro.before, ro.beforeModel
+	if ro.before != nil && (prev.before == nil || ro.before.TotalTokens > prev.before.TotalTokens ||
+		ro.before.TotalTokens == prev.before.TotalTokens && ro.beforeTS.After(prev.beforeTS)) {
+		prev.before, prev.beforeModel, prev.beforeTS = ro.before, ro.beforeModel, ro.beforeTS
 	}
 	if ro.last.TotalTokens > prev.last.TotalTokens {
 		prev.last, prev.model = ro.last, ro.model
@@ -813,7 +818,8 @@ type codexTC struct {
 type codexRollout struct {
 	model       string
 	before      *codex.TokenUsage
-	beforeModel string // model current at the before snapshot
+	beforeModel string    // model current at the before snapshot
+	beforeTS    time.Time // when the before snapshot was emitted
 	last        *codex.TokenUsage
 	tsParsed    bool // at least one token_count carried a parsable timestamp
 	events      []codexTC
@@ -855,7 +861,7 @@ func codexRolloutUsage(path string, dayStart time.Time) (codexRollout, error) {
 			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
 				ro.tsParsed = true
 				if ts.Before(dayStart) {
-					ro.before, ro.beforeModel = ro.last, ro.model
+					ro.before, ro.beforeModel, ro.beforeTS = ro.last, ro.model, ts
 				} else {
 					// ro.model is the running last-seen turn_context, i.e.
 					// the model this snapshot's growth was produced under.
