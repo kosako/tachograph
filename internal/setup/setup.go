@@ -1,7 +1,9 @@
-// Package setup generates and applies the Claude Code statusLine
-// configuration and the SwiftBar plugin. It exists so first-time users don't
-// have to hand-edit ~/.claude/settings.json or guess the absolute path to the
-// tacho binary when it isn't on their PATH.
+// Package setup generates the Claude Code statusLine configuration and the
+// SwiftBar plugin and computes the settings.json merge, without touching the
+// filesystem; cmd/tacho applies them (finds the targets, backs up, writes).
+// It exists so first-time users don't have to hand-edit
+// ~/.claude/settings.json or guess the absolute path to the tacho binary when
+// it isn't on their PATH.
 package setup
 
 import (
