@@ -15,6 +15,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Above go test's default -timeout (10m), so a hung test fails with its
+    # own name and stack before the job is cancelled (#432).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,6 +92,7 @@ jobs:
   # exercises.
   test-windows:
     runs-on: windows-latest
+    timeout-minutes: 15 # above go test's default -timeout, as in test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,6 +110,7 @@ jobs:
   # isn't checked.
   release-snapshot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
