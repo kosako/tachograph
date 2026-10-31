@@ -389,7 +389,9 @@ Japanese too.
 Or via the CLI (config lives in `~/.config/tachograph/config.json` — or under
 `$XDG_CONFIG_HOME/tachograph/` when `XDG_CONFIG_HOME` is set, along with
 `statusline.tmpl` and `pricing.json`; `tacho config path` prints the actual
-location):
+location. `tacho config` edits take turns through `config.json.lock` beside
+`config.json` (beside its target when it is a link), so two that run at once
+don't lose either change):
 
 ```sh
 tacho config show

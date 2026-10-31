@@ -1,6 +1,11 @@
 package cache
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"github.com/kosako/tachograph/internal/atomicfile"
+)
 
 // snapshotLockWait bounds the wait for another process's merge of the same
 // snapshot, which takes milliseconds. Past it the caller still draws its line
@@ -35,4 +40,28 @@ const notifyStateLockWait = time.Second
 // LockSnapshot.
 func LockNotifyState() (unlock func(), err error) {
 	return lockFile("notify-state.lock", notifyStateLockWait)
+}
+
+// configLockWait bounds the wait for another process's config update, which
+// reads, edits, and rewrites one small file.
+const configLockWait = time.Second
+
+// LockConfig holds the config file at path across processes for one
+// read-edit-write update (config.Update): every `tacho config` edit rewrites
+// the whole file, so two that overlap — a `config set` and a SwiftBar
+// Settings click — would otherwise each save over the other's edit (#439).
+// The lock sits beside the file the save writes (atomicfile.Target: a linked
+// config.json's target, in a directory the save writes its temp file to), not
+// in the cache dir: every process saving that file takes the same lock, by
+// whatever path or cache dir (TACHO_CACHE_DIR) it reaches the file. unlock
+// and err as for LockSnapshot.
+func LockConfig(path string) (unlock func(), err error) {
+	if path == "" {
+		return nil, errors.New("config: no home directory")
+	}
+	target, err := atomicfile.Target(path)
+	if err != nil {
+		return nil, err
+	}
+	return lockPath(target+".lock", configLockWait)
 }

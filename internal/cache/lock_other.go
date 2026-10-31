@@ -12,3 +12,8 @@ import (
 func lockFile(string, time.Duration) (func(), error) {
 	return nil, errors.ErrUnsupported
 }
+
+// lockPath is lockFile's counterpart on a file at any path: none either.
+func lockPath(string, time.Duration) (func(), error) {
+	return nil, errors.ErrUnsupported
+}
