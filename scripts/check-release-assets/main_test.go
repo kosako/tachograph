@@ -400,3 +400,69 @@ func TestCheckBinaryOnATaggedBuild(t *testing.T) {
 		t.Errorf("the caller's git environment reached the build: %s exists (%v)", trap, err)
 	}
 }
+
+// The CLI's exit status is the gate the release workflow (verify-assets) and
+// CI's snapshot check rely on: 0 for a good release, 1 when anything is wrong,
+// 2 for a bad invocation (#444). main runs in a child process — this test
+// binary re-run into TestCLIHelper — so its os.Exit and output are its own
+// while the fake binaries' build info stays stubbed.
+func TestCLIExitStatus(t *testing.T) {
+	stubBuildInfo(t)
+	good := t.TempDir()
+	writeRelease(t, good, "v1.2.3", nil)
+	missing := t.TempDir()
+	writeRelease(t, missing, "v1.2.3", nil)
+	if err := os.Remove(filepath.Join(missing, assetName("darwin", "amd64"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		args   []string
+		want   int
+		stderr string
+	}{
+		{"a good release", []string{good, "1.2.3"}, 0, ""},
+		{"a good snapshot", []string{"-skip-version", good}, 0, ""},
+		{"a missing archive", []string{missing, "v1.2.3"}, 1, assetName("darwin", "amd64")},
+		{"no checksums.txt", []string{t.TempDir(), "v1.2.3"}, 1, "checksums.txt"},
+		{"another version", []string{good, "v1.2.4"}, 1, "v1.2.4"},
+		{"a missing tag", []string{good}, 2, "usage:"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestCLIHelper$")
+			cmd.Env = append(os.Environ(), "CHECK_RELEASE_ASSETS_CLI_ARGS="+strings.Join(c.args, "\n"))
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			got := 0
+			if exit, ok := err.(*exec.ExitError); ok {
+				got = exit.ExitCode()
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", got, c.want, stdout.String(), stderr.String())
+			}
+			ok := strings.Contains(stdout.String(), "archives OK")
+			if ok != (c.want == 0) {
+				t.Errorf("stdout %q: says archives OK = %v, want %v", stdout.String(), ok, c.want == 0)
+			}
+			if c.stderr != "" && !strings.Contains(stderr.String(), c.stderr) {
+				t.Errorf("stderr %q doesn't name %q", stderr.String(), c.stderr)
+			}
+		})
+	}
+}
+
+// TestCLIHelper is main for TestCLIExitStatus's child process; run directly it
+// skips.
+func TestCLIHelper(t *testing.T) {
+	args, ok := os.LookupEnv("CHECK_RELEASE_ASSETS_CLI_ARGS")
+	if !ok {
+		t.Skip("run by TestCLIExitStatus")
+	}
+	stubBuildInfo(t)
+	os.Args = append([]string{"check-release-assets"}, strings.Split(args, "\n")...)
+	main()
+	os.Exit(0) // main returns on success; exit before the test framework prints
+}
