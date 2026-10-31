@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -916,5 +917,87 @@ func symlinkOrSkip(t *testing.T, dest, link string) {
 			t.Skipf("can't create a symlink on windows: %v", err)
 		}
 		t.Fatal(err)
+	}
+}
+
+// failBackup makes writeBackup fail for the rest of the test.
+func failBackup(t *testing.T) {
+	t.Helper()
+	orig := writeBackup
+	writeBackup = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
+	t.Cleanup(func() { writeBackup = orig })
+}
+
+// When the backup can't be written, --write stops with exit 1 and the reason
+// and leaves the settings it would have replaced as they were (#445).
+func TestSetupClaudeWriteStopsWhenTheBackupFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	settings := filepath.Join(dir, "settings.json")
+	original := []byte(`{"statusLine":{"type":"command","command":"OLD-USER-STATUSLINE"},"theme":"dark"}`)
+	if err := os.WriteFile(settings, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failBackup(t)
+	var code int
+	stderr := capture(t, &os.Stderr, func() {
+		capture(t, &os.Stdout, func() { code = runSetup([]string{"claude", "--write"}) })
+	})
+	if code != 1 || !strings.Contains(stderr, "could not write backup: disk full") {
+		t.Errorf("exit %d, stderr %q; want 1 and the backup failure", code, stderr)
+	}
+	if b, _ := os.ReadFile(settings); !bytes.Equal(b, original) {
+		t.Errorf("settings.json = %s, want it untouched", b)
+	}
+	if _, err := os.Stat(settings + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("a .bak was left behind (%v)", err)
+	}
+}
+
+// The same for the SwiftBar plugin: whether the backup's folder can't be made
+// or the backup itself can't be written, the installed plugin stays (#445).
+func TestSetupSwiftBarWriteStopsWhenTheBackupFails(t *testing.T) {
+	_, setting := isolateSwiftBar(t)
+	orig := resolveExe
+	resolveExe = func() string { return "/opt/tools/tacho" }
+	t.Cleanup(func() { resolveExe = orig })
+	old := "#!/bin/bash\nexport TACHO_APPEARANCE=light\nexec tacho swiftbar\n"
+	for _, c := range []struct {
+		name   string
+		cfgDir func(t *testing.T) string
+		fail   bool
+	}{
+		// A regular file where the config directory's parent should be, so
+		// MkdirAll fails on every platform.
+		{"the backup's folder can't be made", func(t *testing.T) string {
+			file := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(file, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(file, "cfg")
+		}, false},
+		{"the backup can't be written", func(t *testing.T) string { return t.TempDir() }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TACHO_CONFIG_DIR", c.cfgDir(t))
+			if c.fail {
+				failBackup(t)
+			}
+			*setting = t.TempDir()
+			plugin := filepath.Join(*setting, "tacho.30s.sh")
+			if err := os.WriteFile(plugin, []byte(old), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var code int
+			stderr := capture(t, &os.Stderr, func() {
+				capture(t, &os.Stdout, func() { code = runSetup([]string{"swiftbar", "--write"}) })
+			})
+			if code != 1 || !strings.Contains(stderr, "could not write backup") {
+				t.Errorf("exit %d, stderr %q; want 1 and the backup failure", code, stderr)
+			}
+			if b, _ := os.ReadFile(plugin); string(b) != old {
+				t.Errorf("plugin = %q, want the installed one untouched", b)
+			}
+		})
 	}
 }
