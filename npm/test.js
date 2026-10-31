@@ -107,12 +107,32 @@ const causes = {
   },
   none: () => undefined,
 };
-globalThis.fetch = async (url) => {
+// AbortSignal.timeout is replaced so a timeout needn't take 120 seconds: it
+// records the time asked for, and the signal aborts as a real one does once
+// its stub timer fires. Only timedOut fires it, so a timeout scenario fails
+// the install only through the signal install.js hands fetch (#444).
+const timers = new Map();
+AbortSignal.timeout = (ms) => {
+  const c = new AbortController();
+  const fire = () => c.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+  timers.set(c.signal, { ms, fire });
+  return c.signal;
+};
+// timedOut waits on fetch's signal as fetch does, and fires its timer.
+function timedOut(signal) {
+  const timer = timers.get(signal);
+  if (!timer) throw new Error("stub: fetch was given no timeout signal");
+  if (timer.ms !== 120000) throw new Error("stub: a " + timer.ms + "ms timeout, want 120000");
+  return new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    setImmediate(timer.fire);
+  });
+}
+globalThis.fetch = async (url, options = {}) => {
   const which = url.endsWith("/checksums.txt") ? "sums" : "download";
-  if (s.timeout === which) {
-    const err = new Error("The operation was aborted due to timeout");
-    err.name = "TimeoutError";
-    throw err;
+  if (s.timeout === which) return timedOut(options.signal); // waiting for the headers
+  if (s.bodyTimeout === which) {
+    return { ok: true, status: 200, arrayBuffer: () => timedOut(options.signal) }; // reading the body
   }
   if (s.network === which) {
     const cause = causes[s.cause]();
@@ -206,6 +226,8 @@ for (const [name, scenario, want, extracted] of [
   ["a failed checksums download", { sums: "listed", extract: "ok", sumsStatus: 500 }, /^checksums download failed: 500 Stub Error/m, false],
   ["a download timeout", { sums: "listed", extract: "ok", timeout: "download" }, /^download timed out after 120s/m, false],
   ["a checksums timeout", { sums: "listed", extract: "ok", timeout: "sums" }, /^checksums download timed out after 120s/m, false],
+  ["a timeout reading the download", { sums: "listed", extract: "ok", bodyTimeout: "download" }, /^download timed out after 120s/m, false],
+  ["a timeout reading the checksums", { sums: "listed", extract: "ok", bodyTimeout: "sums" }, /^checksums download timed out after 120s/m, false],
   ["a failed extraction", { sums: "listed", extract: "fail" }, /stub tar failed/, true],
   ["an archive without the binary", { sums: "listed", extract: "empty" }, /extracted archive but tacho(\.exe)? not found in it/, true],
 ]) {
@@ -256,3 +278,58 @@ for (const [name, scenario, want, extracted] of [
     });
   }
 }
+
+// runLauncher runs a copy of bin/tacho.js the way npm's bin shim does, next to
+// a stand-in binary: a shell script running script, written with mode (null
+// leaves the binary out). It reports what the launcher exited with (#444).
+function runLauncher(script, { mode = 0o755, args = [] } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tacho-launcher-test-"));
+  try {
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(bin);
+    fs.copyFileSync(path.join(__dirname, "bin", "tacho.js"), path.join(bin, "tacho.js"));
+    if (script !== null) {
+      const binPath = path.join(bin, assetFor(process.platform, process.arch).binary);
+      fs.writeFileSync(binPath, "#!/bin/sh\n" + script + "\n");
+      fs.chmodSync(binPath, mode);
+    }
+    return spawnSync(process.execPath, [path.join(bin, "tacho.js"), ...args], { encoding: "utf8" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// The stand-in binaries are shell scripts, which Windows can't run.
+const noShell = process.platform === "win32" && "the stand-in binary is a shell script";
+
+test("launcher forwards the arguments, the output, and a non-zero exit status", { skip: noShell }, () => {
+  const r = runLauncher('echo "args: $*"; echo "to stderr" >&2; exit 3', { args: ["a", "b c"] });
+  assert.strictEqual(r.status, 3, r.stderr);
+  assert.strictEqual(r.stdout, "args: a b c\n");
+  assert.strictEqual(r.stderr, "to stderr\n");
+});
+
+test("launcher exits 0 when the binary does", { skip: noShell }, () => {
+  const r = runLauncher("exit 0");
+  assert.strictEqual(r.status, 0, r.stderr);
+});
+
+test("launcher exits 1 with the reinstall hint when the binary is missing", () => {
+  const r = runLauncher(null);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /tachograph: binary not found/);
+  assert.match(r.stderr, /go install github\.com\/kosako\/tachograph\/cmd\/tacho@latest/);
+});
+
+test("launcher exits 1 naming the error when the binary can't be run", { skip: noShell }, () => {
+  const r = runLauncher("exit 0", { mode: 0o644 });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /^tachograph: .*EACCES/m);
+});
+
+// A binary killed by a signal never reads as success. What the launcher then
+// exits with is #442's to decide.
+test("launcher doesn't exit 0 when the binary is killed by a signal", { skip: noShell }, () => {
+  const r = runLauncher("kill -TERM $$");
+  assert.notStrictEqual(r.status, 0);
+});
