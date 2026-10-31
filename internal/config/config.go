@@ -339,15 +339,16 @@ func (e *LoadError) Unwrap() error { return e.Err }
 // edit rewrites the whole file, so two overlapping ones (a `config set` and a
 // SwiftBar Settings click) would otherwise each save over the other's (#439).
 // change's error is returned and nothing saved; a config that can't be read
-// is a *LoadError. When the lock isn't held in time nothing is saved and the
-// error is returned; a system without a file lock updates unlocked
+// is a *LoadError. When the lock can't be taken — held past its wait by
+// another update, or not made at all — nothing is saved and the error is
+// returned; a system without a file lock updates unlocked
 // (errors.ErrUnsupported), keeping the narrow race, as notify.Notify does.
 func Update(lock func() (func(), error), change func(*Config) error) error {
 	unlock, err := lock()
 	if err == nil {
 		defer unlock()
 	} else if !errors.Is(err, errors.ErrUnsupported) {
-		return fmt.Errorf("config: not saved, another update holds the config: %w", err)
+		return fmt.Errorf("config: not saved, the config lock can't be taken: %w", err)
 	}
 	c, err := LoadStrict()
 	if err != nil {

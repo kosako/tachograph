@@ -269,7 +269,7 @@ func TestConfigEditsWaitForTheConfigLock(t *testing.T) {
 	} {
 		var code int
 		stderr := capture(t, &os.Stderr, func() { code = edit() })
-		if code != 1 || !strings.Contains(stderr, "another update holds the config") {
+		if code != 1 || !strings.Contains(stderr, "the config lock can't be taken") {
 			t.Errorf("%s while the lock is held: exit %d, stderr %q; want 1 and the reason", name, code, stderr)
 		}
 	}
@@ -339,5 +339,24 @@ func TestConfigLockFollowsALinkedConfig(t *testing.T) {
 	}
 	if cfg := config.Load(); cfg.Menubar.Style != "number" {
 		t.Errorf("style %q through the link, want number", cfg.Menubar.Style)
+	}
+}
+
+// A lock that can't be taken for a reason other than another update — here a
+// config.json link leading nowhere, so there is no file to lock beside — says
+// so with that reason, not as if waiting would help (#439).
+func TestConfigEditReportsWhyTheLockCantBeTaken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone", "config.json"), filepath.Join(dir, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	stderr := capture(t, &os.Stderr, func() { code = configSet("menubar.style", "number") })
+	if code != 1 || !strings.Contains(stderr, "the config lock can't be taken") || !strings.Contains(stderr, "can't be resolved") {
+		t.Errorf("exit %d, stderr %q; want 1, the lock, and why", code, stderr)
 	}
 }
