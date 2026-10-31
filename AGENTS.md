@@ -86,6 +86,9 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run
   `npm/package.json` declares (`>=N`, read from the file and run as exactly
   `N.0.0`) and on the current LTS. When raising the floor, update the Node version in `npm/README.md`
   too.
+- `.github/repo-baseline.json` lists, by check-run name, the PR checks the
+  default branch requires (`required_checks`). When renaming or removing a CI
+  job listed there, update the list in the same change.
 
 ## Release Notes
 
