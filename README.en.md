@@ -518,8 +518,9 @@ note: recomputed from the logs still on disk; days past Claude Code's transcript
   `tacho status`, and yesterday's row is yesterday's "today" figure,
   recomputed from the logs. When a tool isn't found (`available: false`) or
   fails to collect (`error` set), `daily` in `tacho status` is null, while
-  today's row still shows what the logs add up to (0 with no logs). The
-  tools shown follow the `tools` setting.
+  today's row still shows what the logs add up to when they can be read (0
+  with no logs) and `--` when they can't. The tools shown follow the `tools`
+  setting.
 - **tacho stores no history.** Every call recomputes from the Claude Code
   transcripts and Codex session logs (a few seconds for 30 days), so the
   table only ever shows what is still on disk: a day whose transcripts
