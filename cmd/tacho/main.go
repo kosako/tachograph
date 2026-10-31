@@ -293,29 +293,46 @@ func configToggleTool(name string) int {
 		fmt.Fprintf(os.Stderr, "tacho: unknown tool %q\n", name)
 		return 2
 	}
-	c, err := config.LoadStrict()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tacho: refusing to overwrite an unreadable config, fix or remove it first:", err)
-		return 1
-	}
-	enabled := map[string]bool{}
-	for _, t := range c.Tools {
-		enabled[t] = true
-	}
-	enabled[name] = !enabled[name]
-	// Non-nil empty slice so an all-off selection persists as "tools": [] (an
-	// explicit "show nothing"), not "tools": null (which reloads as defaults).
-	c.Tools = []string{}
-	for _, t := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
-		if enabled[t] {
-			c.Tools = append(c.Tools, t)
+	err := config.Update(cache.LockConfig, func(c *config.Config) error {
+		enabled := map[string]bool{}
+		for _, t := range c.Tools {
+			enabled[t] = true
 		}
-	}
-	if err := config.Save(c); err != nil {
+		enabled[name] = !enabled[name]
+		// Non-nil empty slice so an all-off selection persists as "tools": [] (an
+		// explicit "show nothing"), not "tools": null (which reloads as defaults).
+		c.Tools = []string{}
+		for _, t := range []string{schema.ToolClaudeCode, schema.ToolCodex} {
+			if enabled[t] {
+				c.Tools = append(c.Tools, t)
+			}
+		}
+		return nil
+	})
+	return configUpdateExit(err, 0)
+}
+
+// errConfigRefused stops a config.Update whose edit was refused, and already
+// reported, with the exit code alongside.
+var errConfigRefused = errors.New("config edit refused")
+
+// configUpdateExit reports a config.Update's error and maps it to the exit
+// code: refused's code for a refused edit, 1 when the config can't be read
+// or saved (the lock not held in time included).
+func configUpdateExit(err error, refused int) int {
+	var loadErr *config.LoadError
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, errConfigRefused):
+		return refused
+	case errors.As(err, &loadErr):
+		fmt.Fprintln(os.Stderr, "tacho: refusing to overwrite an unreadable config, fix or remove it first:", loadErr.Err)
+		return 1
+	default:
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
-	return 0
 }
 
 // configStatuslinePreset lists the preset catalog or writes a chosen preset to
@@ -353,12 +370,21 @@ func configStatuslinePreset(args []string) int {
 	return 0
 }
 
+// configSet sets one key under the config lock (config.Update, #439).
 func configSet(key, val string) int {
-	c, err := config.LoadStrict()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tacho: refusing to overwrite an unreadable config, fix or remove it first:", err)
-		return 1
-	}
+	code := 0
+	err := config.Update(cache.LockConfig, func(c *config.Config) error {
+		if code = setConfigValue(c, key, val); code != 0 {
+			return errConfigRefused
+		}
+		return nil
+	})
+	return configUpdateExit(err, code)
+}
+
+// setConfigValue applies one `config set` to c: 0, or the exit code after
+// reporting a key or value it refuses.
+func setConfigValue(c *config.Config, key, val string) int {
 	switch key {
 	case "tools":
 		tools := []string{} // non-nil so an empty selection persists as [] (not null → defaults)
@@ -423,10 +449,6 @@ func configSet(key, val string) int {
 		fmt.Fprintf(os.Stderr, "tacho: unknown key %q\n", key)
 		fmt.Fprint(os.Stderr, configUsage)
 		return 2
-	}
-	if err := config.Save(c); err != nil {
-		fmt.Fprintln(os.Stderr, "tacho:", err)
-		return 1
 	}
 	return 0
 }

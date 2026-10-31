@@ -36,3 +36,16 @@ const notifyStateLockWait = time.Second
 func LockNotifyState() (unlock func(), err error) {
 	return lockFile("notify-state.lock", notifyStateLockWait)
 }
+
+// configLockWait bounds the wait for another process's config update, which
+// reads, edits, and rewrites one small file.
+const configLockWait = time.Second
+
+// LockConfig holds the config file across processes for one read-edit-write
+// update (config.Update): every `tacho config` edit rewrites the whole file,
+// so two that overlap — a `config set` and a SwiftBar Settings click — would
+// otherwise each save over the other's edit (#439). One lock in the cache dir
+// serves every config dir. unlock and err as for LockSnapshot.
+func LockConfig() (unlock func(), err error) {
+	return lockFile("config.lock", configLockWait)
+}

@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/render"
 	"github.com/kosako/tachograph/internal/schema"
@@ -243,5 +245,38 @@ func TestConfigSetNotifyThresholds(t *testing.T) {
 	}
 	if got := config.Load().Notify.Thresholds; len(got) != 0 {
 		t.Errorf("Load().Notify.Thresholds after clearing = %v, want []", got)
+	}
+}
+
+// While another process holds the config lock past its wait, `config set` and
+// the dropdown's tool toggle save nothing and exit 1 with the reason, instead
+// of saving over that process's update (#439); once it lets go they save.
+func TestConfigEditsWaitForTheConfigLock(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	unlock, err := cache.LockConfig()
+	if err != nil {
+		t.Fatalf("hold the config lock: %v", err)
+	}
+	for name, edit := range map[string]func() int{
+		"config set":  func() int { return configSet("menubar.style", "number") },
+		"toggle-tool": func() int { return configToggleTool("codex") },
+	} {
+		var code int
+		stderr := capture(t, &os.Stderr, func() { code = edit() })
+		if code != 1 || !strings.Contains(stderr, "another update holds the config") {
+			t.Errorf("%s while the lock is held: exit %d, stderr %q; want 1 and the reason", name, code, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.json")); !os.IsNotExist(err) {
+		t.Errorf("config.json written while the lock was held elsewhere (%v)", err)
+	}
+	unlock()
+	if code := configSet("menubar.style", "number"); code != 0 {
+		t.Fatalf("config set after the lock was let go: exit %d", code)
+	}
+	if c := config.Load(); c.Menubar.Style != "number" {
+		t.Errorf("style %q after the lock was let go, want number", c.Menubar.Style)
 	}
 }
