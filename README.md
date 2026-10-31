@@ -279,7 +279,7 @@ total        $335.13         329.8M    $0.27           48k  $335.40
 note: recomputed from the logs still on disk; days past Claude Code's transcript retention are under-reported.
 ```
 
-- 値の定義は当日合計(`cost.all` / `tokens.all`、SwiftBar の `/d`)と同じです。今日の行は `tacho status` の `daily` と一致し、昨日の行は、昨日の時点で「今日」だった値をログから計算し直したものです。表示するツールは `tools` 設定に従います
+- 値の定義は当日合計(`cost.all` / `tokens.all`、SwiftBar の `/d`)と同じです。今日の行は `tacho status` の `daily` と一致し、昨日の行は、昨日の時点で「今日」だった値をログから計算し直したものです。ただし、ツールが見つからない(`available: false`)か取得に失敗した(`error` が非 null)ときは、`tacho status` の `daily` は null になります。日次一覧の今日の行は、ログを読めればその値(ログが無ければ 0)、読めなければ `--` です。表示するツールは `tools` 設定に従います
 - **tacho は履歴を保存しません。** 毎回 Claude Code の transcript と Codex のセッションログから再計算します(30 日で数秒)。したがって表に出るのはディスクに残っているログの分だけで、Claude Code が保持期間を過ぎた transcript を削除した日は小さく出ます(脚注はその注意です)。長期保存や分析が要る場合は、別のツールに任せてください
 - `--` はそのツールのログが読めなかった(不明)印です。0 は「ログ上に使用が無い」を意味します。コストは、使用があるのに価格付きモデルが一つも無い日は `--`、使用が 0 の日は `$0.00` です。`total` 行は、不明な日を 1 日でも含むとそのツールの列が `--` に、コストが `--` の日を含むとコストが `--` になります
 

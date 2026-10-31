@@ -306,7 +306,10 @@ type DailyHistory struct {
 // History aggregates the days in [from, to) (local midnights, see
 // daily.DayStart) for both tools with the same accounting as Status's daily,
 // so today's row equals `tacho status` and yesterday's row is what today's
-// was. Nothing is cached: every call re-reads the logs (#242).
+// was. The exception is a tool Status leaves Daily null for (not available,
+// or collected with an error): its rows still come from the logs, and are
+// unknown only when the logs can't be read.
+// Nothing is cached: every call re-reads the logs (#242).
 func History(opts Options, from, to time.Time) DailyHistory {
 	prices := pricing.Load()
 	h := DailyHistory{Tools: map[string][]*schema.Daily{}}
