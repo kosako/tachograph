@@ -28,27 +28,37 @@ func TestLockFileExcludesAnotherHolder(t *testing.T) {
 	second()
 }
 
-// A waiter gets the lock once its holder lets go within the wait. The waiter
-// is let start first so it finds the lock taken; were it to start late, it
-// would take the free lock at once and the test still holds.
+// A waiter gets the lock once its holder lets go within the wait. The holder
+// lets go only after the waiter has found the lock taken (lockContended), so
+// the retry after contention is what takes it, however late the waiter
+// starts (#445).
 func TestLockFileAcquiresOnceReleasedDuringWait(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	unlock, err := lockFile("x.lock", time.Second)
 	if err != nil {
 		t.Fatalf("first lock: %v", err)
 	}
-	started := make(chan struct{})
+	contended := make(chan struct{}, 1)
+	lockContended = func() {
+		select {
+		case contended <- struct{}{}:
+		default:
+		}
+	}
+	t.Cleanup(func() { lockContended = nil })
 	got := make(chan error, 1)
 	go func() {
-		close(started)
 		second, err := lockFile("x.lock", 5*time.Second)
 		if err == nil {
 			second()
 		}
 		got <- err
 	}()
-	<-started
-	time.Sleep(20 * time.Millisecond) // the waiter's first try meets the held lock
+	select {
+	case <-contended:
+	case err := <-got:
+		t.Fatalf("waiter finished (%v) without meeting the held lock", err)
+	}
 	unlock()
 	if err := <-got; err != nil {
 		t.Fatalf("lock after the holder let go: %v", err)

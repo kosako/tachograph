@@ -59,6 +59,9 @@ func lockFile(name string, wait time.Duration) (func(), error) {
 			f.Close()
 			return nil, errno
 		}
+		if lockContended != nil {
+			lockContended()
+		}
 		time.Sleep(2 * time.Millisecond)
 	}
 }

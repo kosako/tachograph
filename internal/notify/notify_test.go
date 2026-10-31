@@ -385,6 +385,45 @@ func TestRunRetriesFailedDelivery(t *testing.T) {
 	}
 }
 
+// A failed delivery in a window already announced at a higher threshold
+// keeps that window's previous record — not the new threshold, nor nothing —
+// so the next tick retries only the threshold that failed (#445).
+func TestRunKeepsThePreviousRecordWhenADeliveryFails(t *testing.T) {
+	th := []int{50, 30}
+	resets := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
+	key := keyOf(schema.ToolCodex, schema.WindowFiveHour)
+	var sent []string
+	failing := false
+	send := func(u string) error {
+		sent = append(sent, u)
+		if failing {
+			return errors.New("open failed")
+		}
+		return nil
+	}
+
+	st := Run(status(limitsTool(schema.ToolCodex, false, 60, 0, resets)), th, State{}, testRoots, "tacho.30s.sh", time.Now(), send)
+	if got := st[key].Notified; len(sent) != 1 || len(got) != 1 || got[0] != 50 {
+		t.Fatalf("40%% left: sent %d, record %v, want the 50%% threshold sent and recorded", len(sent), got)
+	}
+
+	sent, failing = nil, true
+	low := status(limitsTool(schema.ToolCodex, false, 75, 0, resets)) // 25% left
+	st = Run(low, th, st, testRoots, "tacho.30s.sh", time.Now(), send)
+	if got := st[key].Notified; len(sent) != 1 || len(got) != 1 || got[0] != 50 {
+		t.Fatalf("25%% left, delivery failing: sent %d, record %v, want the previous record (50 only)", len(sent), got)
+	}
+
+	sent, failing = nil, false
+	st = Run(low, th, st, testRoots, "tacho.30s.sh", time.Now(), send)
+	if len(sent) != 1 || !strings.Contains(sent[0], "25%25%20left") {
+		t.Errorf("retry sent %v, want the one 25%%-left notification again", sent)
+	}
+	if got := st[key].Notified; len(got) != 2 {
+		t.Errorf("after the retry the record is %v, want both thresholds", got)
+	}
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
 	if got := LoadState(); len(got) != 0 {
