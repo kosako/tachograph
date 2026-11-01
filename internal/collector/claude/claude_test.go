@@ -421,6 +421,38 @@ func TestTranscriptNewestUsageWinsOverNewestMtime(t *testing.T) {
 	}
 }
 
+// A file system that keeps whole-second mtimes can stamp a file before the
+// sub-second timestamp of its last line; that file must still be read, not
+// skipped as older than the response already found (#437).
+func TestTranscriptCoarseMtimeStillRead(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := func(s string) time.Time {
+		ts, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ts
+	}
+	usage := func(ts, session string) string {
+		return `{"timestamp":"` + ts + `","sessionId":"` + session + `","message":{"model":"claude-x","usage":{"input_tokens":10,"output_tokens":5}}}`
+	}
+	writeTranscript(t, dir, "a.jsonl", usage("2026-06-12T12:00:00.100Z", "a")+"\n"+
+		`{"timestamp":"2026-06-12T12:01:00Z","sessionId":"a","type":"user"}`, at("2026-06-12T12:01:00Z"))
+	writeTranscript(t, dir, "b.jsonl", usage("2026-06-12T12:00:00.900Z", "b"), at("2026-06-12T12:00:00Z"))
+
+	got := Collect(Options{Root: root, Now: at("2026-06-12T13:00:00.500Z"), Getenv: noEnv})
+	if got.Session == nil || got.Session.ID == nil || *got.Session.ID != "b" {
+		t.Fatalf("Session = %+v, want b (its response is newer though its mtime is the whole second before)", got.Session)
+	}
+	if got.Stale {
+		t.Error("Stale = true, want false (b's response is under 60 minutes old)")
+	}
+}
+
 // Equal mtimes must resolve deterministically (by path), not by directory
 // read order, so the same session is picked across runs.
 func TestTranscriptTieBreakByPath(t *testing.T) {
