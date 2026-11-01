@@ -377,6 +377,50 @@ func TestTranscriptFallbackPastEmpty(t *testing.T) {
 	}
 }
 
+// An older session that only got a user line appended sorts first by mtime,
+// but the transcript with the newest response wins (#437). A transcript last
+// written before that response is skipped without reading: it can't hold a
+// newer line, so the stray future-dated line planted in one here is never
+// seen.
+func TestTranscriptNewestUsageWinsOverNewestMtime(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := func(s string) time.Time {
+		ts, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ts
+	}
+	usage := func(ts, session string) string {
+		return `{"timestamp":"` + ts + `","sessionId":"` + session + `","message":{"model":"claude-x","usage":{"input_tokens":10,"output_tokens":5}}}`
+	}
+	writeTranscript(t, dir, "a.jsonl", usage("2026-06-12T10:00:00Z", "a")+"\n"+
+		`{"timestamp":"2026-06-12T12:01:00Z","sessionId":"a","type":"user"}`, at("2026-06-12T12:01:00Z"))
+	writeTranscript(t, dir, "b.jsonl", usage("2026-06-12T12:00:00Z", "b"), at("2026-06-12T12:00:00Z"))
+	writeTranscript(t, dir, "c.jsonl", usage("2026-06-12T12:30:00Z", "c"), at("2026-06-12T11:00:00Z"))
+
+	got := Collect(Options{Root: root, Now: at("2026-06-12T12:05:00Z"), Getenv: noEnv})
+	if got.Session == nil || got.Session.ID == nil || *got.Session.ID != "b" {
+		t.Fatalf("Session = %+v, want b (the newest response)", got.Session)
+	}
+	if got.Session.TranscriptPath == nil || *got.Session.TranscriptPath != filepath.Join(dir, "b.jsonl") {
+		t.Errorf("TranscriptPath = %v, want b.jsonl", got.Session.TranscriptPath)
+	}
+	if got.CollectedAt == nil {
+		t.Fatal("CollectedAt = nil")
+	}
+	if ct, _ := time.Parse(time.RFC3339, *got.CollectedAt); !ct.Equal(at("2026-06-12T12:00:00Z")) {
+		t.Errorf("CollectedAt = %v, want b's response at 12:00", ct)
+	}
+	if got.Stale {
+		t.Error("Stale = true, want false (b's response is 5 minutes old)")
+	}
+}
+
 // Equal mtimes must resolve deterministically (by path), not by directory
 // read order, so the same session is picked across runs.
 func TestTranscriptTieBreakByPath(t *testing.T) {
