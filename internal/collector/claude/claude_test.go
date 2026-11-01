@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -502,6 +503,42 @@ func TestTranscriptNewestBlock(t *testing.T) {
 	if want, _ := time.Parse(time.RFC3339, "2026-06-12T12:00:06Z"); !ct.Equal(want) {
 		t.Errorf("CollectedAt = %v, want newest block %v", ct, want)
 	}
+}
+
+// A projects tree that can't be listed leaves nothing listed, which is
+// unknown, not "Claude Code never used": read_error, not available:false
+// (#437). A missing projects directory stays unavailable.
+func TestTranscriptReadErrorWhenNothingCanBeListed(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs unix permissions enforced for the current user")
+	}
+	for _, tc := range []struct{ name, locked string }{
+		{"projects directory", "projects"},
+		{"project directory", filepath.Join("projects", "-proj")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "projects", "-proj"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			locked := filepath.Join(root, tc.locked)
+			if err := os.Chmod(locked, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(locked, 0o755) })
+
+			got := Collect(Options{Root: root, Getenv: noEnv})
+			if got.Error == nil || got.Error.Code != "read_error" {
+				t.Fatalf("Available=%v Error=%+v, want read_error when nothing can be listed", got.Available, got.Error)
+			}
+		})
+	}
+	t.Run("missing projects directory", func(t *testing.T) {
+		got := Collect(Options{Root: t.TempDir(), Getenv: noEnv})
+		if got.Available || got.Error != nil {
+			t.Fatalf("Available=%v Error=%+v, want unavailable without an error", got.Available, got.Error)
+		}
+	})
 }
 
 // When no transcript has any usage, surface a no_usage error (not a panic or

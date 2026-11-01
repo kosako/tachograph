@@ -519,6 +519,43 @@ func TestCollectReadErrorWhenOnlyRolloutUnreadable(t *testing.T) {
 	}
 }
 
+// A sessions tree that can't be listed leaves nothing listed, which is unknown,
+// not "Codex never used": read_error, not available:false (#437). Whether the
+// sessions directory itself or the only day directory fails, the result is the
+// same; a missing sessions directory stays unavailable.
+func TestCollectReadErrorWhenNothingCanBeListed(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs unix permissions enforced for the current user")
+	}
+	for _, tc := range []struct{ name, locked string }{
+		{"sessions directory", "sessions"},
+		{"day directory", filepath.Join("sessions", "2026", "05", "24")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "sessions", "2026", "05", "24"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			locked := filepath.Join(root, tc.locked)
+			if err := os.Chmod(locked, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(locked, 0o755) })
+
+			got := Collect(Options{Root: root})
+			if got.Error == nil || got.Error.Code != "read_error" {
+				t.Fatalf("Available=%v Error=%+v, want read_error when nothing can be listed", got.Available, got.Error)
+			}
+		})
+	}
+	t.Run("missing sessions directory", func(t *testing.T) {
+		got := Collect(Options{Root: t.TempDir()})
+		if got.Available || got.Error != nil {
+			t.Fatalf("Available=%v Error=%+v, want unavailable without an error", got.Available, got.Error)
+		}
+	})
+}
+
 // A just-started session (newest mtime, only turn_context, no token_count) must
 // not be selected and hide an older session's still-valid data.
 func TestCollectSkipsSessionWithoutTokenCount(t *testing.T) {
