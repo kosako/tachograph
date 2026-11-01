@@ -1,6 +1,8 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -76,6 +78,50 @@ func TestStaleSnapshotYieldsToFresherTranscript(t *testing.T) {
 	}
 	if len(got.Limits) != 2 {
 		t.Errorf("Limits = %+v, want both snapshot windows carried over", got.Limits)
+	}
+}
+
+// collected_at keeps whole seconds, so a transcript response 0.9s after a
+// stale snapshot reads as the snapshot's second. The transcript is fresh, so
+// it is the newer observation and wins the tie instead of leaving the stale
+// snapshot with its session dropped (#437).
+func TestFreshTranscriptWinsSameSecondAsStaleSnapshot(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"timestamp":"2026-06-12T12:00:00.900Z","sessionId":"transcript-session","message":{"model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5}}}`
+	p := filepath.Join(dir, "s.jsonl")
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapAt, _ := time.Parse(time.RFC3339, "2026-06-12T12:00:00Z")
+	if err := os.Chtimes(p, snapAt.Add(time.Second), snapAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	collected := snapAt.Format(time.RFC3339)
+	id := "snapshot-session"
+	snap := schema.Tool{
+		Tool:        schema.ToolClaudeCode,
+		Available:   true,
+		Backend:     schema.BackendSubscription,
+		CollectedAt: &collected,
+		Session:     &schema.Session{ID: &id},
+	}
+	if err := cache.WriteSnapshot(snap, snapAt, root); err != nil {
+		t.Fatal(err)
+	}
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-12T13:00:00.500Z")
+
+	got := Status(Options{ClaudeRoot: root, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Stale {
+		t.Error("Stale = true, want false (the transcript's response is under 60 minutes old)")
+	}
+	if got.Session == nil || got.Session.ID == nil || *got.Session.ID != "transcript-session" {
+		t.Errorf("Session = %+v, want the transcript's session", got.Session)
 	}
 }
 
