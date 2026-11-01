@@ -37,6 +37,10 @@ func Key(tool, window, root string) string {
 type Window struct {
 	ResetsAt string `json:"resets_at"` // cycle identity (sameCycle); another cycle's re-arms everything
 	Notified []int  `json:"notified"`  // thresholds announced this cycle
+	// ObservedAt is the observed_at of the latest reading evaluated, so an
+	// older one evaluated later neither re-arms nor restarts anything (#438).
+	// Empty in records written before it, and when no reading had one.
+	ObservedAt string `json:"observed_at,omitempty"`
 }
 
 // cycleJitter is how far a window's reset time may move within one cycle.
@@ -91,7 +95,11 @@ type Event struct {
 // threshold at now — the reading SwiftBar marks ⚠ (schema.ObservedStale) —
 // so an old reading neither fires nor re-arms a threshold (#338). So is a
 // window whose reset time has passed by now (schema.ResetPassed), however
-// fresh the reading: its cycle is over (#363). Records are kept per config root (Key),
+// fresh the reading: its cycle is over (#363). So is a reading observed before
+// the one the record last took in: evaluations can run out of the order their
+// readings were observed in (overlapping plugin passes, a late status.json
+// write), and an older reading would re-arm a threshold the newer one had
+// announced, or restart a cycle the newer one had moved to (#438). Records are kept per config root (Key),
 // roots giving each tool's; a tool whose root doesn't normalize is skipped,
 // since its record couldn't be told from another profile's — as the caches
 // neither store nor match such a root (#321). thresholds must already be
@@ -126,8 +134,15 @@ func Evaluate(s schema.Status, thresholds []int, st State, roots map[string]stri
 				resetsAt = *l.ResetsAt
 			}
 			w := next[key]
+			observed, hasObserved := observedTime(l.ObservedAt)
+			if last, ok := observedTime(&w.ObservedAt); ok && hasObserved && observed.Before(last) {
+				continue
+			}
 			if !sameCycle(w.ResetsAt, resetsAt) {
 				w = Window{ResetsAt: resetsAt}
+			}
+			if hasObserved {
+				w.ObservedAt = *l.ObservedAt
 			}
 			remaining := render.RemainingPct(*l.UsedPct)
 			notified := map[int]bool{}
@@ -158,6 +173,16 @@ func Evaluate(s schema.Status, thresholds []int, st State, roots map[string]stri
 		}
 	}
 	return events, next
+}
+
+// observedTime parses an observed_at; ok is false when it is missing or
+// unreadable.
+func observedTime(s *string) (time.Time, bool) {
+	if s == nil || *s == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, *s)
+	return ts, err == nil
 }
 
 // Body is the notification text for an event, e.g.

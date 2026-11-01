@@ -83,6 +83,42 @@ func TestEvaluateFiresOncePerThresholdPerCycle(t *testing.T) {
 	}
 }
 
+// Evaluations can run out of the order their readings were observed in. A
+// reading observed before the one the record last took in neither re-arms a
+// threshold (here 50% announced at 45% left, then an older 55% left) nor
+// restarts the cycle with an older reset time; the newer low reading after it
+// stays quiet (#438). A reading without observed_at is evaluated as before.
+func TestEvaluateIgnoresReadingsOlderThanTheRecord(t *testing.T) {
+	th := []int{50}
+	r1 := "2026-09-20T03:00:00+09:00"
+	reading := func(used5 float64, resets string, ago time.Duration) schema.Status {
+		return status(observedAgo(limitsTool(schema.ToolClaudeCode, false, used5, 10, resets), ago))
+	}
+
+	ev, st := Evaluate(reading(55, r1, time.Minute), th, State{}, testRoots, testNow)
+	if len(ev) != 1 || ev[0].Threshold != 50 {
+		t.Fatalf("first crossing: events = %+v", ev)
+	}
+	if ev, st = Evaluate(reading(45, r1, 2*time.Minute), th, st, testRoots, testNow); len(ev) != 0 {
+		t.Errorf("older reading above 50%% left: events = %+v, want none", ev)
+	}
+	if ev, st = Evaluate(reading(55, r1, 0), th, st, testRoots, testNow); len(ev) != 0 {
+		t.Errorf("newer reading after the older one: events = %+v, want none (50%% stays announced)", ev)
+	}
+	if ev, st = Evaluate(reading(55, "2026-09-19T22:00:00+09:00", 3*time.Minute), th, st, testRoots, testNow); len(ev) != 0 {
+		t.Errorf("older reading from the previous cycle: events = %+v, want none", ev)
+	}
+	if w := st[keyOf(schema.ToolClaudeCode, schema.WindowFiveHour)]; w.ResetsAt != r1 || len(w.Notified) != 1 {
+		t.Errorf("record = %+v, want the current cycle with 50 announced", w)
+	}
+
+	// Without observed_at, a reading is evaluated as before: it re-arms.
+	_, st = Evaluate(status(limitsTool(schema.ToolClaudeCode, false, 45, 10, r1)), th, st, testRoots, testNow)
+	if ev, _ = Evaluate(reading(55, r1, 0), th, st, testRoots, testNow); len(ev) != 1 {
+		t.Errorf("after a reading without observed_at re-armed 50: events = %+v, want 50 again", ev)
+	}
+}
+
 // Codex writes the same cycle's reset time a few seconds apart from one
 // token_count to the next (up to 10 s in the rollouts seen, #412). A reset
 // time within cycleJitter of the recorded one — the same instant written
