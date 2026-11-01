@@ -153,8 +153,14 @@ func reportJSONLTree(label, path string, now time.Time, hint string) {
 }
 
 func newestJSONL(root string) (time.Time, int, error) {
-	if _, err := os.Stat(root); err != nil {
+	info, err := os.Stat(root)
+	if err != nil {
 		return time.Time{}, 0, err
+	}
+	if !info.IsDir() {
+		// A file (or a link to one) where the tree should be: the collectors
+		// can't list it, so it isn't a data source with one log (#440).
+		return time.Time{}, 0, fmt.Errorf("%s is not a directory", root)
 	}
 	// WalkDir doesn't follow a symlink, not even the root: a projects or
 	// sessions directory linked into place would count no files, while the

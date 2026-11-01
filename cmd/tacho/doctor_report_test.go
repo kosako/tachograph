@@ -51,7 +51,15 @@ func TestReportJSONLTree(t *testing.T) {
 			t.Fatal(err)
 		}
 		cases = append(cases, struct{ name, path, want string }{"linked", linked, "present (2 .jsonl, newest "})
+		// A link to a log file where the tree should be is no tree: the
+		// collectors can't list it.
+		linkedFile := filepath.Join(t.TempDir(), "sessions")
+		if err := os.Symlink(filepath.Join(present, "p", "a.jsonl"), linkedFile); err != nil {
+			t.Fatal(err)
+		}
+		cases = append(cases, struct{ name, path, want string }{"linked to a file", linkedFile, "unreadable ("})
 	}
+	cases = append(cases, struct{ name, path, want string }{"a file", file, "unreadable ("})
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			out := capture(t, &os.Stdout, func() { reportJSONLTree("Logs", c.path, now, "the hint") })
