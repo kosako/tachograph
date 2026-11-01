@@ -34,11 +34,13 @@ type RolloutFile struct {
 //
 // A failure doesn't stop the walk: a directory that can't be listed is
 // skipped whole, and an entry whose mtime can't be read stays listed with a
-// zero mtime. err is the first such failure, and what it means is the
-// caller's call: the collector still picks from what was listed, while daily
-// takes any gap as unknown totals (#187).
+// zero mtime. err is the first such failure — the first one other than an
+// entry removed while listing (fs.ErrNotExist) when there is one, so a later
+// unreadable directory isn't hidden behind a vanished one (#437) — and what it
+// means is the caller's call: the collector still picks from what was listed,
+// while daily takes any gap as unknown totals (#187).
 func ListRollouts(sessions string) (files []RolloutFile, err error) {
-	years, err := os.ReadDir(sessions)
+	years, err := readDir(sessions)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -47,7 +49,7 @@ func ListRollouts(sessions string) (files []RolloutFile, err error) {
 	}
 	var first error
 	fail := func(err error) {
-		if first == nil {
+		if first == nil || (errors.Is(first, fs.ErrNotExist) && !errors.Is(err, fs.ErrNotExist)) {
 			first = err
 		}
 	}
@@ -57,7 +59,7 @@ func ListRollouts(sessions string) (files []RolloutFile, err error) {
 		}
 		for _, month := range subdirs(filepath.Join(sessions, y.Name()), fail) {
 			for _, day := range subdirs(month, fail) {
-				entries, err := os.ReadDir(day)
+				entries, err := readDir(day)
 				if err != nil {
 					fail(err)
 					continue
@@ -80,11 +82,15 @@ func ListRollouts(sessions string) (files []RolloutFile, err error) {
 	return files, first
 }
 
+// readDir is os.ReadDir; tests replace it to fail chosen directories in a
+// chosen way.
+var readDir = os.ReadDir
+
 // subdirs lists dir's immediate subdirectories in name order. A directory
 // that can't be listed goes to fail and yields none — not the part ReadDir
 // read before failing.
 func subdirs(dir string, fail func(error)) []string {
-	entries, err := os.ReadDir(dir)
+	entries, err := readDir(dir)
 	if err != nil {
 		fail(err)
 		return nil

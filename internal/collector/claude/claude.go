@@ -10,6 +10,8 @@ package claude
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -265,8 +267,13 @@ func toLimit(window string, mins int, w *slWindow, observed string) schema.Limit
 // ---- transcript route (no statusline stdin available) ----
 
 func fromTranscripts(opts Options) schema.Tool {
-	paths := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
+	paths, listErr := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
 	if len(paths) == 0 {
+		if listErr != nil {
+			// Nothing listed because the listing failed, not because Claude
+			// Code left no transcripts: unknown, not absent (#437).
+			return errTool("read_error", listErr.Error())
+		}
 		return schema.Unavailable(schema.ToolClaudeCode)
 	}
 
@@ -359,11 +366,25 @@ func fromTranscripts(opts Options) schema.Tool {
 const mtimeSlack = 2 * time.Second
 
 // transcriptsByRecency lists transcript paths newest-first by mtime, so the
-// caller can fall back past a newest transcript that has no usage yet.
-func transcriptsByRecency(projects string) []string {
+// caller can fall back past a newest transcript that has no usage yet. A
+// project directory or entry that can't be listed is a gap: the paths are
+// what was listed, and the first such error is returned for the caller to
+// report when nothing was listed at all (#437). A missing projects directory
+// (Claude Code not used yet) is not an error.
+func transcriptsByRecency(projects string) ([]string, error) {
 	dirs, err := os.ReadDir(projects)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
+	}
+	var first error
+	fail := func(err error) {
+		// An entry removed while listing is gone, not unreadable.
+		if first == nil && !errors.Is(err, fs.ErrNotExist) {
+			first = err
+		}
 	}
 	type entry struct {
 		path string
@@ -376,6 +397,7 @@ func transcriptsByRecency(projects string) []string {
 		}
 		files, err := os.ReadDir(filepath.Join(projects, d.Name()))
 		if err != nil {
+			fail(err)
 			continue
 		}
 		for _, f := range files {
@@ -384,6 +406,7 @@ func transcriptsByRecency(projects string) []string {
 			}
 			info, err := f.Info()
 			if err != nil {
+				fail(err)
 				continue
 			}
 			entries = append(entries, entry{filepath.Join(projects, d.Name(), f.Name()), info.ModTime()})
@@ -401,5 +424,5 @@ func transcriptsByRecency(projects string) []string {
 	for i, e := range entries {
 		paths[i] = e.path
 	}
-	return paths
+	return paths, first
 }

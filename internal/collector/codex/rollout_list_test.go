@@ -1,6 +1,8 @@
 package codex
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -117,5 +119,38 @@ func TestListRolloutsSessionsNotADirectory(t *testing.T) {
 	files, err := ListRollouts(sessions)
 	if err == nil || files != nil {
 		t.Fatalf("ListRollouts = %v, %v; want nil and an error", files, err)
+	}
+}
+
+// A day directory removed while listing (fs.ErrNotExist) must not hide a later
+// one that can't be listed: ListRollouts reports the unreadable one, and with
+// nothing listed the collector says read_error, not "Codex never used"
+// (#437). When the only failure is a vanished directory, nothing is unknown
+// and the tool stays unavailable.
+func TestListRolloutsPrefersUnreadableOverVanished(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	mkdirs(t, filepath.Join(sessions, "2026", "05", "23"), filepath.Join(sessions, "2026", "05", "24"))
+	t.Cleanup(func() { readDir = os.ReadDir })
+	stub := func(fail map[string]error) {
+		readDir = func(dir string) ([]os.DirEntry, error) {
+			if err, ok := fail[filepath.Base(dir)]; ok {
+				return nil, &fs.PathError{Op: "open", Path: dir, Err: err}
+			}
+			return os.ReadDir(dir)
+		}
+	}
+
+	stub(map[string]error{"23": fs.ErrNotExist, "24": fs.ErrPermission})
+	if _, err := ListRollouts(sessions); !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("ListRollouts err = %v, want the permission error behind the vanished day", err)
+	}
+	if got := Collect(Options{Root: root}); got.Error == nil || got.Error.Code != "read_error" {
+		t.Errorf("Available=%v Error=%+v, want read_error", got.Available, got.Error)
+	}
+
+	stub(map[string]error{"23": fs.ErrNotExist})
+	if got := Collect(Options{Root: root}); got.Available || got.Error != nil {
+		t.Errorf("Available=%v Error=%+v, want unavailable when the only failure is a vanished day", got.Available, got.Error)
 	}
 }

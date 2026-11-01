@@ -4,7 +4,9 @@ package codex
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,6 +44,12 @@ func Collect(opts Options) schema.Tool {
 		if res.sawFile {
 			return errTool("no_token_count", "no token_count event in recent Codex sessions")
 		}
+		if res.listErr != nil && !errors.Is(res.listErr, fs.ErrNotExist) {
+			// Nothing listed because the listing failed, not because Codex
+			// left no sessions: unknown, not absent (#437). A directory
+			// removed while listing is gone, not unreadable.
+			return errTool("read_error", res.listErr.Error())
+		}
 		return schema.Unavailable(schema.ToolCodex)
 	}
 	return build(res.path, res.tc, res.lim, res.turn, now)
@@ -59,6 +67,7 @@ type pick struct {
 	limTS   time.Time
 	sawFile bool  // any .jsonl was seen (to distinguish no_token_count vs unavailable)
 	readErr error // last read error, surfaced only when no usable session was found
+	listErr error // first listing error, surfaced only when nothing was listed
 }
 
 // pickSession returns the rollout with the freshest token_count by event
@@ -84,8 +93,8 @@ type pick struct {
 // walk never looks back past that window, and sessions that never carry
 // limits (API-key use) don't make every rollout get read.
 func pickSession(dir string) pick {
-	files := rolloutsByMtime(dir)
-	acc := pick{sawFile: len(files) > 0}
+	files, listErr := rolloutsByMtime(dir)
+	acc := pick{sawFile: len(files) > 0, listErr: listErr}
 	for _, f := range files {
 		if acc.tc != nil {
 			info, err := os.Stat(f.Path)
@@ -136,19 +145,21 @@ func limitsFloor(sessionTS time.Time) time.Time {
 // rolloutsByMtime lists every rollout (ListRollouts), newest mtime first.
 // Equal mtimes tie-break by path (descending) so selection is deterministic
 // rather than dependent on directory read order. A directory that can't be
-// listed is a gap, not a failure: the pick is made from what was listed. An
-// entry whose stat fails stays listed with a zero mtime (sorting last): the
-// mtime only orders the visit, and the caller's stat/read surfaces the error
-// so a listed-but-unreadable rollout reads as read_error, not as absent.
-func rolloutsByMtime(dir string) []RolloutFile {
-	out, _ := ListRollouts(dir) // failures leave gaps; see above
+// listed is a gap, not a failure: the pick is made from what was listed, and
+// the listing's first error is returned only for the caller to report when
+// nothing was listed at all (#437). An entry whose stat fails stays listed
+// with a zero mtime (sorting last): the mtime only orders the visit, and the
+// caller's stat/read surfaces the error so a listed-but-unreadable rollout
+// reads as read_error, not as absent.
+func rolloutsByMtime(dir string) ([]RolloutFile, error) {
+	out, err := ListRollouts(dir) // failures leave gaps; see above
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Mod.Equal(out[j].Mod) {
 			return out[i].Path > out[j].Path
 		}
 		return out[i].Mod.After(out[j].Mod)
 	})
-	return out
+	return out, err
 }
 
 // sessionEvents reads one rollout's most recent usable token_count, most
