@@ -271,22 +271,49 @@ func fromTranscripts(opts Options) schema.Tool {
 	}
 
 	// The newest transcript may have no assistant usage yet (session just
-	// opened, or a non-conversation entry was written last). Fall back to the
-	// next most recent transcript that actually carries usage.
+	// opened), and a transcript's mtime moves with any line, so an older
+	// session that only got a user line appended can sort ahead of a session
+	// with a newer response (#437). mtime therefore only orders the visit: the
+	// transcript whose last usage line is the newest by timestamp wins. Once a
+	// usage line is found, a transcript whose mtime predates it by more than
+	// mtimeSlack is skipped without reading — a line is never newer than its
+	// file's mtime, give or take the file system's mtime precision — and the
+	// skip re-stats at decision time, so a response appended after the listing
+	// is still seen. A usage line whose timestamp doesn't parse can't be
+	// compared; when the first one found is like that, it is used as before.
 	var (
 		last    *TranscriptLine
+		lastTS  time.Time
 		path    string
 		readErr error
 	)
 	for _, p := range paths {
+		if last != nil {
+			if lastTS.IsZero() {
+				break
+			}
+			if info, err := os.Stat(p); err == nil && info.ModTime().Add(mtimeSlack).Before(lastTS) {
+				continue
+			}
+		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			readErr = err
 			continue
 		}
-		if l, ok := lastUsageLine(b); ok {
+		l, ok := lastUsageLine(b)
+		if !ok {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, l.Timestamp)
+		switch {
+		case last == nil:
 			last, path = &l, p
-			break
+			if err == nil {
+				lastTS = ts
+			}
+		case err == nil && ts.After(lastTS):
+			last, lastTS, path = &l, ts, p
 		}
 	}
 	if last == nil {
@@ -324,6 +351,12 @@ func fromTranscripts(opts Options) schema.Tool {
 	// leaves limits null (renderers fall back to session tokens).
 	return t
 }
+
+// mtimeSlack covers the file system's mtime precision when an mtime bounds
+// the newest line a file can hold: a file system that keeps whole seconds (or
+// FAT's two) can stamp a file before the sub-second timestamp of its last
+// line.
+const mtimeSlack = 2 * time.Second
 
 // transcriptsByRecency lists transcript paths newest-first by mtime, so the
 // caller can fall back past a newest transcript that has no usage yet.

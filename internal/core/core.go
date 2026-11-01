@@ -186,14 +186,17 @@ func claudeTool(opts Options) schema.Tool {
 }
 
 // fresher reports whether the transcript route observed Claude more recently
-// than the snapshot did.
+// than the snapshot did. collected_at keeps whole seconds, so a transcript
+// response a fraction of a second after the snapshot reads as the same
+// second; a fresh transcript then wins the tie, since it is fresh where the
+// stale snapshot is not and so was observed after it (#437).
 func fresher(tr, snap schema.Tool) bool {
 	if !tr.Available || tr.Error != nil || tr.CollectedAt == nil || snap.CollectedAt == nil {
 		return false
 	}
 	a, errA := time.Parse(time.RFC3339, *tr.CollectedAt)
 	b, errB := time.Parse(time.RFC3339, *snap.CollectedAt)
-	return errA == nil && errB == nil && a.After(b)
+	return errA == nil && errB == nil && (a.After(b) || (a.Equal(b) && !tr.Stale))
 }
 
 // carryLimits moves the snapshot's rate limits onto the transcript route's
