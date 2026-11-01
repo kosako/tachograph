@@ -44,6 +44,13 @@ func TestReportJSONLTree(t *testing.T) {
 	// as not found, which is the missing case.
 	if runtime.GOOS != "windows" {
 		cases = append(cases, struct{ name, path, want string }{"unreadable", filepath.Join(file, "sub"), "unreadable ("})
+		// A tree linked into place counts the files where it leads, as the
+		// collectors read them (#440).
+		linked := filepath.Join(t.TempDir(), "projects")
+		if err := os.Symlink(present, linked); err != nil {
+			t.Fatal(err)
+		}
+		cases = append(cases, struct{ name, path, want string }{"linked", linked, "present (2 .jsonl, newest "})
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -121,5 +128,31 @@ func TestRunDoctorReportsEverySection(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// doctor's statusLine section tells a settings.json that can't be read (here
+// a directory) from one that isn't there: the former names the error and
+// asks for the file to be fixed, since `tacho setup claude --write` would fail
+// on the same read. Without a home directory there is no path to report
+// (#440).
+func TestReportClaudeStatusLine(t *testing.T) {
+	dir := t.TempDir()
+	notThere := filepath.Join(dir, "settings.json")
+	aDir := filepath.Join(dir, "settings-dir.json")
+	if err := os.Mkdir(aDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, path, want, not string }{
+		{"missing", notThere, "not configured — run `tacho setup claude --write`", "can't be read"},
+		{"unreadable", aDir, "settings.json can't be read: ", "not configured"},
+		{"no home", "", "unavailable — cannot locate the home directory", "not configured"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out := capture(t, &os.Stdout, func() { reportClaudeStatusLine(c.path, "/usr/local/bin/tacho") })
+			if !strings.Contains(out, c.want) || strings.Contains(out, c.not) {
+				t.Errorf("reportClaudeStatusLine(%s) = %q, want %q and not %q", c.name, out, c.want, c.not)
+			}
+		})
 	}
 }
