@@ -130,6 +130,29 @@ func run(args []string) int {
 	}
 }
 
+// unexpectedArgs reports, on stderr, positional arguments left after the
+// flags of a command that takes none (rest is the FlagSet's Args), and
+// whether there were any. The flag package stops at the first non-flag, so
+// `tacho daily 7 --days 1` would otherwise run with the defaults and exit 0;
+// the caller exits 2 before doing anything, as config set does on a wrong
+// argument count (#441).
+func unexpectedArgs(name string, rest []string) bool {
+	if len(rest) == 0 {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "%s: unexpected argument %q (flags come before arguments; run `tacho help` for usage)\n", name, rest[0])
+	return true
+}
+
+// ignoredArgs warns, on stderr, about positional arguments a command run by
+// another program (Claude Code's statusLine, SwiftBar's plugin) was given and
+// goes on: failing there would blank the status line or the menu bar (#441).
+func ignoredArgs(name string, rest []string) {
+	if len(rest) > 0 {
+		fmt.Fprintf(os.Stderr, "%s: ignoring unexpected argument %q\n", name, rest[0])
+	}
+}
+
 // isHelpFlag reports whether arg asks for help in one of the spellings the
 // flag package treats as help: -h, --h, -help, --help.
 func isHelpFlag(arg string) bool {
@@ -151,6 +174,7 @@ func runSwiftbar(args []string) int {
 	fs := flag.NewFlagSet("swiftbar", flag.ExitOnError)
 	pngOut := fs.String("png", "", "write the menu bar gauge image to this PNG file (preview)")
 	fs.Parse(args)
+	ignoredArgs("tacho swiftbar", fs.Args())
 
 	now := time.Now()
 	dark := appearanceDark()
@@ -281,6 +305,13 @@ func runConfig(args []string) int {
 		}
 		return configToggleTool(args[0])
 	case "statusline-preset":
+		// One preset name, or --list / -l, or nothing (the list): a name
+		// with more after it (`moon --list`) would otherwise write the
+		// preset and drop the rest (#441).
+		if len(args) > 1 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
 		return configStatuslinePreset(args)
 	default:
 		fmt.Fprint(os.Stderr, configUsage)
@@ -497,6 +528,9 @@ func runOnce(args []string) int {
 		fmt.Fprint(os.Stderr, parseOut.String())
 		return 2
 	}
+	if unexpectedArgs("tacho", fs.Args()) {
+		return 2
+	}
 
 	now := time.Now()
 	cfg := config.Load()
@@ -512,6 +546,9 @@ func runDaily(args []string) int {
 	fs := flag.NewFlagSet("daily", flag.ExitOnError)
 	days := fs.Int("days", 30, "number of days to show, ending today")
 	fs.Parse(args)
+	if unexpectedArgs("tacho daily", fs.Args()) {
+		return 2
+	}
 	if *days < 1 {
 		fmt.Fprintln(os.Stderr, "tacho: -days must be at least 1")
 		return 2
@@ -537,6 +574,9 @@ func runWatch(args []string) int {
 	interval := fs.Int("n", 5, "refresh interval in seconds (at most 86400)")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fs.Parse(args)
+	if unexpectedArgs("tacho watch", fs.Args()) {
+		return 2
+	}
 	every, err := watchInterval(*interval)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
@@ -587,6 +627,7 @@ func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now t
 	tmplFlag := fs.String("template", "", "override the statusline template")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fs.Parse(args)
+	ignoredArgs("tacho statusline", fs.Args())
 
 	input, _ := io.ReadAll(stdin)
 
@@ -728,6 +769,9 @@ func runStatus(args []string) int {
 	jsonOut := fs.Bool("json", false, "emit the unified schema JSON")
 	noCache := fs.Bool("no-cache", false, "bypass the TTL cache")
 	fs.Parse(args)
+	if unexpectedArgs("tacho status", fs.Args()) {
+		return 2
+	}
 
 	if !*jsonOut {
 		fmt.Fprintln(os.Stderr, "tacho status: use --json (or run bare `tacho` for the compact view)")

@@ -42,6 +42,9 @@ func runSetup(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
 	write := fs.Bool("write", false, "merge into settings.json (~/.claude/settings.json, or the one under CLAUDE_CONFIG_DIR)")
 	fs.Parse(args[1:])
+	if unexpectedArgs("tacho setup claude", fs.Args()) {
+		return 2
+	}
 
 	exe := resolveExe()
 	if exe == "" {
@@ -125,6 +128,9 @@ func runSetupSwiftBar(args []string) int {
 	fs := flag.NewFlagSet("setup swiftbar", flag.ExitOnError)
 	write := fs.Bool("write", false, "write it into SwiftBar's plugin folder")
 	fs.Parse(args)
+	if unexpectedArgs("tacho setup swiftbar", fs.Args()) {
+		return 2
+	}
 
 	exe := resolveExe()
 	if exe == "" {
