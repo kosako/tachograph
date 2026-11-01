@@ -87,6 +87,54 @@ func TestClaudeDaysDedupAcrossFiles(t *testing.T) {
 	}
 }
 
+// A response whose lines straddle midnight counts once on each day it
+// appears, whatever window asks: today's row of a window that also holds
+// yesterday equals the single-day ClaudeTotals and session_today, and
+// yesterday's row equals a yesterday-only window (#435). A copy of the same
+// response in a second transcript still counts once per day.
+func TestClaudeDaysDedupPerDayAcrossMidnight(t *testing.T) {
+	root := t.TempDir()
+	now, today := daysClock()
+	yesterday := today.AddDate(0, 0, -1)
+	before := claudeMsgID(today.Add(-time.Second), "msg_mid", "req_mid", 10, 20, 100, 5)
+	after := claudeMsgID(today.Add(time.Second), "msg_mid", "req_mid", 10, 20, 100, 5)
+	proj := filepath.Join(root, "projects", "p")
+	mainPath := filepath.Join(proj, "main.jsonl")
+	writeFile(t, mainPath, before+"\n"+after+"\n", now)
+	writeFile(t, filepath.Join(proj, "resumed.jsonl"), before+"\n"+after+"\n", now)
+
+	windows := []struct {
+		name     string
+		from, to time.Time
+		want     map[string]int64
+	}{
+		{"today only", today, today.AddDate(0, 0, 1), map[string]int64{DayKey(today): 135}},
+		{"yesterday only", yesterday, today, map[string]int64{DayKey(yesterday): 135}},
+		{"both days", yesterday, today.AddDate(0, 0, 1), map[string]int64{DayKey(yesterday): 135, DayKey(today): 135}},
+	}
+	for _, w := range windows {
+		got, err := ClaudeDays(root, w.from, w.to, noPrices)
+		if err != nil {
+			t.Fatalf("%s: %v", w.name, err)
+		}
+		if len(got) != len(w.want) {
+			t.Errorf("%s: ClaudeDays = %+v, want %d days", w.name, got, len(w.want))
+		}
+		for day, tokens := range w.want {
+			if got[day].Tokens != tokens {
+				t.Errorf("%s: ClaudeDays[%s].Tokens = %d, want %d", w.name, day, got[day].Tokens, tokens)
+			}
+		}
+	}
+
+	if tot := mustClaudeTotals(t, root, now, noPrices); tot.Tokens != 135 {
+		t.Errorf("ClaudeTotals.Tokens = %d, want 135 (today's row of every window)", tot.Tokens)
+	}
+	if _, today, _ := ClaudeSessionTree(mainPath, now, noPrices, nil); today.Tokens != 135 {
+		t.Errorf("session_today = %d, want 135 (today's row of every window)", today.Tokens)
+	}
+}
+
 // A single Codex session that ran across three days contributes each day's
 // growth to that day: the delta base of a day is the last snapshot before
 // it. A snapshot past the window's end is left out without disturbing the

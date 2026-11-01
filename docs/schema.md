@@ -132,7 +132,9 @@ Claude Code のトークン集計規約: `input` は `input_tokens + cache_creat
 の総和(Codexの「inputはcached含む」と意味を揃える)。`cached_input` は `cache_read` の総和。
 この規約は `session.tokens` / `session_today` / `daily` で共通(2.0。集計範囲がそろったのは 3.0)。
 いずれも同一レスポンスは `message.id` + `requestId` で重複を除いて1回だけ数える(content block ごとに usage を繰り返す行や、
-resume / compaction でコピーされた行を二重計上しない)。
+resume / compaction でコピーされた行を二重計上しない)。重複は日ごとに除く。同じレスポンスの行が 0 時をまたいで
+2 日に現れたときは、それぞれの日に 1 回ずつ数える(`tacho daily` の各日の値が、集計する期間に依らず
+単日の `daily` と同じになる。期間の合計にはその分が両方の日から入る、#435)。
 `daily` は `projects` 配下の通常セッションに加え、同セッション配下の subagents / workflows
 transcript も集計する。ログディレクトリの走査自体に失敗したとき(データ未生成の
 「実在する 0」と区別できないとき)は `daily` を null にする(不明は null 原則)。`session_today` も現セッション transcript と、その同名セッション
