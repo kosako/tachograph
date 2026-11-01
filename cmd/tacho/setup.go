@@ -392,10 +392,16 @@ func claudeSettingsPath() string {
 
 // claudeStatusLineCommand extracts the configured statusLine command, or a
 // sentinel string describing why there isn't one.
-func claudeStatusLineCommand(path string) string {
+func claudeStatusLineCommand(path string) (string, error) {
 	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "(missing)", nil
+	}
 	if err != nil {
-		return "(missing)"
+		// Unreadable for another reason (permissions, a directory): not
+		// "not configured", and `tacho setup claude --write` would fail on
+		// the same read, so the caller reports the error itself (#440).
+		return "", err
 	}
 	var s struct {
 		StatusLine *struct {
@@ -403,12 +409,12 @@ func claudeStatusLineCommand(path string) string {
 		} `json:"statusLine"`
 	}
 	if err := json.Unmarshal(b, &s); err != nil {
-		return "(unreadable)"
+		return "(unreadable)", nil
 	}
 	if s.StatusLine == nil || s.StatusLine.Command == "" {
-		return "(no statusLine)"
+		return "(no statusLine)", nil
 	}
-	return s.StatusLine.Command
+	return s.StatusLine.Command, nil
 }
 
 // statusLineResolves checks that the first token of the command exists as an

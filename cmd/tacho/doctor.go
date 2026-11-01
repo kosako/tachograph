@@ -84,9 +84,23 @@ func runDoctor(args []string) int {
 	reportCurrentStatus(now)
 	fmt.Println()
 
-	path := claudeSettingsPath()
+	reportClaudeStatusLine(claudeSettingsPath(), exe)
+	return 0
+}
+
+// reportClaudeStatusLine reports the statusLine in Claude Code's settings at
+// path ("" when the home directory can't be located), and whether its
+// command resolves to this tacho (exe).
+func reportClaudeStatusLine(path, exe string) {
+	if path == "" {
+		fmt.Println("Claude Code statusLine:")
+		fmt.Println("  unavailable — cannot locate the home directory (set HOME or CLAUDE_CONFIG_DIR)")
+		return
+	}
 	fmt.Println("Claude Code statusLine (" + path + "):")
-	switch cmd := claudeStatusLineCommand(path); {
+	switch cmd, err := claudeStatusLineCommand(path); {
+	case err != nil:
+		fmt.Printf("  settings.json can't be read: %v — fix its permissions or file type, then `tacho setup claude --write`\n", err)
 	case cmd == "(missing)":
 		fmt.Println("  not configured — run `tacho setup claude --write`")
 	case cmd == "(no statusLine)":
@@ -103,7 +117,6 @@ func runDoctor(args []string) int {
 			fmt.Println("  note:      " + note)
 		}
 	}
-	return 0
 }
 
 func reportDataSources(now time.Time) {
@@ -140,12 +153,26 @@ func reportJSONLTree(label, path string, now time.Time, hint string) {
 }
 
 func newestJSONL(root string) (time.Time, int, error) {
-	if _, err := os.Stat(root); err != nil {
+	info, err := os.Stat(root)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	if !info.IsDir() {
+		// A file (or a link to one) where the tree should be: the collectors
+		// can't list it, so it isn't a data source with one log (#440).
+		return time.Time{}, 0, fmt.Errorf("%s is not a directory", root)
+	}
+	// WalkDir doesn't follow a symlink, not even the root: a projects or
+	// sessions directory linked into place would count no files, while the
+	// collectors (os.ReadDir) read through the link. Walk from where it
+	// leads (#440).
+	walkRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
 		return time.Time{}, 0, err
 	}
 	var newest time.Time
 	count := 0
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
