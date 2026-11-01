@@ -23,7 +23,7 @@ import (
 const StatusTTL = 30 * time.Second
 
 // statusClockSlack is how far after now a status.json may have been modified
-// and still be served: a file another run has just written can carry a
+// (or a snapshot, or one of its windows, observed, #438) and still be served: a file another run has just written can carry a
 // timestamp a little past the now this run took before reading it, or one the
 // file system stamped from a clock a tick ahead. Any further, the clock has
 // been set back since the write, and the file's age can't be told (#415).
@@ -143,6 +143,7 @@ const (
 	SnapshotOldSchema  SnapshotState = "old_schema" // written under another schema version
 	SnapshotOtherRoot  SnapshotState = "other_root" // observed from another config root (#321)
 	SnapshotExpired    SnapshotState = "expired"    // collected more than maxAge ago
+	SnapshotFuture     SnapshotState = "future"     // collected after now: the clock was set back (#438)
 	SnapshotStale      SnapshotState = "stale"      // served, marked stale
 	SnapshotFresh      SnapshotState = "fresh"      // served as is
 )
@@ -195,6 +196,12 @@ func inspectSnapshot(tool string, maxAge time.Duration, now time.Time, root stri
 	}
 	r.CollectedAt = ts
 	switch age := now.Sub(ts); {
+	case age < -statusClockSlack:
+		// Observed after now: the clock was set back since the write, so the
+		// snapshot's age can't be told and it would pass as fresh until the
+		// clock caught up (#438, as #415 for status.json).
+		r.State = SnapshotFuture
+		return nil, r
 	case age > maxAge:
 		r.State = SnapshotExpired
 		return nil, r
@@ -221,8 +228,10 @@ func ReadSnapshot(tool string, maxAge time.Duration, now time.Time, root string)
 	t.Stale = r.State == SnapshotStale
 	if len(t.Limits) > 0 {
 		observed, ok := snap.limitsObservedAt()
-		if !ok || now.Sub(observed) > maxAge {
+		if !ok || !observedWithin(observed, now, maxAge) {
 			t.Limits = nil
+		} else {
+			t.Limits = dropFutureLimits(t.Limits, now)
 		}
 	}
 	return &t, true
@@ -240,10 +249,39 @@ func ReadSnapshotLimits(tool string, maxAge time.Duration, now time.Time, root s
 		return nil, "", time.Time{}, false
 	}
 	observed, ok := snap.limitsObservedAt()
-	if !ok || now.Sub(observed) > maxAge {
+	if !ok || !observedWithin(observed, now, maxAge) {
 		return nil, "", time.Time{}, false
 	}
-	return snap.Limits, snap.Backend, observed, true
+	limits := dropFutureLimits(snap.Limits, now)
+	if len(limits) == 0 {
+		return nil, "", time.Time{}, false
+	}
+	return limits, snap.Backend, observed, true
+}
+
+// observedWithin reports whether an observation at observed is still usable
+// at now: at most maxAge old, and not after now beyond the clock slack (a
+// later one means the clock was set back, #438).
+func observedWithin(observed, now time.Time, maxAge time.Duration) bool {
+	age := now.Sub(observed)
+	return age <= maxAge && age >= -statusClockSlack
+}
+
+// dropFutureLimits leaves out the windows whose own observed_at is after now
+// beyond the clock slack: carried forward, such a window would win every
+// merge against the live payload's newer value (#438). A window without a
+// readable observed_at is kept, judged by the snapshot's time as before.
+func dropFutureLimits(limits []schema.Limit, now time.Time) []schema.Limit {
+	var out []schema.Limit
+	for _, l := range limits {
+		if l.ObservedAt != nil {
+			if ts, err := time.Parse(time.RFC3339Nano, *l.ObservedAt); err == nil && now.Sub(ts) < -statusClockSlack {
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 // NormalizeRoot is the form config roots are stored and compared in: the

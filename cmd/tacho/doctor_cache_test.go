@@ -89,6 +89,8 @@ func TestReportSnapshot(t *testing.T) {
 		{"fresh", nil, func(t *testing.T, dir string) { write(this(), 2*time.Minute)(t, dir) }, "present (collected 2m ago, fresh)"},
 		{"stale", nil, func(t *testing.T, dir string) { write(this(), 2*time.Hour)(t, dir) }, "present (collected 2h ago, stale but usable)"},
 		{"expired", nil, func(t *testing.T, dir string) { write(this(), cache.SnapshotMaxAge+24*time.Hour)(t, dir) }, "present (collected 31d ago, expired)"},
+		{"from the future", nil, func(t *testing.T, dir string) { write(this(), -10*time.Minute)(t, dir) },
+			"present but not used — collected in the future (" + now.Add(10*time.Minute).Local().Format(time.RFC3339) + "; the clock was set back?)"},
 		{"other root", nil, write(other, 2*time.Minute),
 			"present but not used — observed from another Claude config dir (" + otherStored + ", not {here})"},
 		{"no root recorded", nil, write("", 2*time.Minute),

@@ -76,6 +76,10 @@ func TestInspectSnapshot(t *testing.T) {
 		{"just under maxAge", SnapshotMaxAge - time.Second, SnapshotStale},
 		{"at maxAge", SnapshotMaxAge, SnapshotStale},
 		{"just over maxAge", SnapshotMaxAge + time.Second, SnapshotExpired},
+		// A collected_at after now: within the clock slack it is served, past
+		// it the clock was set back and the snapshot is not used (#438).
+		{"after now within the clock slack", -statusClockSlack, SnapshotFresh},
+		{"after now past the clock slack", -statusClockSlack - time.Second, SnapshotFuture},
 	} {
 		cases = append(cases, inspectCase{name: b.name, seed: written(snapRoot, b.age), state: b.state,
 			schema: schema.Version, root: stored, age: b.age})
