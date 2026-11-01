@@ -954,6 +954,53 @@ func TestSetupClaudeWriteStopsWhenTheBackupFails(t *testing.T) {
 	}
 }
 
+// A settings.json.bak that can't be checked (a link round in a loop) or isn't
+// a regular file (a directory) is no backup of the original statusLine:
+// --write stops with exit 1 and leaves settings.json as it was, instead of
+// replacing it with the original kept nowhere (#440).
+func TestSetupClaudeWriteStopsOnAnUnusableBackup(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		plant func(t *testing.T, bak string)
+		want  string
+	}{
+		{"a directory", func(t *testing.T, bak string) {
+			if err := os.Mkdir(bak, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "is not a regular file"},
+		{"a link round in a loop", func(t *testing.T, bak string) {
+			if runtime.GOOS == "windows" {
+				t.Skip("symlink creation needs privileges on windows")
+			}
+			if err := os.Symlink(bak, bak); err != nil {
+				t.Fatal(err)
+			}
+		}, "cannot check the backup"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", dir)
+			settings := filepath.Join(dir, "settings.json")
+			original := []byte(`{"statusLine":{"type":"command","command":"OLD-USER-STATUSLINE"},"theme":"dark"}`)
+			if err := os.WriteFile(settings, original, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			c.plant(t, settings+".bak")
+			var code int
+			stderr := capture(t, &os.Stderr, func() {
+				capture(t, &os.Stdout, func() { code = runSetup([]string{"claude", "--write"}) })
+			})
+			if code != 1 || !strings.Contains(stderr, c.want) || !strings.Contains(stderr, "leaving "+settings+" untouched") {
+				t.Errorf("exit %d, stderr %q; want 1 and %q", code, stderr, c.want)
+			}
+			if b, _ := os.ReadFile(settings); !bytes.Equal(b, original) {
+				t.Errorf("settings.json = %s, want it untouched", b)
+			}
+		})
+	}
+}
+
 // The same for the SwiftBar plugin: whether the backup's folder can't be made
 // or the backup itself can't be written, the installed plugin stays (#445).
 func TestSetupSwiftBarWriteStopsWhenTheBackupFails(t *testing.T) {

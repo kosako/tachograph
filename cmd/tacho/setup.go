@@ -87,14 +87,26 @@ func runSetup(args []string) int {
 	// otherwise overwrite the original backup with tacho's own merged output and
 	// lose the user's pre-tacho statusLine. Keep the first .bak. The settings
 	// and the backup are written atomically, so an interrupted write can't
-	// leave a truncated settings.json behind (#194 L-02), and get 0600.
+	// leave a truncated settings.json behind (#194 L-02), and get 0600. A
+	// .bak that can't be checked, or isn't a regular file (a directory, a
+	// link round in a loop), is no backup to keep: stop rather than write
+	// settings.json with the original statusLine kept nowhere (#440).
 	if bak := path + ".bak"; len(existing) > 0 {
-		if _, err := os.Stat(bak); os.IsNotExist(err) {
+		switch info, err := os.Stat(bak); {
+		case os.IsNotExist(err):
 			if err := writeBackup(bak, existing, 0o600); err != nil {
 				fmt.Fprintln(os.Stderr, "tacho: could not write backup:", err)
 				return 1
 			}
 			fmt.Println("Backed up existing settings to " + bak)
+		case err != nil:
+			fmt.Fprintln(os.Stderr, "tacho: cannot check the backup:", err)
+			fmt.Fprintln(os.Stderr, "tacho: leaving "+path+" untouched")
+			return 1
+		case !info.Mode().IsRegular():
+			fmt.Fprintln(os.Stderr, "tacho: the backup "+bak+" is not a regular file; move it aside and re-run")
+			fmt.Fprintln(os.Stderr, "tacho: leaving "+path+" untouched")
+			return 1
 		}
 	}
 	if err := atomicfile.WriteThrough(path, merged, 0o600); err != nil {
