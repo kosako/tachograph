@@ -232,6 +232,9 @@ func reportSnapshot(now time.Time) {
 		default:
 			fmt.Printf("  %-16s present but not used — observed from another Claude config dir (%s, not %s)\n", key, r.Root, here)
 		}
+	case cache.SnapshotFuture:
+		fmt.Printf("  %-16s present but not used — collected in the future (%s; the clock was set back?); %s\n",
+			key, r.CollectedAt.Local().Format(time.RFC3339), rewrite)
 	case cache.SnapshotExpired:
 		fmt.Printf("  %-16s present (collected %s, expired)\n", key, doctorAge(r.CollectedAt, now))
 	case cache.SnapshotStale:

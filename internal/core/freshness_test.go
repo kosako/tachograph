@@ -81,6 +81,24 @@ func TestStaleSnapshotYieldsToFresherTranscript(t *testing.T) {
 	}
 }
 
+// After the clock was set back, a snapshot collected in the future is not
+// served as fresh: the transcript route decides, and the snapshot's session
+// doesn't stay on screen until the clock catches up (#438).
+func TestSnapshotFromTheFutureYieldsToTranscript(t *testing.T) {
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	clearClaudeBackendEnv(t)
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T12:05:00Z")
+	writeClaudeSnapshot(t, now, -10*time.Minute, time.Hour, 72*time.Hour)
+
+	got := Status(Options{ClaudeRoot: claudeRoot, CodexRoot: codexRoot, Now: now, NoCache: true}).Tools[0]
+	if got.Model == nil || got.Model.ID != "claude-fable-5" {
+		t.Errorf("Model = %+v, want the transcript's claude-fable-5", got.Model)
+	}
+	if got.Session != nil && got.Session.ID != nil && *got.Session.ID == "snapshot-session" {
+		t.Errorf("Session = %+v, want the transcript's session, not the future snapshot's", got.Session)
+	}
+}
+
 // collected_at keeps whole seconds, so a transcript response 0.9s after a
 // stale snapshot reads as the snapshot's second. The transcript is fresh, so
 // it is the newer observation and wins the tie instead of leaving the stale

@@ -232,6 +232,50 @@ func TestReadSnapshotLimits(t *testing.T) {
 	}
 }
 
+// After the clock was set back, a snapshot collected in the future isn't
+// served, and a window whose own observed_at is in the future is left out of
+// both readers: carried forward, it would win every merge against the live
+// payload's newer value (#438). Windows observed before now stay.
+func TestSnapshotFromTheFutureIsNotUsed(t *testing.T) {
+	setCacheDir(t)
+	now := time.Now().Truncate(time.Second)
+	write := func(collected time.Time, observed ...time.Time) {
+		t.Helper()
+		c := collected.Format(time.RFC3339)
+		tool := schema.Tool{Tool: schema.ToolClaudeCode, Available: true, Backend: schema.BackendSubscription, CollectedAt: &c}
+		windows := []string{schema.WindowFiveHour, schema.WindowWeekly}
+		for i, o := range observed {
+			pct := float64(10 * (i + 1))
+			at := o.Format(time.RFC3339)
+			tool.Limits = append(tool.Limits, schema.Limit{Window: windows[i], UsedPct: &pct, ObservedAt: &at})
+		}
+		if err := WriteSnapshot(tool, collected, snapRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(now.Add(10 * time.Minute))
+	if _, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
+		t.Error("ReadSnapshot served a snapshot collected 10 minutes in the future")
+	}
+
+	write(now.Add(-time.Minute), now.Add(10*time.Minute), now.Add(-time.Minute))
+	snap, ok := ReadSnapshot(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
+	if !ok || len(snap.Limits) != 1 || snap.Limits[0].Window != schema.WindowWeekly {
+		t.Errorf("ReadSnapshot limits = %+v, want only the window observed before now", snap)
+	}
+	limits, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot)
+	if !ok || len(limits) != 1 || limits[0].Window != schema.WindowWeekly {
+		t.Errorf("ReadSnapshotLimits = %+v, %v; want only the window observed before now", limits, ok)
+	}
+
+	// Limits observed (as a whole) in the future are dropped as a whole.
+	write(now.Add(10*time.Minute), now.Add(10*time.Minute))
+	if limits, _, _, ok := ReadSnapshotLimits(schema.ToolClaudeCode, SnapshotMaxAge, now, snapRoot); ok {
+		t.Errorf("ReadSnapshotLimits = %+v, want none from a snapshot observed in the future", limits)
+	}
+}
+
 // The display path must not show limits past their observation ceiling
 // either: a fresh snapshot whose limits observation has expired keeps its
 // other fields but drops the limits (#186).

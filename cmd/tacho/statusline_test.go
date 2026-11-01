@@ -570,6 +570,40 @@ func TestRunStatuslineOlderPayloadDoesNotRollBackLimits(t *testing.T) {
 	}
 }
 
+// After the clock was set back, a carried window observed in the future (by
+// the snapshot's limits_collected_at, or by its own observed_at) must not
+// win against the payload's current reading: it would keep the old use on
+// the statusline and in the snapshot until the clock caught up (#438).
+func TestRunStatuslineFutureCarriedLimitsDoNotWin(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2026-06-12T21:00:00+09:00")
+	future := now.Add(10 * time.Minute)
+	stamped := window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour))
+	at := future.Format(time.RFC3339)
+	stamped.ObservedAt = &at
+	for _, c := range []struct {
+		name     string
+		observed time.Time
+		weekly   schema.Limit
+	}{
+		{"limits observed in the future", future, window(schema.WindowWeekly, 10080, 92, now.Add(time.Hour))},
+		{"a window observed in the future", now.Add(-time.Minute), stamped},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			subscriptionStatuslineEnv(t)
+			writeClaudeSnapshotWithLimits(t, now, c.observed, c.weekly)
+			input := fmt.Sprintf(`{"session_id":"s","transcript_path":%q,"model":{"id":"claude-test"},"rate_limits":{"seven_day":{"used_percentage":89,"resets_at":%d}}}`,
+				transcriptRespondedAt(t, now.Add(-time.Minute)), now.Add(time.Hour).Unix())
+			var out bytes.Buffer
+			if code := runStatuslineWithIO([]string{"--template", "{claude.wk.pct}", "--no-color"}, strings.NewReader(input), &out, now); code != 0 {
+				t.Fatalf("runStatuslineWithIO exit = %d", code)
+			}
+			if got := strings.TrimSpace(out.String()); got != "11%" {
+				t.Errorf("statusline output = %q, want the payload's weekly (11%% left), not the future-dated 8%%", got)
+			}
+		})
+	}
+}
+
 // A payload observed later wins even with a lower reading: use only falls
 // when the window is reset or the limit raised, and that must show (#330).
 func TestRunStatuslineNewerPayloadReplacesLimits(t *testing.T) {
