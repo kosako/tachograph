@@ -401,9 +401,13 @@ func ClaudeDays(root string, from, to time.Time, prices pricing.Table) (map[stri
 		return nil, errors.New("claude root could not be resolved")
 	}
 	out := map[string]Totals{}
-	// One dedup set spans every file so a response duplicated across files
-	// (resume/compaction copies prior turns forward) is also counted once.
-	seen := claude.UsageSet{}
+	// One dedup set per day spans every file, so a response duplicated across
+	// files (resume/compaction copies prior turns forward) is counted once on
+	// its day. The sets are per day, not one for the window: a response whose
+	// lines straddle midnight counts on each day it appears, as the single-day
+	// ClaudeTotals and session_today count it, so a day's figure doesn't
+	// depend on which other days the window holds (#435).
+	seen := map[string]claude.UsageSet{}
 
 	projects := filepath.Join(root, "projects")
 	dirs, err := os.ReadDir(projects)
@@ -442,18 +446,24 @@ func ClaudeDays(root string, from, to time.Time, prices pricing.Table) (map[stri
 }
 
 // claudeFileDays sums one transcript's entries within [from, to) into days,
-// keyed by local calendar day, recording counted responses in seen so the
-// caller can dedup across files. A read failure is an error: a transcript
-// that was listed but can't be read means the totals are unknown, not
-// smaller.
-func claudeFileDays(path string, from, to time.Time, prices pricing.Table, seen claude.UsageSet, days map[string]Totals) error {
+// keyed by local calendar day, recording counted responses in that day's set
+// of seen so the caller can dedup across files. A read failure is an error: a
+// transcript that was listed but can't be read means the totals are unknown,
+// not smaller.
+func claudeFileDays(path string, from, to time.Time, prices pricing.Table, seen map[string]claude.UsageSet, days map[string]Totals) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 	claude.EachUsageLine(b, func(line claude.TranscriptLine) {
 		day, ok := dayIn(line.Timestamp, from, to)
-		if !ok || seen.Dup(line) {
+		if !ok {
+			return
+		}
+		if seen[day] == nil {
+			seen[day] = claude.UsageSet{}
+		}
+		if seen[day].Dup(line) {
 			return
 		}
 		acc := days[day]
