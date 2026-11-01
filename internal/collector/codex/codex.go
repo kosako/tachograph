@@ -168,12 +168,23 @@ func rolloutsByMtime(dir string) ([]RolloutFile, error) {
 // the token_count or turn_context. turn_context is emitted at turn start and
 // token_count at the end, so a single turn longer than the tail can leave
 // turn_context out of reach (model/cwd would silently go null) — the full scan
-// recovers it. A missing lim alone doesn't trigger the full scan: the codex
-// bucket is written just before the other buckets of the same turn, and
-// sessions without limits (API-key use) would otherwise be read in full on
-// every call; pickSession looks for limits in other rollouts instead.
+// recovers it.
+//
+// A missing lim alone doesn't trigger the full scan: sessions without limits
+// (API-key use) would otherwise be read in full on every call, and
+// pickSession looks for limits in other rollouts too. But when the tail holds
+// another bucket's rate limits (the session writes limits) and still not the
+// account's, the account's token_count can sit just before the tail — the
+// tail may even start inside its line (#437). The tail is then widened
+// backwards, doubling, until the limits are found, the file's start is
+// reached, or the tail already reaches back past limitsFloor (older limits
+// would be dropped anyway). The widened reads end where the first one did, so
+// lines appended meanwhile can't push the token_count already found out of
+// them; should a re-read still miss it (the file was replaced), the full scan
+// decides as above.
 func sessionEvents(path string) (tc, lim *TokenCount, turn *TurnContext, err error) {
-	lines, err := tailLines(path)
+	size := int64(tailBytes)
+	lines, whole, end, err := tailLines(path, -1, size)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -183,8 +194,64 @@ func sessionEvents(path string) (tc, lim *TokenCount, turn *TurnContext, err err
 			return nil, nil, nil, err
 		}
 		tc, lim, turn = lastEvents(lines)
+		return tc, lim, turn, nil
+	}
+	for lim == nil && !whole && otherBucketLimits(lines) && !reachesBefore(lines, tcFloor(tc)) {
+		size *= 2
+		if widenHook != nil {
+			widenHook()
+		}
+		if lines, whole, _, err = tailLines(path, end, size); err != nil {
+			return nil, nil, nil, err
+		}
+		if tc, lim, turn = lastEvents(lines); tc == nil || turn == nil {
+			if lines, err = allLines(path); err != nil {
+				return nil, nil, nil, err
+			}
+			tc, lim, turn = lastEvents(lines)
+			break
+		}
 	}
 	return tc, lim, turn, nil
+}
+
+// widenHook, when set by a test, runs before each widened tail read.
+var widenHook func()
+
+// tcFloor is limitsFloor of tc's timestamp, which lastEvents has parsed.
+func tcFloor(tc *TokenCount) time.Time {
+	ts, _ := time.Parse(time.RFC3339Nano, tc.timestamp)
+	return limitsFloor(ts)
+}
+
+// otherBucketLimits reports whether lines hold a token_count with rate limits
+// that aren't the account's (a premium or per-model bucket, #258): a sign the
+// session writes limits, so the account's may be further back.
+func otherBucketLimits(lines [][]byte) bool {
+	for _, l := range lines {
+		if !bytes.Contains(l, []byte(`"limit_id"`)) {
+			continue
+		}
+		if ev, ok := ParseEvent(l); ok {
+			if c := ev.TokenCount(); c != nil && c.RateLimits != nil && !c.AccountLimits() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// reachesBefore reports whether lines' oldest timestamped event is before t,
+// so lastEvents has already looked back past t.
+func reachesBefore(lines [][]byte, t time.Time) bool {
+	for _, l := range lines {
+		if ev, ok := ParseEvent(l); ok {
+			if ts, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
+				return ts.Before(t)
+			}
+		}
+	}
+	return false
 }
 
 func errTool(code, msg string) schema.Tool {
@@ -194,29 +261,36 @@ func errTool(code, msg string) schema.Tool {
 	return t
 }
 
-func tailLines(path string) ([][]byte, error) {
+// tailLines reads the size bytes of path that end at end (the file's current
+// size when end is negative, which it returns as end) as lines, dropping the
+// first (partial) one unless the read reached the file's start, which whole
+// reports.
+func tailLines(path string, end, size int64) (lines [][]byte, whole bool, readEnd int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
+	if end < 0 {
+		st, err := f.Stat()
+		if err != nil {
+			return nil, false, 0, err
+		}
+		end = st.Size()
 	}
-	off := st.Size() - tailBytes
+	off := end - size
 	if off < 0 {
 		off = 0
 	}
-	buf := make([]byte, st.Size()-off)
+	buf := make([]byte, end-off)
 	if _, err := f.ReadAt(buf, off); err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
-	lines := bytes.Split(buf, []byte("\n"))
+	lines = bytes.Split(buf, []byte("\n"))
 	if off > 0 && len(lines) > 0 {
 		lines = lines[1:] // first line is partial
 	}
-	return lines, nil
+	return lines, off == 0, end, nil
 }
 
 func allLines(path string) ([][]byte, error) {

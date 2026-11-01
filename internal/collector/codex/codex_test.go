@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -711,5 +712,109 @@ func TestWindowName(t *testing.T) {
 		if got := windowName(mins); got != want {
 			t.Errorf("windowName(%d) = %q, want %q", mins, got, want)
 		}
+	}
+}
+
+// The account's limits can sit just before the tail when the tail holds only
+// another bucket's token_count (#437): either a whole turn of output pushes
+// the codex bucket out, or the tail starts inside the codex bucket's own line
+// (written just before the premium one in the same turn). Seeing the other
+// bucket, sessionEvents widens the tail back and finds them. Without another
+// bucket in the tail (sessions that write no limits, such as API-key use) the
+// tail isn't widened, and limits further back stay unseen.
+func TestCollectAccountLimitsJustBeforeTail(t *testing.T) {
+	const (
+		turn1 = `{"timestamp":"2026-05-24T10:00:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/work","model":"gpt-5.4-codex"}}` + "\n"
+		turn2 = `{"timestamp":"2026-05-24T10:03:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/work","model":"gpt-5.4-codex"}}` + "\n"
+		info  = `"info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"total_tokens":150},"model_context_window":200000}`
+	)
+	tokenCount := func(ts, rateLimits string) string {
+		return `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"token_count",` + info + `,"rate_limits":` + rateLimits + `}}` + "\n"
+	}
+	codex := func(ts string, pad int) string {
+		return `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"token_count",` + info +
+			`,"rate_limits":{"limit_id":"codex","primary":{"used_percent":42,"window_minutes":300,"resets_at":1790000000},"secondary":null,"plan_type":"plus"}},"pad":"` +
+			strings.Repeat("p", pad) + `"}` + "\n"
+	}
+	premium := func(ts string) string {
+		return tokenCount(ts, `{"limit_id":"premium","primary":{"used_percent":1,"window_minutes":300,"resets_at":1790000000},"secondary":null}`)
+	}
+	// filler is n bytes of whole response_item lines (no token_count).
+	filler := func(n int) string {
+		line := `{"timestamp":"2026-05-24T10:02:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + strings.Repeat("x", 1000) + `"}]}}` + "\n"
+		var b strings.Builder
+		for b.Len()+len(line) <= n {
+			b.WriteString(line)
+		}
+		return b.String()
+	}
+	// The codex bucket's 3000-byte line is followed by just under tailBytes,
+	// so the tail starts inside it.
+	straddleRest := premium("2026-05-24T10:01:00.500Z") + turn2
+	straddleRest += filler(tailBytes - 1000 - len(straddleRest))
+
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"a turn of output pushes the codex bucket out",
+			turn1 + codex("2026-05-24T10:01:00.000Z", 0) + filler(600*1024) + turn2 + premium("2026-05-24T10:04:00.000Z"), true},
+		{"the tail starts inside the codex bucket's line",
+			turn1 + codex("2026-05-24T10:01:00.000Z", 3000) + straddleRest, true},
+		{"account limits older than limitsFloor stay unused",
+			`{"timestamp":"2026-05-24T04:00:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/work","model":"gpt-5.4-codex"}}` + "\n" +
+				codex("2026-05-24T04:01:00.000Z", 0) + filler(600*1024) + turn2 + premium("2026-05-24T10:04:00.000Z"), false},
+		{"no other bucket in the tail",
+			turn1 + codex("2026-05-24T10:01:00.000Z", 0) + filler(600*1024) + turn2 + tokenCount("2026-05-24T10:04:00.000Z", "null"), false},
+	}
+	// Output appended while the tail is widened (more than the first tail,
+	// then an empty premium token_count) must not push the token_count already
+	// found, near the start of the first tail, out of the widened reads: they
+	// end where the first read did.
+	emptyPremium := `{"timestamp":"2026-05-24T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","primary":{"used_percent":1,"window_minutes":300,"resets_at":1790000000},"secondary":null}}}` + "\n"
+	cases = append(cases, struct {
+		name    string
+		content string
+		want    bool
+	}{"output appended while widening", cases[0].content + filler(500*1024), true})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			day := filepath.Join(root, "sessions", "2026", "05", "24")
+			if err := os.MkdirAll(day, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-000000000437.jsonl")
+			if err := os.WriteFile(file, []byte(c.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if c.name == "output appended while widening" {
+				appended := false
+				widenHook = func() {
+					if appended {
+						return
+					}
+					appended = true
+					f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer f.Close()
+					if _, err := f.WriteString(filler(600*1024) + emptyPremium); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Cleanup(func() { widenHook = nil })
+			}
+			now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
+			got := Collect(Options{Root: root, Now: now})
+			if got.Error != nil {
+				t.Fatalf("Error = %+v", got.Error)
+			}
+			if has := len(got.Limits) > 0 && got.Plan != nil && *got.Plan == "plus"; has != c.want {
+				t.Errorf("limits %+v plan %v, want the codex bucket's limits found = %v", got.Limits, got.Plan, c.want)
+			}
+		})
 	}
 }
