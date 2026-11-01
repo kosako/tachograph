@@ -27,6 +27,9 @@ func runDoctor(args []string) int {
 		fmt.Print(usage)
 		return 0
 	}
+	if unexpectedArgs("tacho doctor", args) {
+		return 2
+	}
 	exe := resolveExe()
 	onPath := tachoOnPath()
 	now := time.Now()
