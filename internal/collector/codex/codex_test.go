@@ -768,6 +768,16 @@ func TestCollectAccountLimitsJustBeforeTail(t *testing.T) {
 		{"no other bucket in the tail",
 			turn1 + codex("2026-05-24T10:01:00.000Z", 0) + filler(600*1024) + turn2 + tokenCount("2026-05-24T10:04:00.000Z", "null"), false},
 	}
+	// Output appended while the tail is widened (more than the first tail,
+	// then an empty premium token_count) must not push the token_count already
+	// found, near the start of the first tail, out of the widened reads: they
+	// end where the first read did.
+	emptyPremium := `{"timestamp":"2026-05-24T10:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","primary":{"used_percent":1,"window_minutes":300,"resets_at":1790000000},"secondary":null}}}` + "\n"
+	cases = append(cases, struct {
+		name    string
+		content string
+		want    bool
+	}{"output appended while widening", cases[0].content + filler(500*1024), true})
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -775,8 +785,27 @@ func TestCollectAccountLimitsJustBeforeTail(t *testing.T) {
 			if err := os.MkdirAll(day, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-000000000437.jsonl"), []byte(c.content), 0o644); err != nil {
+			file := filepath.Join(day, "rollout-2026-05-24T10-00-00-019e5933-2289-7e72-88fd-000000000437.jsonl")
+			if err := os.WriteFile(file, []byte(c.content), 0o644); err != nil {
 				t.Fatal(err)
+			}
+			if c.name == "output appended while widening" {
+				appended := false
+				widenHook = func() {
+					if appended {
+						return
+					}
+					appended = true
+					f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer f.Close()
+					if _, err := f.WriteString(filler(600*1024) + emptyPremium); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Cleanup(func() { widenHook = nil })
 			}
 			now, _ := time.Parse(time.RFC3339, "2026-05-24T10:06:00Z")
 			got := Collect(Options{Root: root, Now: now})

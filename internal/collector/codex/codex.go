@@ -178,10 +178,13 @@ func rolloutsByMtime(dir string) ([]RolloutFile, error) {
 // tail may even start inside its line (#437). The tail is then widened
 // backwards, doubling, until the limits are found, the file's start is
 // reached, or the tail already reaches back past limitsFloor (older limits
-// would be dropped anyway).
+// would be dropped anyway). The widened reads end where the first one did, so
+// lines appended meanwhile can't push the token_count already found out of
+// them; should a re-read still miss it (the file was replaced), the full scan
+// decides as above.
 func sessionEvents(path string) (tc, lim *TokenCount, turn *TurnContext, err error) {
 	size := int64(tailBytes)
-	lines, whole, err := tailLines(path, size)
+	lines, whole, end, err := tailLines(path, -1, size)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -195,13 +198,25 @@ func sessionEvents(path string) (tc, lim *TokenCount, turn *TurnContext, err err
 	}
 	for lim == nil && !whole && otherBucketLimits(lines) && !reachesBefore(lines, tcFloor(tc)) {
 		size *= 2
-		if lines, whole, err = tailLines(path, size); err != nil {
+		if widenHook != nil {
+			widenHook()
+		}
+		if lines, whole, _, err = tailLines(path, end, size); err != nil {
 			return nil, nil, nil, err
 		}
-		tc, lim, turn = lastEvents(lines)
+		if tc, lim, turn = lastEvents(lines); tc == nil || turn == nil {
+			if lines, err = allLines(path); err != nil {
+				return nil, nil, nil, err
+			}
+			tc, lim, turn = lastEvents(lines)
+			break
+		}
 	}
 	return tc, lim, turn, nil
 }
+
+// widenHook, when set by a test, runs before each widened tail read.
+var widenHook func()
 
 // tcFloor is limitsFloor of tc's timestamp, which lastEvents has parsed.
 func tcFloor(tc *TokenCount) time.Time {
@@ -246,32 +261,36 @@ func errTool(code, msg string) schema.Tool {
 	return t
 }
 
-// tailLines reads the last size bytes of path as lines, dropping the first
-// (partial) one unless the read reached the file's start, which whole
+// tailLines reads the size bytes of path that end at end (the file's current
+// size when end is negative, which it returns as end) as lines, dropping the
+// first (partial) one unless the read reached the file's start, which whole
 // reports.
-func tailLines(path string, size int64) (lines [][]byte, whole bool, err error) {
+func tailLines(path string, end, size int64) (lines [][]byte, whole bool, readEnd int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, false, err
+	if end < 0 {
+		st, err := f.Stat()
+		if err != nil {
+			return nil, false, 0, err
+		}
+		end = st.Size()
 	}
-	off := st.Size() - size
+	off := end - size
 	if off < 0 {
 		off = 0
 	}
-	buf := make([]byte, st.Size()-off)
+	buf := make([]byte, end-off)
 	if _, err := f.ReadAt(buf, off); err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 	lines = bytes.Split(buf, []byte("\n"))
 	if off > 0 && len(lines) > 0 {
 		lines = lines[1:] // first line is partial
 	}
-	return lines, off == 0, nil
+	return lines, off == 0, end, nil
 }
 
 func allLines(path string) ([][]byte, error) {
