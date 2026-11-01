@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kosako/tachograph/internal/atomicfile"
 	"github.com/kosako/tachograph/internal/cache"
 	"github.com/kosako/tachograph/internal/collector/claude"
 	"github.com/kosako/tachograph/internal/config"
@@ -363,8 +364,11 @@ func configStatuslinePreset(args []string) int {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}
+	// Replaced through a temp file, like config.json, so a statusline
+	// reading it meanwhile never sees it empty, and a failed write leaves the
+	// old template (#440). A linked template is written through the link.
 	path := filepath.Join(dir, "statusline.tmpl")
-	if err := os.WriteFile(path, []byte(tmpl+"\n"), 0o644); err != nil {
+	if err := atomicfile.WriteThrough(path, []byte(tmpl+"\n"), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "tacho:", err)
 		return 1
 	}

@@ -1,9 +1,9 @@
 // Package atomicfile replaces a file through a temp file and a rename, so a
 // reader sees the old content or the new, never a partial write. The cache,
-// the config, and the files `tacho setup --write` writes all go through it,
-// so a failed write is handled the same way everywhere (#379). The config and
-// the setup files follow a symlink to the file it leads to (WriteThrough);
-// the cache doesn't (#413).
+// the config, the statusline template, and the files `tacho setup --write`
+// writes all go through it, so a failed write is handled the same way
+// everywhere (#379, #440). All but the cache follow a symlink to the file it
+// leads to (WriteThrough); the cache doesn't (#413).
 package atomicfile
 
 import (

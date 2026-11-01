@@ -360,3 +360,46 @@ func TestConfigEditReportsWhyTheLockCantBeTaken(t *testing.T) {
 		t.Errorf("exit %d, stderr %q; want 1, the lock, and why", code, stderr)
 	}
 }
+
+// `tacho config statusline-preset` replaces statusline.tmpl through a temp
+// file rather than truncating it in place, so a statusline reading it
+// meanwhile never sees it empty (#440): a reader that opened the old file
+// keeps reading the old template. A linked template is replaced where the
+// link leads, and the link stays.
+func TestConfigStatuslinePresetReplacesTheTemplate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("an open file can't be replaced on windows; symlinks need privileges")
+	}
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	target := filepath.Join(t.TempDir(), "statusline.tmpl")
+	if err := os.WriteFile(target, []byte("OLD {claude.5h.pct}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "statusline.tmpl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := os.Open(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	var code int
+	capture(t, &os.Stdout, func() { code = run([]string{"config", "statusline-preset", "minimal"}) })
+	if code != 0 {
+		t.Fatalf("config statusline-preset minimal = %d, want 0", code)
+	}
+	var old bytes.Buffer
+	if _, err := old.ReadFrom(reader); err != nil || old.String() != "OLD {claude.5h.pct}\n" {
+		t.Errorf("the reader that opened the old template read %q (%v), want the old template whole", old.String(), err)
+	}
+	minimal, _ := render.PresetTemplate("minimal")
+	if b, err := os.ReadFile(target); err != nil || string(b) != minimal+"\n" {
+		t.Errorf("link target = %q (%v), want the minimal preset", b, err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("statusline.tmpl is no longer a link (%v)", err)
+	}
+}
