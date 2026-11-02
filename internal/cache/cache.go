@@ -85,24 +85,94 @@ type statusFile struct {
 	schema.Status
 }
 
-// ReadStatus returns the cached status if its file is fresh for ttl (see
-// StatusFresh) and it was assembled from the same config roots.
-func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*schema.Status, bool) {
+// StatusState is what ReadStatus makes of status.json, as InspectStatus
+// reports it.
+type StatusState string
+
+const (
+	StatusFileMissing    StatusState = "missing"    // no status.json
+	StatusFileUnreadable StatusState = "unreadable" // the file can't be read
+	StatusFileExpired    StatusState = "expired"    // modified more than the TTL ago
+	StatusFileFuture     StatusState = "future"     // modified after now: the clock was set back (#415)
+	StatusFileInvalid    StatusState = "invalid"    // not valid JSON
+	StatusFileOldSchema  StatusState = "old_schema" // written under another schema version
+	StatusFileOtherRoot  StatusState = "other_root" // assembled from other config roots (#321)
+	StatusFileFresh      StatusState = "fresh"      // served
+)
+
+// StatusReport describes status.json as ReadStatus sees it.
+type StatusReport struct {
+	State StatusState
+	// Err is why the file could not be read (StatusFileUnreadable).
+	Err error
+	// ModTime is the file's modification time, set from StatusFileExpired on.
+	ModTime time.Time
+	// SchemaVersion is the schema the file was written under, set from
+	// StatusFileOldSchema on.
+	SchemaVersion string
+}
+
+// InspectStatus reports what ReadStatus makes of status.json for ttl, now,
+// and roots. Both go through the same checks, so doctor says why the cache
+// is not used exactly when the reader doesn't use it (#446, as #379 for the
+// snapshot).
+func InspectStatus(ttl time.Duration, now time.Time, roots map[string]string) StatusReport {
+	_, r := inspectStatus(ttl, now, roots)
+	return r
+}
+
+// inspectStatus reads status.json and judges it; the file is returned only
+// when it is served. The age is checked before the content, so an expired
+// file isn't read.
+func inspectStatus(ttl time.Duration, now time.Time, roots map[string]string) (*statusFile, StatusReport) {
 	dir, err := Dir()
 	if err != nil {
-		return nil, false
+		return nil, StatusReport{State: StatusFileUnreadable, Err: err}
 	}
 	path := filepath.Join(dir, "status.json")
 	st, err := os.Stat(path)
-	if err != nil || !StatusFresh(st.ModTime(), now, ttl) {
-		return nil, false
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, StatusReport{State: StatusFileMissing}
+	}
+	if err != nil {
+		return nil, StatusReport{State: StatusFileUnreadable, Err: err}
+	}
+	r := StatusReport{ModTime: st.ModTime()}
+	if !StatusFresh(st.ModTime(), now, ttl) {
+		r.State = StatusFileExpired
+		if st.ModTime().After(now) {
+			r.State = StatusFileFuture
+		}
+		return nil, r
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, false
+		r.State, r.Err = StatusFileUnreadable, err
+		return nil, r
 	}
 	var f statusFile
-	if json.Unmarshal(b, &f) != nil || f.SchemaVersion != schema.Version || !sameRoots(f.Roots, roots) {
+	if json.Unmarshal(b, &f) != nil {
+		r.State = StatusFileInvalid
+		return nil, r
+	}
+	r.SchemaVersion = f.SchemaVersion
+	if f.SchemaVersion != schema.Version {
+		r.State = StatusFileOldSchema
+		return nil, r
+	}
+	if !sameRoots(f.Roots, roots) {
+		r.State = StatusFileOtherRoot
+		return nil, r
+	}
+	r.State = StatusFileFresh
+	return &f, r
+}
+
+// ReadStatus returns the cached status if its file is fresh for ttl (see
+// StatusFresh) and it was assembled from the same config roots.
+func ReadStatus(ttl time.Duration, now time.Time, roots map[string]string) (*schema.Status, bool) {
+	f, _ := inspectStatus(ttl, now, roots)
+	if f == nil {
 		return nil, false
 	}
 	return &f.Status, true

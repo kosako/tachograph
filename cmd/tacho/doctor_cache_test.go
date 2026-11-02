@@ -12,36 +12,67 @@ import (
 	"github.com/kosako/tachograph/internal/schema"
 )
 
-// status.json is judged by its modification time as the reader judges it:
-// against the TTL, and not used when modified in the future (#415).
-func TestReportCacheFile(t *testing.T) {
+// doctor reports status.json as the reader judges it, by the same checks
+// (#446): a file just modified but not valid, written for another schema
+// version, or assembled for other config dirs is present but not used, and
+// one modified in the future past the slack isn't used either (#415). Each
+// line says fresh exactly when ReadStatus serves the file.
+func TestReportStatusCache(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
-	path := filepath.Join(t.TempDir(), "status.json")
+	dir := t.TempDir()
+	t.Setenv("TACHO_CACHE_DIR", dir)
+	path := filepath.Join(dir, "status.json")
+	roots := core.Roots(core.Options{})
 	report := func() string {
-		return capture(t, &os.Stdout, func() {
-			reportCacheFile("status.json", path, cache.StatusTTL, now, "run `tacho` once")
-		})
+		return capture(t, &os.Stdout, func() { reportStatusCache(now) })
 	}
-	if out := report(); !strings.Contains(out, "status.json:     missing — run `tacho` once") {
+	if out := report(); !strings.Contains(out, "status.json:     missing — run `tacho` or `tacho status --json` once") {
 		t.Errorf("missing file:\n%s", out)
 	}
-	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
+	valid := func(t *testing.T) {
+		if err := cache.WriteStatus(&schema.Status{SchemaVersion: schema.Version}, roots); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := func(body string) func(t *testing.T) {
+		return func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	otherRoots := func(t *testing.T) {
+		other := map[string]string{schema.ToolClaudeCode: filepath.Join(t.TempDir(), "other-profile")}
+		if err := cache.WriteStatus(&schema.Status{SchemaVersion: schema.Version}, other); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, c := range []struct {
-		age  time.Duration
-		want string
+		name  string
+		write func(t *testing.T)
+		age   time.Duration
+		want  string
 	}{
-		{10 * time.Second, "present (modified 10s ago, fresh)"},
-		{cache.StatusTTL + time.Second, "present (modified 31s ago, expired)"},
-		{-time.Second, "present (modified in the future, fresh)"}, // within the slack
-		{-15 * time.Minute, "present (modified in the future, not used)"},
+		{"fresh", valid, 10 * time.Second, "present (modified 10s ago, fresh)"},
+		{"expired", valid, cache.StatusTTL + time.Second, "present (modified 31s ago, expired)"},
+		{"future within the slack", valid, -time.Second, "present (modified in the future, fresh)"},
+		{"future", valid, -15 * time.Minute, "present (modified in the future, not used)"},
+		{"not JSON", raw("not json"), 10 * time.Second, "present (modified 10s ago) but not used — not valid JSON; the next `tacho` run rewrites it"},
+		{"no schema version", raw("{}"), 10 * time.Second, "present (modified 10s ago) but not used — it records no schema version, this tacho reads " + schema.Version},
+		{"another schema", raw(`{"schema_version":"0.1"}`), 10 * time.Second, "present (modified 10s ago) but not used — written for schema \"0.1\", this tacho reads " + schema.Version},
+		{"other config dirs", otherRoots, 10 * time.Second, "present (modified 10s ago) but not used — assembled for other Claude Code / Codex config dirs"},
 	} {
+		c.write(t)
 		if err := os.Chtimes(path, now.Add(-c.age), now.Add(-c.age)); err != nil {
 			t.Fatal(err)
 		}
-		if out := report(); !strings.Contains(out, c.want) {
-			t.Errorf("modified %v ago:\n%s\nwant %q", c.age, out, c.want)
+		out := report()
+		if !strings.Contains(out, c.want) {
+			t.Errorf("%s:\n%s\nwant %q", c.name, out, c.want)
+		}
+		_, served := cache.ReadStatus(cache.StatusTTL, now, roots)
+		if fresh := strings.Contains(out, ", fresh)"); fresh != served {
+			t.Errorf("%s: doctor says fresh %v, ReadStatus serves %v:\n%s", c.name, fresh, served, out)
 		}
 	}
 }

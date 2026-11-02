@@ -203,33 +203,44 @@ func reportCache(now time.Time) {
 		return
 	}
 	fmt.Println("  dir:       " + dir)
-	reportCacheFile("status.json", filepath.Join(dir, "status.json"), cache.StatusTTL, now,
-		"run `tacho` or `tacho status --json` once")
+	reportStatusCache(now)
 	reportSnapshot(now)
 }
 
-func reportCacheFile(label, path string, maxAge time.Duration, now time.Time, hint string) {
-	info, err := os.Stat(path)
-	key := fmt.Sprintf("%s:", label)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Printf("  %-16s missing — %s\n", key, hint)
-			return
+// reportStatusCache reports status.json as the reader judges it, by the same
+// checks (cache.InspectStatus): a file just modified but not valid, written
+// for another schema version, or assembled for another profile's config
+// dirs is there but never used, which its modification time can't tell
+// (#446). A file modified in the future (the clock was set back since) isn't
+// used however recent it looks (#415).
+func reportStatusCache(now time.Time) {
+	const key = "status.json:"
+	const rewrite = "the next `tacho` run rewrites it"
+	r := cache.InspectStatus(cache.StatusTTL, now, core.Roots(core.Options{}))
+	switch r.State {
+	case cache.StatusFileMissing:
+		fmt.Printf("  %-16s missing — run `tacho` or `tacho status --json` once\n", key)
+	case cache.StatusFileUnreadable:
+		fmt.Printf("  %-16s unreadable: %v\n", key, r.Err)
+	case cache.StatusFileExpired:
+		fmt.Printf("  %-16s present (modified %s, expired)\n", key, doctorAge(r.ModTime, now))
+	case cache.StatusFileFuture:
+		fmt.Printf("  %-16s present (modified %s, not used)\n", key, doctorAge(r.ModTime, now))
+	case cache.StatusFileInvalid:
+		fmt.Printf("  %-16s present (modified %s) but not used — not valid JSON; %s\n", key, doctorAge(r.ModTime, now), rewrite)
+	case cache.StatusFileOldSchema:
+		written := fmt.Sprintf("written for schema %q", r.SchemaVersion)
+		if r.SchemaVersion == "" {
+			written = "it records no schema version"
 		}
-		fmt.Printf("  %-16s unreadable: %v\n", key, err)
-		return
+		fmt.Printf("  %-16s present (modified %s) but not used — %s, this tacho reads %s; %s\n",
+			key, doctorAge(r.ModTime, now), written, schema.Version, rewrite)
+	case cache.StatusFileOtherRoot:
+		fmt.Printf("  %-16s present (modified %s) but not used — assembled for other Claude Code / Codex config dirs (another profile?); %s\n",
+			key, doctorAge(r.ModTime, now), rewrite)
+	default:
+		fmt.Printf("  %-16s present (modified %s, fresh)\n", key, doctorAge(r.ModTime, now))
 	}
-
-	// Judged as the reader does: a file modified in the future (the clock
-	// was set back since) isn't served however recent it looks (#415).
-	state := "fresh"
-	if !cache.StatusFresh(info.ModTime(), now, maxAge) {
-		state = "expired"
-		if info.ModTime().After(now) {
-			state = "not used"
-		}
-	}
-	fmt.Printf("  %-16s present (modified %s, %s)\n", key, doctorAge(info.ModTime(), now), state)
 }
 
 // reportSnapshot reports the Claude snapshot as the readers judge it, by the
