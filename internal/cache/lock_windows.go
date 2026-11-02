@@ -40,13 +40,20 @@ func lockFile(name string, wait time.Duration) (func(), error) {
 }
 
 // lockPath is lockFile on the file at path, wherever it is, making its
-// directory if missing.
+// directory if missing. The lock file is opened without following a reparse
+// point (a symlink or junction) in its place and must be a regular file: a
+// link planted there neither creates nor opens the file it leads to (#448),
+// and the lock isn't taken.
 func lockPath(path string, wait time.Duration) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := openLockNoFollow(path)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkLockFile(f); err != nil {
+		f.Close()
 		return nil, err
 	}
 	h := f.Fd()
@@ -70,4 +77,21 @@ func lockPath(path string, wait time.Duration) (func(), error) {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+// openLockNoFollow opens path for reading and writing, creating it if missing,
+// as os.OpenFile does, but on a reparse point itself rather than what it
+// leads to (FILE_FLAG_OPEN_REPARSE_POINT), so checkLockFile sees the link.
+func openLockNoFollow(path string) (*os.File, error) {
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE,
+		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE, nil, syscall.OPEN_ALWAYS,
+		syscall.FILE_ATTRIBUTE_NORMAL|syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(h), path), nil
 }

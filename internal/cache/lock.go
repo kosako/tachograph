@@ -2,6 +2,8 @@ package cache
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/kosako/tachograph/internal/atomicfile"
@@ -13,6 +15,20 @@ import (
 // saves; only a system without a file lock saves unlocked (see the statusline's
 // writeStatuslineSnapshot).
 const snapshotLockWait = time.Second
+
+// checkLockFile refuses a lock file that isn't a regular file — a link left
+// in its place (opened as itself, not followed: see lockPath), a FIFO, a
+// directory — so the lock is taken only on a file of tacho's own (#448).
+func checkLockFile(f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("lock file %s is not a regular file (%s)", f.Name(), info.Mode().Type())
+	}
+	return nil
+}
 
 // lockContended, when set (tests only), is called each time lockFile finds
 // the lock held and is about to wait and retry, so a test can tell the
