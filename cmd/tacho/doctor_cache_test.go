@@ -61,6 +61,7 @@ func TestReportStatusCache(t *testing.T) {
 		{"no schema version", raw("{}"), 10 * time.Second, "present (modified 10s ago) but not used — it records no schema version, this tacho reads " + schema.Version},
 		{"another schema", raw(`{"schema_version":"0.1"}`), 10 * time.Second, "present (modified 10s ago) but not used — written for schema \"0.1\", this tacho reads " + schema.Version},
 		{"other config dirs", otherRoots, 10 * time.Second, "present (modified 10s ago) but not used — assembled for other Claude Code / Codex config dirs"},
+		{"no config dirs recorded", raw(`{"schema_version":"` + schema.Version + `"}`), 10 * time.Second, "present (modified 10s ago) but not used — it records no config dirs"},
 	} {
 		c.write(t)
 		if err := os.Chtimes(path, now.Add(-c.age), now.Add(-c.age)); err != nil {
@@ -74,6 +75,32 @@ func TestReportStatusCache(t *testing.T) {
 		if fresh := strings.Contains(out, ", fresh)"); fresh != served {
 			t.Errorf("%s: doctor says fresh %v, ReadStatus serves %v:\n%s", c.name, fresh, served, out)
 		}
+	}
+}
+
+// A run that resolves no config dir (no CLAUDE_CONFIG_DIR, CODEX_HOME, or
+// home) matches no status cache, not even the one it just wrote: doctor says
+// so rather than blaming another profile (#446).
+func TestReportStatusCacheWithoutConfigDirs(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	t.Setenv("TACHO_CACHE_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // the home os.UserHomeDir reads on Windows
+	roots := core.Roots(core.Options{})
+	if len(roots) != 0 {
+		t.Fatalf("roots = %v, want none without a home", roots)
+	}
+	if err := cache.WriteStatus(&schema.Status{SchemaVersion: schema.Version}, roots); err != nil {
+		t.Fatal(err)
+	}
+	out := capture(t, &os.Stdout, func() { reportStatusCache(now) })
+	if want := "but not used — this run's Claude Code and Codex config dirs can't be resolved"; !strings.Contains(out, want) {
+		t.Errorf("got:\n%s\nwant %q", out, want)
+	}
+	if _, served := cache.ReadStatus(cache.StatusTTL, now, roots); served {
+		t.Error("ReadStatus served a status cache with no roots")
 	}
 }
 

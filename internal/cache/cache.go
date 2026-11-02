@@ -110,6 +110,9 @@ type StatusReport struct {
 	// SchemaVersion is the schema the file was written under, set from
 	// StatusFileOldSchema on.
 	SchemaVersion string
+	// Roots are the config roots (by tool) the file was assembled from, as
+	// stored (empty when it records none), set from StatusFileOtherRoot on.
+	Roots map[string]string
 }
 
 // InspectStatus reports what ReadStatus makes of status.json for ttl, now,
@@ -160,6 +163,7 @@ func inspectStatus(ttl time.Duration, now time.Time, roots map[string]string) (*
 		r.State = StatusFileOldSchema
 		return nil, r
 	}
+	r.Roots = f.Roots
 	if !sameRoots(f.Roots, roots) {
 		r.State = StatusFileOtherRoot
 		return nil, r

@@ -216,7 +216,8 @@ func reportCache(now time.Time) {
 func reportStatusCache(now time.Time) {
 	const key = "status.json:"
 	const rewrite = "the next `tacho` run rewrites it"
-	r := cache.InspectStatus(cache.StatusTTL, now, core.Roots(core.Options{}))
+	roots := core.Roots(core.Options{}) // the roots core.Status reads (#321)
+	r := cache.InspectStatus(cache.StatusTTL, now, roots)
 	switch r.State {
 	case cache.StatusFileMissing:
 		fmt.Printf("  %-16s missing — run `tacho` or `tacho status --json` once\n", key)
@@ -236,8 +237,17 @@ func reportStatusCache(now time.Time) {
 		fmt.Printf("  %-16s present (modified %s) but not used — %s, this tacho reads %s; %s\n",
 			key, doctorAge(r.ModTime, now), written, schema.Version, rewrite)
 	case cache.StatusFileOtherRoot:
-		fmt.Printf("  %-16s present (modified %s) but not used — assembled for other Claude Code / Codex config dirs (another profile?); %s\n",
-			key, doctorAge(r.ModTime, now), rewrite)
+		// A roots mismatch covers three cases, told apart as for the
+		// snapshot: a set with no roots matches nothing, so a run that
+		// resolves none never uses the file it writes either.
+		why := "assembled for other Claude Code / Codex config dirs (another profile?); " + rewrite
+		switch {
+		case len(roots) == 0:
+			why = "this run's Claude Code and Codex config dirs can't be resolved, so no status cache is used"
+		case len(r.Roots) == 0:
+			why = "it records no config dirs (written by a tacho before v0.9.0, or by a run that couldn't resolve them); " + rewrite
+		}
+		fmt.Printf("  %-16s present (modified %s) but not used — %s\n", key, doctorAge(r.ModTime, now), why)
 	default:
 		fmt.Printf("  %-16s present (modified %s, fresh)\n", key, doctorAge(r.ModTime, now))
 	}
