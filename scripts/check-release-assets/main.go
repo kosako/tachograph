@@ -5,9 +5,11 @@
 // binary was built for the archive's OS and architecture from the release's
 // tag. It reads the archives from a directory — the release's assets as the
 // release workflow downloads them, or GoReleaser's dist/ — and touches no
-// network.
+// network. It also fails on an archive it doesn't know, and with
+// -npm-assets compares its platforms with the archives the npm wrapper
+// downloads (#447).
 //
-//	go run ./scripts/check-release-assets <dir> <tag>
+//	go run ./scripts/check-release-assets [-npm-assets file] <dir> <tag>
 package main
 
 import (
@@ -25,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -62,8 +65,9 @@ func main() {
 	// tag, so its binaries carry a pseudo-version: everything but the
 	// version is checked then.
 	skipVersion := flag.Bool("skip-version", false, "don't check the binaries' version (a snapshot, built off any tag)")
+	npmAssets := flag.String("npm-assets", "", "also compare the platforms with the npm wrapper's archives, listed in `file` (\"<asset> <binary>\" lines)")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: check-release-assets <dir> <tag>\n       check-release-assets -skip-version <dir>")
+		fmt.Fprintln(os.Stderr, "usage: check-release-assets [-npm-assets file] <dir> <tag>\n       check-release-assets [-npm-assets file] -skip-version <dir>")
 	}
 	flag.Parse()
 	args := flag.Args()
@@ -77,7 +81,11 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if errs := check(dir, tag); len(errs) > 0 {
+	errs := check(dir, tag)
+	if *npmAssets != "" {
+		errs = append(errs, checkNPMAssets(*npmAssets)...)
+	}
+	if len(errs) > 0 {
 		for _, err := range errs {
 			fmt.Fprintln(os.Stderr, "check-release-assets:", err)
 		}
@@ -100,7 +108,11 @@ func normalizeTag(v string) string {
 }
 
 // check returns every problem found in dir's archives for tag, or none. An
-// empty tag leaves the binaries' version unchecked (a snapshot).
+// empty tag leaves the binaries' version unchecked (a snapshot). Besides
+// checking each platform's archive, it fails on an archive it doesn't know —
+// in checksums.txt, or a tachograph_* file in dir — so a target added to
+// .goreleaser.yaml without adding it here (and to npm/asset.js) isn't
+// published unchecked (#447).
 func check(dir, tag string) []error {
 	sums, err := readChecksums(filepath.Join(dir, "checksums.txt"))
 	if err != nil {
@@ -112,7 +124,96 @@ func check(dir, tag string) []error {
 			errs = append(errs, err)
 		}
 	}
+	return append(errs, unknownArchives(dir, sums)...)
+}
+
+// unknownArchives reports the archives in checksums.txt, and the regular
+// files named tachograph_* in dir, that aren't a platform's archive. In
+// GoReleaser's dist/ and in a downloaded release, those files are the
+// archives (the per-build directories are named after the build, tacho_*).
+func unknownArchives(dir string, sums map[string]string) []error {
+	known := map[string]bool{}
+	for _, p := range platforms {
+		known[assetName(p.goos, p.goarch)] = true
+	}
+	unknown := map[string]bool{}
+	for name := range sums {
+		if !known[name] {
+			unknown[name] = true
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return []error{err}
+	}
+	for _, e := range entries {
+		if e.Type().IsRegular() && strings.HasPrefix(e.Name(), "tachograph_") && !known[e.Name()] {
+			unknown[e.Name()] = true
+		}
+	}
+	names := make([]string, 0, len(unknown))
+	for name := range unknown {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, name := range names {
+		errs = append(errs, fmt.Errorf("%s: not an archive this check knows; add its platform to platforms here and to npm/asset.js", name))
+	}
 	return errs
+}
+
+// checkNPMAssets compares the archives the npm wrapper downloads, as listed
+// in the file at path ("<asset> <binary>" lines, from npm/asset.js's
+// allAssets), with platforms: a target one side has and the other doesn't
+// would ship unchecked or be downloaded from nowhere (#447).
+func checkNPMAssets(path string) []error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return []error{err}
+	}
+	want := map[string]string{}
+	for _, p := range platforms {
+		want[assetName(p.goos, p.goarch)] = binaryName(p.goos)
+	}
+	got := map[string]string{}
+	var errs []error
+	for i, line := range strings.Split(string(b), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			return []error{fmt.Errorf("%s line %d is not \"<asset> <binary>\": %q", path, i+1, line)}
+		}
+		if _, dup := got[f[0]]; dup {
+			return []error{fmt.Errorf("%s lists %s more than once", path, f[0])}
+		}
+		got[f[0]] = f[1]
+	}
+	for _, name := range sortedKeys(want) {
+		switch bin, ok := got[name]; {
+		case !ok:
+			errs = append(errs, fmt.Errorf("%s: a release archive the npm wrapper doesn't download", name))
+		case bin != want[name]:
+			errs = append(errs, fmt.Errorf("%s: the npm wrapper looks for %s in it, the archive holds %s", name, bin, want[name]))
+		}
+	}
+	for _, name := range sortedKeys(got) {
+		if _, ok := want[name]; !ok {
+			errs = append(errs, fmt.Errorf("%s: the npm wrapper downloads it, but no release archive is checked for it", name))
+		}
+	}
+	return errs
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // checksumLine is the one line shape checksums.txt may hold: GoReleaser's

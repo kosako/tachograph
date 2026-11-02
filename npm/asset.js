@@ -23,6 +23,19 @@ function assetFor(platform, arch) {
   };
 }
 
+// allAssets returns assetFor's result for every platform × arch the wrapper
+// supports. CI hands the list to scripts/check-release-assets, which fails
+// when it and the release's platforms disagree (#447).
+function allAssets() {
+  const out = [];
+  for (const platform of Object.keys(PLATFORMS)) {
+    for (const arch of Object.keys(ARCHES)) {
+      out.push(assetFor(platform, arch));
+    }
+  }
+  return out;
+}
+
 // tagFor normalizes a package version to its release tag (v-prefixed).
 function tagFor(version) {
   return version.startsWith("v") ? version : `v${version}`;
@@ -66,4 +79,4 @@ function checksumFor(text, asset) {
   return sums.has(asset) ? sums.get(asset) : null;
 }
 
-module.exports = { assetFor, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES };
+module.exports = { assetFor, allAssets, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES };

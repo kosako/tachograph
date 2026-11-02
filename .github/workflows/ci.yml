@@ -107,7 +107,9 @@ jobs:
   # npm wrapper would download (#353), so a change to .goreleaser.yaml, the
   # GoReleaser pin, or a platform-specific compile fails on the PR instead of
   # at the tag. A snapshot isn't built from a tag, so the binaries' version
-  # isn't checked.
+  # isn't checked. The check also fails on an archive it doesn't know, and
+  # compares its platforms with the archives npm/asset.js downloads (#447),
+  # so a target added on one side only fails here too.
   release-snapshot:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -123,7 +125,8 @@ jobs:
         with:
           version: v2.18.3
           args: release --snapshot --clean --skip=publish
-      - run: go run ./scripts/check-release-assets -skip-version dist
+      - run: node -e 'for (const a of require("./npm/asset.js").allAssets()) console.log(a.asset + " " + a.binary)' > "$RUNNER_TEMP/npm-assets.txt"
+      - run: go run ./scripts/check-release-assets -skip-version -npm-assets "$RUNNER_TEMP/npm-assets.txt" dist
 
   # Exercise the real npm install path on every supported OS (see
   # npm-install-smoke.yml) against the release matching npm/package.json's

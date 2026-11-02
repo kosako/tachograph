@@ -113,6 +113,18 @@ func TestCheckAcceptsAGoodRelease(t *testing.T) {
 	stubBuildInfo(t)
 	dir := t.TempDir()
 	writeRelease(t, dir, "v1.2.3", nil)
+	// What else GoReleaser leaves in dist/: its per-build directories and
+	// metadata files aren't archives.
+	for _, d := range []string{"tacho_linux_amd64_v1", "tachograph_dir"} {
+		if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"artifacts.json", "metadata.json", "config.yaml"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if errs := check(dir, "v1.2.3"); len(errs) != 0 {
 		t.Errorf("check = %v, want no problems", errs)
 	}
@@ -148,6 +160,23 @@ func TestCheckReportsBadArchives(t *testing.T) {
 			os.WriteFile(filepath.Join(dir, "tachograph_windows_arm64.zip"), []byte("tampered"), 0o644)
 		}, "tachograph_windows_arm64.zip: SHA-256", 1},
 		{"no checksums.txt", func(dir string) { os.Remove(filepath.Join(dir, "checksums.txt")) }, "checksums.txt", 1},
+		// A target GoReleaser builds but this check doesn't know (#447): as
+		// an archive in the directory, in checksums.txt, or both (one
+		// problem each name).
+		{"unknown archive", func(dir string) {
+			os.WriteFile(filepath.Join(dir, "tachograph_freebsd_amd64.tar.gz"), []byte("x"), 0o644)
+		}, "tachograph_freebsd_amd64.tar.gz: not an archive this check knows", 1},
+		{"unknown archive in checksums.txt", func(dir string) {
+			p := filepath.Join(dir, "checksums.txt")
+			b, _ := os.ReadFile(p)
+			os.WriteFile(p, append(b, []byte(strings.Repeat("a", 64)+"  tachograph_linux_riscv64.tar.gz\n")...), 0o644)
+		}, "tachograph_linux_riscv64.tar.gz: not an archive this check knows", 1},
+		{"unknown archive in both", func(dir string) {
+			os.WriteFile(filepath.Join(dir, "tachograph_freebsd_amd64.tar.gz"), []byte("x"), 0o644)
+			p := filepath.Join(dir, "checksums.txt")
+			b, _ := os.ReadFile(p)
+			os.WriteFile(p, append(b, []byte(fmt.Sprintf("%x  tachograph_freebsd_amd64.tar.gz\n", sha256.Sum256([]byte("x"))))...), 0o644)
+		}, "tachograph_freebsd_amd64.tar.gz: not an archive this check knows", 1},
 		// A wrong line ahead of the right one: a map keeps the last line and
 		// would pass, while the npm installer takes the first (#442).
 		{"archive listed twice", func(dir string) {
@@ -258,6 +287,49 @@ func TestReadChecksumsSharedCases(t *testing.T) {
 				t.Errorf("%s: %s = %q (listed %v), want %q", c.Name, c.Asset, got, ok, *c.Want)
 			}
 		}
+	}
+}
+
+// The npm wrapper's archives (npm/asset.js's allAssets, one "<asset>
+// <binary>" line each) must be the platforms' archives with the binary
+// each holds: one the wrapper downloads but no release check covers, or one
+// the release ships but the wrapper never downloads, fails (#447).
+func TestCheckNPMAssets(t *testing.T) {
+	var good strings.Builder
+	for _, p := range platforms {
+		fmt.Fprintf(&good, "%s %s\n", assetName(p.goos, p.goarch), binaryName(p.goos))
+	}
+	for _, c := range []struct {
+		name, text string
+		want       []string
+	}{
+		{"the same archives", good.String(), nil},
+		{"one missing", strings.Replace(good.String(), "tachograph_linux_arm64.tar.gz tacho\n", "", 1),
+			[]string{"tachograph_linux_arm64.tar.gz: a release archive the npm wrapper doesn't download"}},
+		{"one more", good.String() + "tachograph_linux_riscv64.tar.gz tacho\n",
+			[]string{"tachograph_linux_riscv64.tar.gz: the npm wrapper downloads it, but no release archive is checked for it"}},
+		{"another binary name", strings.Replace(good.String(), "tachograph_windows_arm64.zip tacho.exe", "tachograph_windows_arm64.zip tacho", 1),
+			[]string{"tachograph_windows_arm64.zip: the npm wrapper looks for tacho in it, the archive holds tacho.exe"}},
+		{"a malformed line", good.String() + "tachograph_linux_amd64.tar.gz\n", []string{"line 7 is not"}},
+		{"a line twice", good.String() + "tachograph_linux_amd64.tar.gz tacho\n", []string{"lists tachograph_linux_amd64.tar.gz more than once"}},
+	} {
+		path := filepath.Join(t.TempDir(), "npm-assets.txt")
+		if err := os.WriteFile(path, []byte(c.text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		errs := checkNPMAssets(path)
+		if len(errs) != len(c.want) {
+			t.Errorf("%s: checkNPMAssets = %v, want %d problem(s)", c.name, errs, len(c.want))
+			continue
+		}
+		for i, w := range c.want {
+			if !strings.Contains(errs[i].Error(), w) {
+				t.Errorf("%s: problem %q, want it to mention %q", c.name, errs[i], w)
+			}
+		}
+	}
+	if errs := checkNPMAssets(filepath.Join(t.TempDir(), "missing")); len(errs) != 1 {
+		t.Errorf("a missing list: %v, want one problem", errs)
 	}
 }
 
