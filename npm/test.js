@@ -64,6 +64,21 @@ test("checksumFor parses GoReleaser checksums.txt", () => {
   assert.strictEqual(checksumFor(text, "tachograph_windows_amd64.zip"), null);
 });
 
+// An asset listed twice is refused whichever line comes first, rather than
+// taking one: the release check rejects the same checksums.txt (#442). Other
+// assets' lines still parse.
+test("checksumFor refuses an asset listed twice", () => {
+  const asset = "tachograph_linux_arm64.tar.gz";
+  for (const text of [
+    "aaaa1111  " + asset + "\n" + "bbbb2222  " + asset + "\n",
+    "bbbb2222  " + asset + "\n" + "aaaa1111  " + asset + "\n",
+    "aaaa1111  " + asset + "\n" + "aaaa1111  " + asset + "\n",
+  ]) {
+    assert.throws(() => checksumFor(text, asset), /checksums\.txt lists tachograph_linux_arm64\.tar\.gz more than once/);
+    assert.strictEqual(checksumFor(text + "cccc3333  tachograph_darwin_arm64.tar.gz\n", "tachograph_darwin_arm64.tar.gz"), "cccc3333");
+  }
+});
+
 // INSTALL_STUB is preloaded (node --require) into the postinstall run: it
 // replaces fetch with the scenario's responses for this platform's asset and
 // checksums.txt, and tar (child_process.execFileSync, which install.js takes
@@ -86,6 +101,7 @@ const sums = {
   listed: sha + "  " + asset + "\\n",
   mismatch: "0".repeat(64) + "  " + asset + "\\n",
   missing: sha + "  tachograph_other_asset.tar.gz\\n",
+  duplicated: sha + "  " + asset + "\\n" + "0".repeat(64) + "  " + asset + "\\n",
 }[s.sums];
 const socketError = (message, code) => Object.assign(new Error(message), { code });
 const causes = {
@@ -222,6 +238,7 @@ test("install places the binary when the checksum matches", () => {
 for (const [name, scenario, want, extracted] of [
   ["a checksum mismatch", { sums: "mismatch", extract: "ok" }, /checksum mismatch for tachograph_/, false],
   ["a missing checksum", { sums: "missing", extract: "ok" }, /no checksum listed for tachograph_/, false],
+  ["a checksum listed twice", { sums: "duplicated", extract: "ok" }, /checksums\.txt lists tachograph_\S+ more than once/, false],
   ["a failed download", { sums: "listed", extract: "ok", downloadStatus: 404 }, /^download failed: 404 Stub Error/m, false],
   ["a failed checksums download", { sums: "listed", extract: "ok", sumsStatus: 500 }, /^checksums download failed: 500 Stub Error/m, false],
   ["a download timeout", { sums: "listed", extract: "ok", timeout: "download" }, /^download timed out after 120s/m, false],

@@ -39,13 +39,21 @@ function checksumsURL(version) {
 }
 
 // checksumFor parses GoReleaser's "<sha256>  <filename>" lines and returns the
-// hex digest for asset, or null when it isn't listed.
+// hex digest for asset, or null when it isn't listed. It throws when asset is
+// listed more than once, rather than picking one of the lines: the release
+// check (scripts/check-release-assets) rejects such a checksums.txt too (#442).
 function checksumFor(text, asset) {
+  let found = null;
   for (const line of text.split("\n")) {
     const [hash, name] = line.trim().split(/\s+/);
-    if (name === asset && hash) return hash;
+    if (name === asset && hash) {
+      if (found !== null) {
+        throw new Error(`checksums.txt lists ${asset} more than once`);
+      }
+      found = hash;
+    }
   }
-  return null;
+  return found;
 }
 
 module.exports = { assetFor, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES };

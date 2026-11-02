@@ -115,7 +115,9 @@ func check(dir, tag string) []error {
 }
 
 // readChecksums parses GoReleaser's checksums.txt ("<sha256>  <file>" lines)
-// into file → digest.
+// into file → digest. A file listed twice is an error: the npm installer
+// takes the first line and a map the last, so a release whose lines
+// disagree would pass here and fail every install (#442).
 func readChecksums(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -124,6 +126,9 @@ func readChecksums(path string) (map[string]string, error) {
 	sums := map[string]string{}
 	for _, line := range strings.Split(string(b), "\n") {
 		if f := strings.Fields(line); len(f) == 2 {
+			if _, dup := sums[f[1]]; dup {
+				return nil, fmt.Errorf("checksums.txt lists %s more than once", f[1])
+			}
 			sums[f[1]] = f[0]
 		}
 	}

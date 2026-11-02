@@ -147,6 +147,13 @@ func TestCheckReportsBadArchives(t *testing.T) {
 			os.WriteFile(filepath.Join(dir, "tachograph_windows_arm64.zip"), []byte("tampered"), 0o644)
 		}, "tachograph_windows_arm64.zip: SHA-256", 1},
 		{"no checksums.txt", func(dir string) { os.Remove(filepath.Join(dir, "checksums.txt")) }, "checksums.txt", 1},
+		// A wrong line ahead of the right one: a map keeps the last line and
+		// would pass, while the npm installer takes the first (#442).
+		{"archive listed twice", func(dir string) {
+			p := filepath.Join(dir, "checksums.txt")
+			b, _ := os.ReadFile(p)
+			os.WriteFile(p, append([]byte(strings.Repeat("0", 64)+"  tachograph_linux_arm64.tar.gz\n"), b...), 0o644)
+		}, "checksums.txt lists tachograph_linux_arm64.tar.gz more than once", 1},
 	}
 	for _, c := range cases {
 		dir := t.TempDir()
