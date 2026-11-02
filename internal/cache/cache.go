@@ -523,10 +523,13 @@ func (c *SessionTreeCache) Put(path string, size int64, mtime time.Time, data []
 }
 
 // Save writes the cache when Put changed it — or, when it was only read,
-// refreshes the file's mtime at most daily so an active tree's cache isn't
-// taken for unused — and removes other session-tree cache files unused for
-// sessionTreeMaxAge. Entries for paths not asked about this run (deleted
-// transcripts, or ones now written today and read live) are dropped.
+// rewrites it at most daily so an active tree's cache isn't taken for unused —
+// and removes other session-tree cache files unused for sessionTreeMaxAge.
+// Entries for paths not asked about this run (deleted transcripts, or ones
+// now written today and read live) are dropped. The daily refresh goes
+// through WriteJSON's replace, not a touch of the file's times, which would
+// follow a link planted in its place (#448; the cache never writes through
+// a link, #413).
 func (c *SessionTreeCache) Save(now time.Time) error {
 	dir, err := Dir()
 	if err != nil {
@@ -539,13 +542,13 @@ func (c *SessionTreeCache) Save(now time.Time) error {
 		}
 	}
 	if !c.dirty {
-		if c.used {
-			p := filepath.Join(dir, c.name)
-			if info, err := os.Stat(p); err == nil && now.Sub(info.ModTime()) > 24*time.Hour {
-				_ = os.Chtimes(p, now, now)
-			}
+		if !c.used {
+			return nil
 		}
-		return nil
+		info, err := os.Lstat(filepath.Join(dir, c.name))
+		if err != nil || now.Sub(info.ModTime()) <= 24*time.Hour {
+			return nil
+		}
 	}
 	if err := WriteJSON(c.name, sessionTreeFile{SchemaVersion: schema.Version, Entries: c.entries}); err != nil {
 		return err

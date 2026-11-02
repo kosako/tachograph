@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -87,6 +89,62 @@ func TestSessionTreeCacheTouchedWhenUsed(t *testing.T) {
 	}
 	if info, err := os.Stat(p); err != nil || now.Sub(info.ModTime()) > time.Hour {
 		t.Errorf("a used cache file must be touched; mtime %v", info.ModTime())
+	}
+}
+
+// The daily refresh of a cache that was only read doesn't follow a link
+// planted in the cache file's place: the file it leads to keeps its times and
+// content, and the link is replaced by the cache file (#448).
+func TestSessionTreeCacheRefreshDoesNotFollowLink(t *testing.T) {
+	dir := setCacheDir(t)
+	now := time.Now()
+	c := OpenSessionTree("/p/session-a")
+	c.Put("/p/session-a/sub.jsonl", 1, now, []byte{1})
+	if err := c.Save(now); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, c.name)
+	saved, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = OpenSessionTree("/p/session-a")
+	if _, ok := c.Get("/p/session-a/sub.jsonl", 1, now); !ok {
+		t.Fatal("expected a hit")
+	}
+
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-40 * 24 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(victim, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, p); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("can't create a symlink on windows: %v", err)
+		}
+		t.Fatal(err)
+	}
+	// Two days on, the link (made now) is past the daily refresh.
+	if err := c.Save(now.Add(48 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(victim); err != nil || !info.ModTime().Equal(old) {
+		t.Errorf("the link's target mtime = %v, %v; want it left at %v", info.ModTime(), err, old)
+	}
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "keep" {
+		t.Errorf("the link's target = %q, %v; want it untouched", b, err)
+	}
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("cache file = %v, %v; want a regular file in the link's place", info, err)
+	}
+	if b, err := os.ReadFile(p); err != nil || !bytes.Equal(b, saved) {
+		t.Errorf("cache file = %q, %v; want the saved cache %q", b, err, saved)
 	}
 }
 

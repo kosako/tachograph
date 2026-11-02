@@ -3,6 +3,9 @@
 package cache
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -81,5 +84,42 @@ func TestLockFileGivesUpAfterWait(t *testing.T) {
 	}
 	if waited := time.Since(start); waited < 50*time.Millisecond {
 		t.Errorf("gave up after %v, want the 50ms wait", waited)
+	}
+}
+
+// A link planted where a lock file goes is neither followed nor taken: the
+// lock fails, a missing file the link leads to isn't created, and an
+// existing one is left as it was (#448). Each lock goes through lockPath.
+func TestLockFileDoesNotFollowLink(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		dir := t.TempDir()
+		t.Setenv("TACHO_CACHE_DIR", dir)
+		victim := filepath.Join(t.TempDir(), "victim")
+		old := time.Now().Add(-40 * 24 * time.Hour).Truncate(time.Second)
+		if existing {
+			if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(victim, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink(victim, filepath.Join(dir, "snapshot-claude.lock")); err != nil {
+			if runtime.GOOS == "windows" {
+				t.Skipf("can't create a symlink on windows: %v", err)
+			}
+			t.Fatal(err)
+		}
+		if unlock, err := LockSnapshot("claude"); err == nil {
+			unlock()
+			t.Errorf("existing target %v: lock taken through a planted link", existing)
+		}
+		info, err := os.Stat(victim)
+		switch {
+		case !existing && !os.IsNotExist(err):
+			t.Errorf("the link's missing target was created (stat: %v, %v)", info, err)
+		case existing && (err != nil || !info.ModTime().Equal(old) || info.Size() != 4):
+			t.Errorf("the link's target = %v, %v; want it left as it was", info, err)
+		}
 	}
 }
