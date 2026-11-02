@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"debug/buildinfo"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -210,6 +211,52 @@ func TestCheckReportsBadArchives(t *testing.T) {
 		errs := check(dir, "v1.2.3")
 		if len(errs) != 1 || !strings.Contains(errs[0].Error(), c.want) {
 			t.Errorf("%s: check = %v, want one problem mentioning %q", c.name, errs, c.want)
+		}
+	}
+}
+
+// readChecksums reads the cases npm/test.js gives checksumFor (npm/asset.js)
+// the same way: whatever checksums.txt passes here, the installer reads the
+// same digest from, and a line one parser would skip or pick fails both
+// (#442).
+func TestReadChecksumsSharedCases(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "checksums-cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Cases []struct {
+			Name, Text, Asset string
+			Want              *string
+			Error             bool
+		}
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range f.Cases {
+		path := filepath.Join(t.TempDir(), "checksums.txt")
+		if err := os.WriteFile(path, []byte(c.Text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sums, err := readChecksums(path)
+		switch {
+		case c.Error:
+			if err == nil || !strings.HasPrefix(err.Error(), "checksums.txt ") {
+				t.Errorf("%s: readChecksums = %v, %v; want a checksums.txt error", c.Name, sums, err)
+			}
+		case err != nil:
+			t.Errorf("%s: readChecksums: %v", c.Name, err)
+		default:
+			got, ok := sums[c.Asset]
+			if c.Want == nil && ok {
+				t.Errorf("%s: %s = %q, want it not listed", c.Name, c.Asset, got)
+			} else if c.Want != nil && got != *c.Want {
+				t.Errorf("%s: %s = %q (listed %v), want %q", c.Name, c.Asset, got, ok, *c.Want)
+			}
 		}
 	}
 }

@@ -38,22 +38,32 @@ function checksumsURL(version) {
   return `https://github.com/kosako/tachograph/releases/download/${tagFor(version)}/checksums.txt`;
 }
 
-// checksumFor parses GoReleaser's "<sha256>  <filename>" lines and returns the
-// hex digest for asset, or null when it isn't listed. It throws when asset is
-// listed more than once, rather than picking one of the lines: the release
-// check (scripts/check-release-assets) rejects such a checksums.txt too (#442).
+// CHECKSUM_LINE is the one line shape checksums.txt may hold: GoReleaser's
+// lowercase SHA-256, two spaces, and a file name of printable ASCII. The
+// release check (readChecksums in scripts/check-release-assets) parses the
+// same pattern before publishing, so a file it passed reads the same here
+// (#442).
+const CHECKSUM_LINE = /^([0-9a-f]{64}) {2}([!-~]+)$/;
+
+// checksumFor parses GoReleaser's checksums.txt and returns the hex digest for
+// asset, or null when it isn't listed. Empty lines are skipped; it throws on
+// any other line out of shape, and on a file listed more than once, rather
+// than picking one of the lines. The release check refuses the same files.
 function checksumFor(text, asset) {
-  let found = null;
-  for (const line of text.split("\n")) {
-    const [hash, name] = line.trim().split(/\s+/);
-    if (name === asset && hash) {
-      if (found !== null) {
-        throw new Error(`checksums.txt lists ${asset} more than once`);
-      }
-      found = hash;
+  const sums = new Map();
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === "") continue;
+    const m = CHECKSUM_LINE.exec(lines[i]);
+    if (!m) {
+      throw new Error(`checksums.txt line ${i + 1} is not "<sha256>  <file>": ${JSON.stringify(lines[i])}`);
     }
+    if (sums.has(m[2])) {
+      throw new Error(`checksums.txt lists ${m[2]} more than once`);
+    }
+    sums.set(m[2], m[1]);
   }
-  return found;
+  return sums.has(asset) ? sums.get(asset) : null;
 }
 
 module.exports = { assetFor, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES };

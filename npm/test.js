@@ -57,25 +57,27 @@ test("checksumsURL points at the release checksums.txt", () => {
 });
 
 test("checksumFor parses GoReleaser checksums.txt", () => {
-  const text =
-    "aaaa1111  tachograph_darwin_arm64.tar.gz\n" +
-    "bbbb2222  tachograph_linux_amd64.tar.gz\n";
-  assert.strictEqual(checksumFor(text, "tachograph_linux_amd64.tar.gz"), "bbbb2222");
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const text = `${a}  tachograph_darwin_arm64.tar.gz\n${b}  tachograph_linux_amd64.tar.gz\n`;
+  assert.strictEqual(checksumFor(text, "tachograph_linux_amd64.tar.gz"), b);
   assert.strictEqual(checksumFor(text, "tachograph_windows_amd64.zip"), null);
 });
 
-// An asset listed twice is refused whichever line comes first, rather than
-// taking one: the release check rejects the same checksums.txt (#442). Other
-// assets' lines still parse.
-test("checksumFor refuses an asset listed twice", () => {
-  const asset = "tachograph_linux_arm64.tar.gz";
-  for (const text of [
-    "aaaa1111  " + asset + "\n" + "bbbb2222  " + asset + "\n",
-    "bbbb2222  " + asset + "\n" + "aaaa1111  " + asset + "\n",
-    "aaaa1111  " + asset + "\n" + "aaaa1111  " + asset + "\n",
-  ]) {
-    assert.throws(() => checksumFor(text, asset), /checksums\.txt lists tachograph_linux_arm64\.tar\.gz more than once/);
-    assert.strictEqual(checksumFor(text + "cccc3333  tachograph_darwin_arm64.tar.gz\n", "tachograph_darwin_arm64.tar.gz"), "cccc3333");
+// The release check (readChecksums in scripts/check-release-assets) reads the
+// same cases from the same file: whatever checksums.txt it passes, the
+// installer reads the same digest from, and a line one would skip or pick is
+// refused by both (#442).
+test("checksumFor reads the shared checksums.txt cases as the release check does", () => {
+  const file = path.join(__dirname, "..", "scripts", "check-release-assets", "testdata", "checksums-cases.json");
+  const { cases } = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.ok(cases.length > 0);
+  for (const c of cases) {
+    if (c.error) {
+      assert.throws(() => checksumFor(c.text, c.asset), /^Error: checksums\.txt /, c.name);
+    } else {
+      assert.strictEqual(checksumFor(c.text, c.asset), c.want, c.name);
+    }
   }
 });
 

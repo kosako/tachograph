@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -114,23 +115,35 @@ func check(dir, tag string) []error {
 	return errs
 }
 
-// readChecksums parses GoReleaser's checksums.txt ("<sha256>  <file>" lines)
-// into file → digest. A file listed twice is an error: the npm installer
-// takes the first line and a map the last, so a release whose lines
-// disagree would pass here and fail every install (#442).
+// checksumLine is the one line shape checksums.txt may hold: GoReleaser's
+// lowercase SHA-256, two spaces, and a file name of printable ASCII. The npm
+// installer (checksumFor in npm/asset.js) parses the same pattern, so a file
+// that passes here reads the same there (#442).
+var checksumLine = regexp.MustCompile(`^([0-9a-f]{64})  ([!-~]+)$`)
+
+// readChecksums parses GoReleaser's checksums.txt into file → digest. Empty
+// lines are skipped; any other line out of shape, or a file listed twice, is
+// an error rather than a line one parser skips or picks and the other
+// doesn't: the npm installer takes the first line and a map the last, so a
+// release whose lines disagree would pass here and fail every install.
 func readChecksums(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	sums := map[string]string{}
-	for _, line := range strings.Split(string(b), "\n") {
-		if f := strings.Fields(line); len(f) == 2 {
-			if _, dup := sums[f[1]]; dup {
-				return nil, fmt.Errorf("checksums.txt lists %s more than once", f[1])
-			}
-			sums[f[1]] = f[0]
+	for i, line := range strings.Split(string(b), "\n") {
+		if line == "" {
+			continue
 		}
+		m := checksumLine.FindStringSubmatch(line)
+		if m == nil {
+			return nil, fmt.Errorf("checksums.txt line %d is not \"<sha256>  <file>\": %q", i+1, line)
+		}
+		if _, dup := sums[m[2]]; dup {
+			return nil, fmt.Errorf("checksums.txt lists %s more than once", m[2])
+		}
+		sums[m[2]] = m[1]
 	}
 	return sums, nil
 }
