@@ -329,9 +329,24 @@ test("launcher exits 1 naming the error when the binary can't be run", { skip: n
   assert.match(r.stderr, /^tachograph: .*EACCES/m);
 });
 
-// A binary killed by a signal never reads as success. What the launcher then
-// exits with is #442's to decide.
-test("launcher doesn't exit 0 when the binary is killed by a signal", { skip: noShell }, () => {
-  const r = runLauncher("kill -TERM $$");
-  assert.notStrictEqual(r.status, 0);
-});
+// A binary killed by a signal ends the launcher with the same signal, as
+// running the binary directly would, instead of exit 1 (#442).
+for (const signal of ["SIGTERM", "SIGHUP", "SIGKILL"]) {
+  test(`launcher ends with ${signal} when the binary is killed by it`, { skip: noShell }, () => {
+    const r = runLauncher(`kill -${signal.slice(3)} $$`);
+    assert.strictEqual(r.signal, signal, `status ${r.status}, stderr ${r.stderr}`);
+    assert.strictEqual(r.status, null);
+  });
+}
+
+// Signals Node doesn't end on (it ignores SIGPIPE and SIGXFSZ) or puts to its
+// own use (SIGUSR1 starts the inspector) give the shell's 128 + signal number
+// instead, with no inspector started (#442).
+for (const signal of ["SIGPIPE", "SIGXFSZ", "SIGUSR1"]) {
+  test(`launcher exits 128 + the number of ${signal} when the binary is killed by it`, { skip: noShell }, () => {
+    const r = runLauncher(`kill -${signal.slice(3)} $$`);
+    assert.strictEqual(r.status, 128 + os.constants.signals[signal], `signal ${r.signal}, stderr ${r.stderr}`);
+    assert.strictEqual(r.signal, null);
+    assert.doesNotMatch(r.stderr, /Debugger listening/);
+  });
+}
