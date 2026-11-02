@@ -57,11 +57,28 @@ test("checksumsURL points at the release checksums.txt", () => {
 });
 
 test("checksumFor parses GoReleaser checksums.txt", () => {
-  const text =
-    "aaaa1111  tachograph_darwin_arm64.tar.gz\n" +
-    "bbbb2222  tachograph_linux_amd64.tar.gz\n";
-  assert.strictEqual(checksumFor(text, "tachograph_linux_amd64.tar.gz"), "bbbb2222");
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const text = `${a}  tachograph_darwin_arm64.tar.gz\n${b}  tachograph_linux_amd64.tar.gz\n`;
+  assert.strictEqual(checksumFor(text, "tachograph_linux_amd64.tar.gz"), b);
   assert.strictEqual(checksumFor(text, "tachograph_windows_amd64.zip"), null);
+});
+
+// The release check (readChecksums in scripts/check-release-assets) reads the
+// same cases from the same file: whatever checksums.txt it passes, the
+// installer reads the same digest from, and a line one would skip or pick is
+// refused by both (#442).
+test("checksumFor reads the shared checksums.txt cases as the release check does", () => {
+  const file = path.join(__dirname, "..", "scripts", "check-release-assets", "testdata", "checksums-cases.json");
+  const { cases } = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.ok(cases.length > 0);
+  for (const c of cases) {
+    if (c.error) {
+      assert.throws(() => checksumFor(c.text, c.asset), /^Error: checksums\.txt /, c.name);
+    } else {
+      assert.strictEqual(checksumFor(c.text, c.asset), c.want, c.name);
+    }
+  }
 });
 
 // INSTALL_STUB is preloaded (node --require) into the postinstall run: it
@@ -86,6 +103,7 @@ const sums = {
   listed: sha + "  " + asset + "\\n",
   mismatch: "0".repeat(64) + "  " + asset + "\\n",
   missing: sha + "  tachograph_other_asset.tar.gz\\n",
+  duplicated: sha + "  " + asset + "\\n" + "0".repeat(64) + "  " + asset + "\\n",
 }[s.sums];
 const socketError = (message, code) => Object.assign(new Error(message), { code });
 const causes = {
@@ -222,6 +240,7 @@ test("install places the binary when the checksum matches", () => {
 for (const [name, scenario, want, extracted] of [
   ["a checksum mismatch", { sums: "mismatch", extract: "ok" }, /checksum mismatch for tachograph_/, false],
   ["a missing checksum", { sums: "missing", extract: "ok" }, /no checksum listed for tachograph_/, false],
+  ["a checksum listed twice", { sums: "duplicated", extract: "ok" }, /checksums\.txt lists tachograph_\S+ more than once/, false],
   ["a failed download", { sums: "listed", extract: "ok", downloadStatus: 404 }, /^download failed: 404 Stub Error/m, false],
   ["a failed checksums download", { sums: "listed", extract: "ok", sumsStatus: 500 }, /^checksums download failed: 500 Stub Error/m, false],
   ["a download timeout", { sums: "listed", extract: "ok", timeout: "download" }, /^download timed out after 120s/m, false],

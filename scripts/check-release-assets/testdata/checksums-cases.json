@@ -1,0 +1,137 @@
+{
+  "_comment": "checksums.txt inputs that readChecksums (scripts/check-release-assets) and checksumFor (npm/asset.js) must read the same way: the digest for asset, null when it isn't listed, or an error (#442).",
+  "cases": [
+    {
+      "name": "listed",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  tachograph_darwin_arm64.tar.gz\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "want": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "not listed",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  tachograph_darwin_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "want": null
+    },
+    {
+      "name": "no final newline",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "want": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "empty lines skipped",
+      "text": "\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  tachograph_darwin_arm64.tar.gz\n\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "want": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "listed twice, wrong digest first",
+      "text": "0000000000000000000000000000000000000000000000000000000000000000  tachograph_linux_arm64.tar.gz\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "listed twice, right digest first",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n0000000000000000000000000000000000000000000000000000000000000000  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "listed twice with the same digest",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "another file listed twice",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  tachograph_darwin_arm64.tar.gz\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  tachograph_darwin_arm64.tar.gz\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "a copy with an extra field",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz extra\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "an extra field",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz extra\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "one space",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "a tab",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ttachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "uppercase digest",
+      "text": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "short digest",
+      "text": "aaaa1111  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "CRLF line ends",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\r\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "leading space",
+      "text": " bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "trailing space",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz \n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "whitespace-only line",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n  \n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "no-break space separator",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u00a0\u00a0tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "next-line separator",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u0085\u0085tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "byte order mark",
+      "text": "\ufeffbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    },
+    {
+      "name": "non-ASCII file name",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  tachograph_linux_arm64\u00e9.tar.gz\n",
+      "asset": "tachograph_linux_arm64.tar.gz",
+      "error": true
+    }
+  ]
+}
