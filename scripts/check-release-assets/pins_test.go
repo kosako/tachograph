@@ -1,30 +1,30 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 )
 
 // goreleaserVersions returns the `version:` input of every
-// goreleaser/goreleaser-action step in a workflow, as "file:line: value" for
-// the message, and the values. A step without one gets "" (the action's
-// default, a floating version).
-func goreleaserVersions(t *testing.T, path string) (where []string, versions []string) {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(string(b), "\n")
-	uses := regexp.MustCompile(`^(\s*)(- )?uses:\s*goreleaser/goreleaser-action@`)
+// goreleaser/goreleaser-action step in the workflow text, by line: where
+// ("name:line: value", for messages) and the values. A step without one
+// gets "" (the action's default, a floating version). unread lists the
+// mentions of the action outside a comment that it can't read as a step's
+// uses: — a step written some other way would otherwise go unchecked.
+func goreleaserVersions(name, text string) (where, versions, unread []string) {
+	lines := strings.Split(text, "\n")
+	uses := regexp.MustCompile(`^(\s*)(- )?uses:\s*["']?goreleaser/goreleaser-action@`)
 	version := regexp.MustCompile(`^\s*version:\s*(\S+)\s*$`)
 	for i, line := range lines {
 		m := uses.FindStringSubmatch(line)
 		if m == nil {
+			if code, _, _ := strings.Cut(line, "#"); strings.Contains(code, "goreleaser/goreleaser-action") {
+				unread = append(unread, fmt.Sprintf("%s:%d", name, i+1))
+			}
 			continue
 		}
 		// The step's keys sit two deeper than its "- "; the step ends at the
@@ -48,26 +48,41 @@ func goreleaserVersions(t *testing.T, path string) (where []string, versions []s
 				break
 			}
 		}
-		where = append(where, filepath.Base(path)+":"+strconv.Itoa(i+1)+": "+found)
+		where = append(where, fmt.Sprintf("%s:%d: %s", name, i+1, found))
 		versions = append(versions, found)
 	}
-	return where, versions
+	return where, versions, unread
 }
 
-// Every GoReleaser step in the workflows runs the same pinned version, and
-// AGENTS.md names it: the PR checks and the release then build with the
-// same GoReleaser, and raising it means changing every pin (#447; pinned in
-// #351). Dependabot raises the action's ref, not this input.
+// Every GoReleaser step in the workflows (.yml and .yaml) runs the same
+// pinned version, and AGENTS.md names it: the PR checks and the release
+// then build with the same GoReleaser, and raising it means changing every
+// pin (#447; pinned in #351). Dependabot raises the action's ref, not this
+// input.
 func TestGoReleaserPinsAgree(t *testing.T) {
 	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("workflows: %v, %v", files, err)
+	var files []string
+	for _, ext := range []string{"*.yml", "*.yaml"} {
+		m, err := filepath.Glob(filepath.Join(root, ".github", "workflows", ext))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, m...)
+	}
+	if len(files) == 0 {
+		t.Fatal("no workflows found")
 	}
 	var where, versions []string
 	perFile := map[string]int{}
 	for _, f := range files {
-		w, v := goreleaserVersions(t, f)
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, v, unread := goreleaserVersions(filepath.Base(f), string(b))
+		for _, u := range unread {
+			t.Errorf("%s: can't read this goreleaser-action reference as a step's uses:", u)
+		}
 		where, versions = append(where, w...), append(versions, v...)
 		perFile[filepath.Base(f)] += len(v)
 	}
@@ -95,15 +110,15 @@ func TestGoReleaserPinsAgree(t *testing.T) {
 }
 
 // goreleaserVersions finds each step's input, and "" for a step without
-// one, whichever way the step is written.
+// one, whichever way the step is written; a mention of the action it can't
+// read as a step's uses: is reported, one in a comment isn't.
 func TestGoReleaserVersionsParsesSteps(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "w.yml")
 	body := `jobs:
   a:
     steps:
       - uses: goreleaser/goreleaser-action@abc # v7
         with:
-          # a comment
+          # a comment naming goreleaser/goreleaser-action
           version: v2.1.0
           args: check
       - name: no version
@@ -122,18 +137,25 @@ func TestGoReleaserVersionsParsesSteps(t *testing.T) {
           args: check
           version: v2.3.0
   b:
+    strategy:
+      matrix:
+        action: [goreleaser/goreleaser-action@abc]
     steps:
       - uses: goreleaser/goreleaser-action@abc
+      - name: quoted
+        uses: "goreleaser/goreleaser-action@abc"
+        with:
+          version: v2.4.0
   c:
     with:
       version: v9.9.8
 `
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, got := goreleaserVersions(t, path)
-	want := []string{"v2.1.0", "", "v2.2.0", "v2.3.0", ""}
+	_, got, unread := goreleaserVersions("w.yml", body)
+	want := []string{"v2.1.0", "", "v2.2.0", "v2.3.0", "", "v2.4.0"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("versions = %q, want %q", got, want)
+	}
+	if strings.Join(unread, ",") != "w.yml:27" {
+		t.Errorf("unread = %q, want [w.yml:27]", unread)
 	}
 }
