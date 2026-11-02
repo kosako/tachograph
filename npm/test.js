@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
-const { assetFor, downloadURL, checksumsURL, checksumFor } = require("./asset");
+const { assetFor, allAssets, downloadURL, checksumsURL, checksumFor, PLATFORMS, ARCHES } = require("./asset");
 
 test("assetFor maps known platforms", () => {
   // Full platform × arch matrix: macOS, Linux, and Windows on amd64 + arm64.
@@ -54,6 +54,25 @@ test("checksumsURL points at the release checksums.txt", () => {
     "https://github.com/kosako/tachograph/releases/download/v0.1.1/checksums.txt";
   assert.strictEqual(checksumsURL("0.1.1"), want);
   assert.strictEqual(checksumsURL("v0.1.1"), want);
+});
+
+// allAssets lists every archive the wrapper downloads, one per platform ×
+// arch; CI compares it with the release check's platforms (#447).
+test("allAssets lists every supported platform's archive", () => {
+  const all = allAssets();
+  assert.strictEqual(all.length, Object.keys(PLATFORMS).length * Object.keys(ARCHES).length);
+  assert.deepStrictEqual(all[0], assetFor("darwin", "x64"));
+  assert.deepStrictEqual(
+    all.map((a) => a.asset).sort(),
+    [
+      "tachograph_darwin_amd64.tar.gz",
+      "tachograph_darwin_arm64.tar.gz",
+      "tachograph_linux_amd64.tar.gz",
+      "tachograph_linux_arm64.tar.gz",
+      "tachograph_windows_amd64.zip",
+      "tachograph_windows_arm64.zip",
+    ],
+  );
 });
 
 test("checksumFor parses GoReleaser checksums.txt", () => {

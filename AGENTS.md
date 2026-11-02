@@ -110,9 +110,13 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run
   Windows (`npm-install-smoke.yml`) and a static check of all six archives
   (`scripts/check-release-assets`). GoReleaser is pinned (`v2.18.3`) in both
   workflows, and so is the npm CLI that publishes (`11.21.0`, the
-  `npm-publish` job); raise them on purpose. CI builds a GoReleaser snapshot
-  on every PR and runs the same archive check (`-skip-version`), and runs
-  `go test ./...` on Windows too.
+  `npm-publish` job); raise them on purpose. A test in
+  `scripts/check-release-assets` fails unless every GoReleaser step's pin and
+  this line agree. CI builds a GoReleaser snapshot on every PR and runs the
+  same archive check (`-skip-version`), which also compares the check's
+  platforms with `npm/asset.js`'s archives (`-npm-assets`), and runs
+  `go test ./...` on Windows too. A release target is added in
+  `.goreleaser.yaml`, `npm/asset.js`, and the check's `platforms` together.
 - When a release run fails: never move or reuse a published tag (the Go
   module proxy caches it); re-run the failed jobs for a transient network
   error; for a broken asset, delete the GitHub Release, keep the tag, fix,
