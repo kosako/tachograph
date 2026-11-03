@@ -1,7 +1,7 @@
 // Package daily aggregates usage per local calendar day across all of a
 // tool's sessions. It walks the same on-disk logs the collectors read,
-// delegating log-format parsing to the collector packages and keeping only
-// the date filtering and aggregation here. The per-day figures store
+// delegating where the logs live and their format to the collector packages
+// and keeping only the date filtering and aggregation here. The per-day figures store
 // nothing: every call recomputes them from the logs, so a day only ever
 // reflects what is still on disk (#242). The one exception is
 // ClaudeSessionTree, whose caller may hand it a TreeFileCache (#262) holding
@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
@@ -202,7 +201,7 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 		return hasUsage, nil
 	}
 	mainUsage, mainErr := live(transcriptPath)
-	sessionDir := strings.TrimSuffix(transcriptPath, ".jsonl")
+	sessionDir := claude.SessionDir(transcriptPath)
 	treeErr := false // a nested file or directory couldn't be read
 	_ = filepath.WalkDir(sessionDir, func(path string, f os.DirEntry, err error) error {
 		if err != nil {
@@ -212,7 +211,7 @@ func ClaudeSessionTree(transcriptPath string, now time.Time, prices pricing.Tabl
 			}
 			return nil
 		}
-		if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+		if !claude.IsTranscript(f) {
 			return nil
 		}
 		info, err := f.Info()
@@ -409,38 +408,21 @@ func ClaudeDays(root string, from, to time.Time, prices pricing.Table) (map[stri
 	// depend on which other days the window holds (#435).
 	seen := map[string]claude.UsageSet{}
 
-	projects := filepath.Join(root, "projects")
-	dirs, err := os.ReadDir(projects)
-	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil // no sessions yet: a real zero, not unknown
-	}
-	if err != nil {
-		return nil, err // unknown totals; callers keep daily null, not 0
-	}
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		projectDir := filepath.Join(projects, d.Name())
-		err := filepath.WalkDir(projectDir, func(path string, f os.DirEntry, err error) error {
-			if err != nil {
-				return err // a listed entry we can't descend into: totals are unknown
-			}
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
-				return nil
-			}
-			info, err := f.Info()
-			if err != nil {
-				return err // can't check the mtime filter: totals are unknown
-			}
-			if info.ModTime().Before(from) {
-				return nil // a file last written before the window can't hold its messages
-			}
-			return claudeFileDays(path, from, to, prices, seen, out)
-		})
+	// No projects directory yet is a real zero, not unknown. A listed entry
+	// that can't be descended into or stat'ed leaves the totals unknown, so
+	// it is an error and callers keep daily null, not 0.
+	err := claude.WalkTranscripts(claude.ProjectsDir(root), func(path string, f fs.DirEntry) error {
+		info, err := f.Info()
 		if err != nil {
-			return nil, err // unknown totals; callers keep daily null, not 0
+			return err // can't check the mtime filter: totals are unknown
 		}
+		if info.ModTime().Before(from) {
+			return nil // a file last written before the window can't hold its messages
+		}
+		return claudeFileDays(path, from, to, prices, seen, out)
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -520,7 +502,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	if !ok {
 		return nil, errors.New("codex root could not be resolved")
 	}
-	sessions := filepath.Join(root, "sessions")
+	sessions := codex.SessionsDir(root)
 
 	// Each day directory in the window must be listable when it exists: it
 	// holds that day's sessions by default, so "can't list" means the totals
@@ -530,7 +512,7 @@ func CodexDays(root string, from, to time.Time, prices pricing.Table) (map[strin
 	dayDirs := map[string]time.Time{}
 	window := map[string]bool{} // day keys inside [from, to)
 	for d := from; d.Before(to); d = DayStartFrom(d, 1) {
-		dir := filepath.Join(sessions, d.Format("2006"), d.Format("01"), d.Format("02"))
+		dir := codex.DayDir(sessions, d)
 		if _, err := os.ReadDir(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}

@@ -4,7 +4,6 @@ package core
 import (
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kosako/tachograph/internal/agentpath"
@@ -129,7 +128,7 @@ func AddSessionTree(t *schema.Tool, now time.Time, prices pricing.Table) {
 		return
 	}
 	path := *t.Session.TranscriptPath
-	fc := cache.OpenSessionTree(strings.TrimSuffix(path, ".jsonl"))
+	fc := cache.OpenSessionTree(claude.SessionDir(path))
 	cum, today, ok := daily.ClaudeSessionTree(path, now, prices, fc)
 	_ = fc.Save(now)
 	if ok {

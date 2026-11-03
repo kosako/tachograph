@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -36,7 +35,7 @@ func Collect(opts Options) schema.Tool {
 		now = time.Now()
 	}
 
-	res := pickSession(filepath.Join(root, "sessions"))
+	res := pickSession(SessionsDir(root))
 	if res.tc == nil {
 		if res.readErr != nil {
 			return errTool("read_error", res.readErr.Error())

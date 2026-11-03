@@ -14,6 +14,8 @@ import (
 
 	"github.com/kosako/tachograph/internal/agentpath"
 	"github.com/kosako/tachograph/internal/cache"
+	"github.com/kosako/tachograph/internal/collector/claude"
+	"github.com/kosako/tachograph/internal/collector/codex"
 	"github.com/kosako/tachograph/internal/config"
 	"github.com/kosako/tachograph/internal/core"
 	"github.com/kosako/tachograph/internal/pricing"
@@ -125,13 +127,13 @@ func reportClaudeStatusLine(path, exe string) {
 func reportDataSources(now time.Time) {
 	fmt.Println("data sources:")
 	if root, ok := agentpath.ClaudeRoot(""); ok {
-		reportJSONLTree("Claude projects", filepath.Join(root, "projects"), now,
+		reportJSONLTree("Claude projects", claude.ProjectsDir(root), now,
 			"run Claude Code once, or set CLAUDE_CONFIG_DIR")
 	} else {
 		fmt.Println("  Claude projects: unavailable — cannot locate the home directory")
 	}
 	if root, ok := agentpath.CodexRoot(""); ok {
-		reportJSONLTree("Codex sessions", filepath.Join(root, "sessions"), now,
+		reportJSONLTree("Codex sessions", codex.SessionsDir(root), now,
 			"run Codex once, or set CODEX_HOME")
 	} else {
 		fmt.Println("  Codex sessions:  unavailable — cannot locate the home directory")

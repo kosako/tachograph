@@ -18,6 +18,20 @@ import (
 	"time"
 )
 
+// SessionsDir is the directory holding the rollouts under the Codex home:
+// sessions/YYYY/MM/DD/<rollout>.jsonl, each rollout in the directory of the
+// day its session started, however long the session runs (#133, #188).
+func SessionsDir(root string) string {
+	return filepath.Join(root, "sessions")
+}
+
+// DayDir is the directory under sessions (SessionsDir) holding the rollouts
+// of the sessions started on d's date: the same path ListRollouts reports as
+// a RolloutFile's Day.
+func DayDir(sessions string, d time.Time) string {
+	return filepath.Join(sessions, d.Format("2006"), d.Format("01"), d.Format("02"))
+}
+
 // RolloutFile is one rollout found by ListRollouts: its path, the
 // YYYY/MM/DD directory holding it, and its mtime (zero when it couldn't be
 // read).
