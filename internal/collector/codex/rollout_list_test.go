@@ -154,3 +154,26 @@ func TestListRolloutsPrefersUnreadableOverVanished(t *testing.T) {
 		t.Errorf("Available=%v Error=%+v, want unavailable when the only failure is a vanished day", got.Available, got.Error)
 	}
 }
+
+// DayDir names the same directory ListRollouts reports as a rollout's Day:
+// daily matches the two to place a rollout without timestamps on its day
+// (#446).
+func TestDayDirMatchesListedDay(t *testing.T) {
+	sessions := SessionsDir(t.TempDir())
+	day := time.Date(2026, time.March, 7, 15, 4, 5, 0, time.Local)
+	dir := DayDir(sessions, day)
+	if want := filepath.Join(sessions, "2026", "03", "07"); dir != want {
+		t.Fatalf("DayDir = %q, want %q", dir, want)
+	}
+	mkdirs(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "rollout-a.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := ListRollouts(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Day != dir {
+		t.Errorf("ListRollouts = %+v, want one rollout whose Day is %q", files, dir)
+	}
+}

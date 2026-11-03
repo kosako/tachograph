@@ -267,7 +267,7 @@ func toLimit(window string, mins int, w *slWindow, observed string) schema.Limit
 // ---- transcript route (no statusline stdin available) ----
 
 func fromTranscripts(opts Options) schema.Tool {
-	paths, listErr := transcriptsByRecency(filepath.Join(opts.Root, "projects"))
+	paths, listErr := transcriptsByRecency(ProjectsDir(opts.Root))
 	if len(paths) == 0 {
 		if listErr != nil {
 			// Nothing listed because the listing failed, not because Claude
@@ -401,7 +401,7 @@ func transcriptsByRecency(projects string) ([]string, error) {
 			continue
 		}
 		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+			if !IsTranscript(f) {
 				continue
 			}
 			info, err := f.Info()
