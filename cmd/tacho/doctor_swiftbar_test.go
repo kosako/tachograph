@@ -30,6 +30,10 @@ func TestSwiftBarPluginWarning(t *testing.T) {
 		return path
 	}
 	stale := write(filepath.Join(t.TempDir(), "old node", "tacho"), 0o755) // setup quotes the space
+	// setup also escapes $ ` " and \ inside the quotes (#482, round 3).
+	const odd = "a $HOME `b` \"c\" \\d \\$ 'e'"
+	oddStale := write(filepath.Join(t.TempDir(), odd, "tacho"), 0o755)
+	oddMissing := filepath.Join(t.TempDir(), odd, "gone", "tacho")
 	script := write(filepath.Join(t.TempDir(), "gauges.sh"), 0o755)
 	unexecutable := write(filepath.Join(t.TempDir(), "tacho"), 0o644)
 	missing := filepath.Join(t.TempDir(), "gone", "tacho")
@@ -48,6 +52,9 @@ func TestSwiftBarPluginWarning(t *testing.T) {
 		{"missing", setup.SwiftBarPlugin(missing), "runs " + missing + ", which is " + gone},
 		{"not executable", setup.SwiftBarPlugin(unexecutable), "runs " + unexecutable + ", which is " + gone},
 		{"another tacho at a quoted path", setup.SwiftBarPlugin(stale), "different tacho (" + stale + ")"},
+		{"another tacho at an escaped path", setup.SwiftBarPlugin(oddStale), "different tacho (" + oddStale + ")"},
+		{"missing at an escaped path", setup.SwiftBarPlugin(oddMissing), "runs " + oddMissing + ", which is " + gone},
+		{"an escaped quote in an export", "#!/bin/bash\nexport A=\"a\\\"b \\\\ \\c\"\nexec " + missing + " swiftbar\n", gone},
 		{"not tacho", setup.SwiftBarPlugin(script), ""},
 		{"a display setting added", tweaked, "runs " + missing + ", which is " + gone},
 		{"an export of quotes, names, and a ~", "#!/bin/bash\nexport A=~/bin:'b c'\"$X1:$PATH d\"\nexec " + missing + " swiftbar\n", gone},
@@ -120,7 +127,8 @@ func TestSwiftBarPluginWarningNotChecked(t *testing.T) {
 		{"HOME changed before a ~", "#!/bin/bash\nexport HOME=\"$HOME/alt\"\nexec ~/bin/tacho swiftbar\n", unknown},
 		// A readonly variable's export ends sh there, before exec.
 		{"a readonly variable", "#!/bin/sh\nexport UID=1\n" + execGone, unknown},
-		{"a backslash in double quotes", "#!/bin/bash\nexport A=\"a\\\"b\"\n" + execGone, unknown},
+		{"an escaped closing quote", "#!/bin/bash\nexport A=\"a\\\"\n" + execGone, unknown},
+		{"a backslash ending the quotes' line", "#!/bin/bash\nexport A=\"a\\\n\"\n" + execGone, unknown},
 		// \" doesn't end the quotes, so the shell runs exit before exec.
 		{"an escaped quote hiding a command", "#!/bin/bash\nexport A=\"\\\" #\"; exit\n" + execGone, unknown},
 		{"a backquote in double quotes", "#!/bin/bash\nexport A=\"`/opt/tacho swiftbar`\"\n" + execGone, unknown},

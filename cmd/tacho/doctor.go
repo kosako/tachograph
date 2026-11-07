@@ -407,7 +407,8 @@ func pluginExecCommand(script string) (command string, ok bool) {
 	for _, line := range lines[1:] {
 		line = strings.TrimLeft(line, " \t")
 		// A comment ends at the newline, even after a backslash. Elsewhere a
-		// backslash isn't plain (see plainWordLen), so a line that continues
+		// backslash ending the line is unquoted or in a quote left open,
+		// neither of them plain (see plainWordLen), so a line that continues
 		// on the next one is refused below.
 		switch {
 		case line == "" || line[0] == '#':
@@ -492,10 +493,10 @@ func isPlainWords(s string) bool {
 // plainWordLen returns the length of the plain word s starts with, which
 // ends at a blank or the end of s, or -1 when s doesn't start with one. A
 // plain word runs and expands nothing but $NAME: unquoted inert characters,
-// single quotes, and double quotes with no backslash or backquote. An
-// unquoted $NAME is refused too: some shells (dash, which /bin/sh can be)
-// split it into words in export's arguments, and a word that isn't a name
-// makes export fail.
+// single quotes, and plain double quotes (see plainQuotedLen), each closed
+// on this line. An unquoted $NAME is refused too: some shells (dash, which
+// /bin/sh can be) split it into words in export's arguments, and a word
+// that isn't a name makes export fail.
 func plainWordLen(s string) int {
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
@@ -508,16 +509,43 @@ func plainWordLen(s string) int {
 			}
 			i += j + 1
 		case c == '"':
-			j := strings.IndexByte(s[i+1:], '"')
-			if j < 0 || !isPlainQuoted(s[i+1:i+1+j]) {
+			n := plainQuotedLen(s[i:])
+			if n < 0 {
 				return -1
 			}
-			i += j + 1
+			i += n - 1
 		case !isInertShellByte(c):
 			return -1
 		}
 	}
 	return len(s)
+}
+
+// plainQuotedLen returns the length of the double-quoted string s starts
+// with, through its closing quote, or -1 when it isn't closed on this line
+// or expands anything but $NAME. As in the shell, a backslash escapes " $ `
+// and \ (the escapes setup's quoting writes, #482) and is literal before
+// anything else.
+func plainQuotedLen(s string) int {
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			return i + 1
+		case '`':
+			return -1
+		case '\\':
+			if i+1 < len(s) && strings.IndexByte("\"$`\\", s[i+1]) >= 0 {
+				i++
+			}
+		case '$':
+			n := shellNameLen(s[i+1:])
+			if n == 0 {
+				return -1 // ${…}, $(…), $1, $?, …
+			}
+			i += n
+		}
+	}
+	return -1
 }
 
 // unsafeExports are the variables whose export changes how doctor would
@@ -528,25 +556,6 @@ func plainWordLen(s string) int {
 var unsafeExports = map[string]bool{
 	"HOME":     true,
 	"BASHOPTS": true, "BASH_VERSINFO": true, "EUID": true, "PPID": true, "SHELLOPTS": true, "UID": true,
-}
-
-// isPlainQuoted reports whether s, the inside of double quotes, expands
-// nothing but $NAME. A backslash is refused too: \" would end the quotes
-// elsewhere than where plainWordLen looked.
-func isPlainQuoted(s string) bool {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\', '`':
-			return false
-		case '$':
-			n := shellNameLen(s[i+1:])
-			if n == 0 {
-				return false // ${…}, $(…), $1, $?, …
-			}
-			i += n
-		}
-	}
-	return true
 }
 
 // shellNameLen returns the length of the shell variable name s starts with,
