@@ -365,7 +365,7 @@ func swiftBarPluginWarning(script, exe string) (warning, note string) {
 	bin, ok := firstTokenFor(command, "darwin")
 	switch {
 	case !ok || bin == "" || strings.HasPrefix(bin, "-"):
-		// "" is an unterminated quote; -a, -c, -l are exec's options.
+		// "" is an empty word ("" or ''); -a, -c, -l are exec's options.
 		return "", unknown
 	case !strings.Contains(bin, "/"):
 		return "", "not checked — the plugin looks `" + bin + "` up on the PATH SwiftBar gives it, not your shell's; `tacho setup swiftbar --write` writes an absolute path instead"
@@ -384,14 +384,17 @@ func swiftBarPluginWarning(script, exe string) (warning, note string) {
 
 // pluginExecCommand returns what follows exec in a plugin script shaped like
 // the one `tacho setup swiftbar` writes, which the shell runs straight
-// through to its exec line: a bash or sh shebang, then only comments, blank
-// lines, and export lines that each set one variable (the PATH line, and the
-// display settings the README has users add), then exec as the last
-// command. ok is false for any other script: another command, a branch, a
-// line continuation, or an export whose value runs or expands anything but a
-// plain $NAME could exit or reach another exec first. (A BASH_ENV in
-// SwiftBar's environment, which doctor can't see, could still redefine exec;
-// tacho doesn't second-guess that.)
+// through to its exec line and then runs exec: a bash or sh shebang, then
+// only comments, blank lines, and export lines that each set one variable
+// (the PATH line, and the display settings the README has users add), then
+// exec with plain words (see isPlainWords) as the last command. ok is false
+// for any other script: another command, a branch, a line continuation, or
+// an export whose value runs or expands anything but $NAME could exit or
+// reach another exec first, and on the exec line an operator, a
+// redirection, or an unterminated quote can keep the shell from running it
+// (a syntax error, or a redirection that fails). (A BASH_ENV in SwiftBar's
+// environment, which doctor can't see, could still redefine exec; tacho
+// doesn't second-guess that.)
 func pluginExecCommand(script string) (command string, ok bool) {
 	if len(script) > maxPluginScript || strings.ContainsRune(script, '\r') {
 		return "", false
@@ -403,15 +406,19 @@ func pluginExecCommand(script string) (command string, ok bool) {
 	found := false
 	for _, line := range lines[1:] {
 		line = strings.TrimLeft(line, " \t")
+		// A comment ends at the newline, even after a backslash. Elsewhere a
+		// backslash isn't plain (see plainWordLen), so a line that continues
+		// on the next one is refused below.
 		switch {
 		case line == "" || line[0] == '#':
-			continue // a comment ends at the newline, even after a backslash
+			continue
 		case found:
 			return "", false // a command after exec
-		case strings.HasSuffix(line, `\`):
-			return "", false // the line may continue on the next one
 		}
 		if rest, isExec := cutWord(line, "exec"); isExec {
+			if !isPlainWords(rest) {
+				return "", false
+			}
 			command, found = rest, true
 			continue
 		}
@@ -451,38 +458,66 @@ func cutWord(line, word string) (rest string, ok bool) {
 
 // isPlainAssignment reports whether s, an export's arguments, sets one
 // variable (NAME=value, then at most a comment) other than unsafeExports to
-// a value that runs and expands nothing but $NAME: unquoted inert
-// characters, single quotes, and double quotes with no backslash or
-// backquote. An unquoted $NAME is refused too: some shells (dash, which
-// /bin/sh can be) split it into words in export's arguments, and a word
-// that isn't a name makes export fail.
+// a plain word (see plainWordLen), or to nothing.
 func isPlainAssignment(s string) bool {
 	eq := strings.IndexByte(s, '=')
 	if eq < 0 || !isShellName(s[:eq]) || unsafeExports[s[:eq]] {
 		return false
 	}
-	for i := eq + 1; i < len(s); i++ {
+	n := plainWordLen(s[eq+1:])
+	if n < 0 {
+		return false
+	}
+	rest := strings.TrimLeft(s[eq+1+n:], " \t")
+	return rest == "" || rest[0] == '#'
+}
+
+// isPlainWords reports whether s is plain words (see plainWordLen) separated
+// by blanks, then at most a comment: no operator, redirection, or
+// unterminated quote.
+func isPlainWords(s string) bool {
+	for {
+		s = strings.TrimLeft(s, " \t")
+		if s == "" || s[0] == '#' {
+			return true
+		}
+		n := plainWordLen(s)
+		if n <= 0 {
+			return false
+		}
+		s = s[n:]
+	}
+}
+
+// plainWordLen returns the length of the plain word s starts with, which
+// ends at a blank or the end of s, or -1 when s doesn't start with one. A
+// plain word runs and expands nothing but $NAME: unquoted inert characters,
+// single quotes, and double quotes with no backslash or backquote. An
+// unquoted $NAME is refused too: some shells (dash, which /bin/sh can be)
+// split it into words in export's arguments, and a word that isn't a name
+// makes export fail.
+func plainWordLen(s string) int {
+	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == ' ' || c == '\t':
-			rest := strings.TrimLeft(s[i:], " \t")
-			return rest == "" || rest[0] == '#'
+			return i
 		case c == '\'':
 			j := strings.IndexByte(s[i+1:], '\'')
 			if j < 0 {
-				return false
+				return -1
 			}
 			i += j + 1
 		case c == '"':
 			j := strings.IndexByte(s[i+1:], '"')
 			if j < 0 || !isPlainQuoted(s[i+1:i+1+j]) {
-				return false
+				return -1
 			}
 			i += j + 1
 		case !isInertShellByte(c):
-			return false
+			return -1
 		}
 	}
-	return true
+	return len(s)
 }
 
 // unsafeExports are the variables whose export changes how doctor would
@@ -497,7 +532,7 @@ var unsafeExports = map[string]bool{
 
 // isPlainQuoted reports whether s, the inside of double quotes, expands
 // nothing but $NAME. A backslash is refused too: \" would end the quotes
-// elsewhere than where isPlainAssignment looked.
+// elsewhere than where plainWordLen looked.
 func isPlainQuoted(s string) bool {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {

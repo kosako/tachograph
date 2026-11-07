@@ -95,6 +95,13 @@ func TestSwiftBarPluginWarningNotChecked(t *testing.T) {
 		{"an unterminated quote", "#!/bin/bash\nexec \"" + gone + " swiftbar\n", unknown},
 		{"exec without a command", "#!/bin/bash\nexec\n", unknown},
 		{"a fallback on the exec line", "#!/bin/bash\nexec " + gone + " swiftbar || echo tacho\n", unknown},
+		// A syntax error or a failed redirection keeps the shell from
+		// running exec at all.
+		{"an unterminated quote after the program", strings.Replace(setup.SwiftBarPlugin(gone), " swiftbar\n", " swiftbar \"\n", 1), unknown},
+		{"a stray operator", "#!/bin/bash\nexec " + gone + " swiftbar ;;\n", unknown},
+		{"a redirection", "#!/bin/bash\nexec " + gone + " swiftbar 2>/nonexistent-482/log\n", unknown},
+		{"in the background", "#!/bin/bash\nexec " + gone + " swiftbar &\n", unknown},
+		{"an empty word", "#!/bin/bash\nexec '' swiftbar\n", unknown},
 		{"a command after exec", "#!/bin/bash\n" + execGone + "echo tacho\n", unknown},
 		{"another exec after exec", "#!/bin/bash\n" + execGone + "exec /bin/sh -c true\n", unknown},
 		{"an export after exec", "#!/bin/bash\n" + execGone + "export A=1\n", unknown},
@@ -126,6 +133,8 @@ func TestSwiftBarPluginWarningNotChecked(t *testing.T) {
 		{"a relative interpreter", "#!bash\n" + execGone, unknown},
 		{"no shebang", execGone, unknown},
 		{"CRLF line ends", "#!/bin/bash\r\nexec " + gone + " swiftbar\r\n", unknown},
+		// The kernel looks for an interpreter named "/bin/bash\r".
+		{"a CR on the shebang only", "#!/bin/bash\r\n" + execGone, unknown},
 		{"no exec line", "#!/bin/bash\nexport A=1\n" + gone + " swiftbar\n", unknown},
 		{"too large", "#!/bin/bash\n" + strings.Repeat("#\n", maxPluginScript/2) + execGone, unknown},
 	}
