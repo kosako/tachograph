@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -83,7 +84,7 @@ func runDoctor(args []string) int {
 	reportCache(now)
 	fmt.Println()
 
-	reportIntegrations()
+	reportIntegrations(exe)
 	fmt.Println()
 
 	reportCurrentStatus(now)
@@ -297,17 +298,233 @@ func reportSnapshot(now time.Time) {
 	}
 }
 
-func reportIntegrations() {
+func reportIntegrations(exe string) {
 	fmt.Println("integrations:")
-	reportSwiftBarPlugin()
+	reportSwiftBarPlugin(exe)
 }
 
-func reportSwiftBarPlugin() {
-	if path := findSwiftBarPlugin(); path != "" {
-		fmt.Println("  SwiftBar:   plugin found (" + path + ")")
+// reportSwiftBarPlugin reports the tacho plugin doctor finds, and whether
+// the program its exec line runs is there and is this tacho (exe), as the
+// statusLine's check does (#482): a plugin left pointing at a tacho since
+// moved or removed (an npm install's path after switching Node) fails on
+// every run while its file is still found.
+func reportSwiftBarPlugin(exe string) {
+	plugin := findSwiftBarPlugin()
+	if plugin == "" {
+		fmt.Println("  SwiftBar:   plugin not found in the SwiftBar / xbar plugin folders — run `tacho setup swiftbar --write` (ignore this if you don't use SwiftBar)")
 		return
 	}
-	fmt.Println("  SwiftBar:   plugin not found in the SwiftBar / xbar plugin folders — run `tacho setup swiftbar --write` (ignore this if you don't use SwiftBar)")
+	fmt.Println("  SwiftBar:   plugin found (" + plugin + ")")
+	var warning, note string
+	if script, err := readPluginScript(plugin); err != nil {
+		note = "not checked — can't read it: " + err.Error()
+	} else {
+		warning, note = swiftBarPluginWarning(script, exe)
+	}
+	if warning != "" {
+		fmt.Println("    warning:  " + warning)
+	}
+	if note != "" {
+		fmt.Println("    note:     " + note)
+	}
+}
+
+// maxPluginScript bounds how much of a plugin doctor reads. The one tacho
+// writes is under 1 KiB; a larger file is left unchecked (see
+// pluginExecCommand).
+const maxPluginScript = 64 << 10
+
+// readPluginScript reads the plugin at path, up to one byte past
+// maxPluginScript so that a larger file shows as one.
+func readPluginScript(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxPluginScript+1))
+	return string(b), err
+}
+
+// swiftBarPluginWarning is doctor's diagnosis of a tacho plugin's script
+// (both "" when fine), with statusLineWarning's verdicts: a warning when the
+// program its exec line runs is missing or not executable — a shell exits
+// when exec fails, so the plugin fails on every run — or is a different
+// tacho than this one (exe). The program is told only for an absolute path
+// in a script shaped like the one `tacho setup swiftbar` writes (see
+// pluginExecCommand); any other gets a note instead, as a statusLine whose
+// program can't be told does (#362): a warning would be a guess, and its
+// advice to re-run setup would replace the user's own plugin.
+func swiftBarPluginWarning(script, exe string) (warning, note string) {
+	const unknown = "not checked — tacho can't tell which program this plugin runs"
+	command, ok := pluginExecCommand(script)
+	if !ok {
+		return "", unknown
+	}
+	// The plugin is a bash or sh script, whichever OS doctor runs on.
+	bin, ok := firstTokenFor(command, "darwin")
+	switch {
+	case !ok || bin == "" || strings.HasPrefix(bin, "-"):
+		// "" is an unterminated quote; -a, -c, -l are exec's options.
+		return "", unknown
+	case !strings.Contains(bin, "/"):
+		return "", "not checked — the plugin looks `" + bin + "` up on the PATH SwiftBar gives it, not your shell's; `tacho setup swiftbar --write` writes an absolute path instead"
+	case !strings.HasPrefix(bin, "/"):
+		return "", unknown // relative to SwiftBar's working directory, not doctor's
+	}
+	// LookPath runs a path as is and checks the file is executable.
+	if _, err := exec.LookPath(bin); err != nil {
+		return "the plugin runs " + bin + ", which is missing or not executable — re-run `tacho setup swiftbar --write`", ""
+	}
+	if runsAnotherTacho(bin, exe) {
+		return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup swiftbar --write` to point it here", ""
+	}
+	return "", ""
+}
+
+// pluginExecCommand returns what follows exec in a plugin script shaped like
+// the one `tacho setup swiftbar` writes, which the shell runs straight
+// through to its exec line: a bash or sh shebang, then only comments, blank
+// lines, and export lines that each set one variable (the PATH line, and the
+// display settings the README has users add), then exec as the last
+// command. ok is false for any other script: another command, a branch, a
+// line continuation, or an export whose value runs or expands anything but a
+// plain $NAME could exit or reach another exec first. (A BASH_ENV in
+// SwiftBar's environment, which doctor can't see, could still redefine exec;
+// tacho doesn't second-guess that.)
+func pluginExecCommand(script string) (command string, ok bool) {
+	if len(script) > maxPluginScript || strings.ContainsRune(script, '\r') {
+		return "", false
+	}
+	lines := strings.Split(script, "\n")
+	if !isShShebang(lines[0]) {
+		return "", false
+	}
+	found := false
+	for _, line := range lines[1:] {
+		line = strings.TrimLeft(line, " \t")
+		switch {
+		case line == "" || line[0] == '#':
+			continue // a comment ends at the newline, even after a backslash
+		case found:
+			return "", false // a command after exec
+		case strings.HasSuffix(line, `\`):
+			return "", false // the line may continue on the next one
+		}
+		if rest, isExec := cutWord(line, "exec"); isExec {
+			command, found = rest, true
+			continue
+		}
+		if rest, isExport := cutWord(line, "export"); !isExport || !isPlainAssignment(rest) {
+			return "", false
+		}
+	}
+	return command, found
+}
+
+// isShShebang reports whether line is a shebang that runs bash or sh, as
+// tacho's plugin does, with no option (-n, -u, and others change what runs).
+func isShShebang(line string) bool {
+	interp, ok := strings.CutPrefix(line, "#!")
+	if !ok {
+		return false
+	}
+	isSh := func(name string) bool { return name == "bash" || name == "sh" }
+	switch f := strings.Fields(interp); {
+	case len(f) == 1 && strings.HasPrefix(f[0], "/"):
+		return isSh(f[0][strings.LastIndexByte(f[0], '/')+1:])
+	case len(f) == 2 && f[0] == "/usr/bin/env":
+		return isSh(f[1])
+	}
+	return false
+}
+
+// cutWord returns the rest of line after its first word, when that word is
+// word followed by a blank.
+func cutWord(line, word string) (rest string, ok bool) {
+	rest, ok = strings.CutPrefix(line, word)
+	if !ok || rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return "", false
+	}
+	return strings.TrimLeft(rest, " \t"), true
+}
+
+// isPlainAssignment reports whether s, an export's arguments, sets one
+// variable (NAME=value, then at most a comment) to a value that runs and
+// expands nothing but $NAME: unquoted inert characters, single quotes, and
+// double quotes with no backslash or backquote.
+func isPlainAssignment(s string) bool {
+	eq := strings.IndexByte(s, '=')
+	if eq < 0 || !isShellName(s[:eq]) {
+		return false
+	}
+	for i := eq + 1; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == ' ' || c == '\t':
+			rest := strings.TrimLeft(s[i:], " \t")
+			return rest == "" || rest[0] == '#'
+		case c == '\'':
+			j := strings.IndexByte(s[i+1:], '\'')
+			if j < 0 {
+				return false
+			}
+			i += j + 1
+		case c == '"':
+			j := strings.IndexByte(s[i+1:], '"')
+			if j < 0 || !isPlainQuoted(s[i+1:i+1+j]) {
+				return false
+			}
+			i += j + 1
+		case c == '$':
+			n := shellNameLen(s[i+1:])
+			if n == 0 {
+				return false // ${…}, $(…), $1, $?, …
+			}
+			i += n
+		case !isInertShellByte(c):
+			return false
+		}
+	}
+	return true
+}
+
+// isPlainQuoted reports whether s, the inside of double quotes, expands
+// nothing but $NAME. A backslash is refused too: \" would end the quotes
+// elsewhere than where isPlainAssignment looked.
+func isPlainQuoted(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\', '`':
+			return false
+		case '$':
+			n := shellNameLen(s[i+1:])
+			if n == 0 {
+				return false
+			}
+			i += n
+		}
+	}
+	return true
+}
+
+// shellNameLen returns the length of the shell variable name s starts with,
+// or 0 when it starts with none.
+func shellNameLen(s string) int {
+	n := 0
+	for ; n < len(s); n++ {
+		c := s[n]
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (n == 0 || c < '0' || c > '9') {
+			break
+		}
+	}
+	return n
+}
+
+// isInertShellByte reports whether c, unquoted in a variable's value, is a
+// character the shell takes literally (or, for ~, expands to a home).
+func isInertShellByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		strings.IndexByte("_./:,@%+=-~", c) >= 0
 }
 
 // findSwiftBarPlugin returns the tacho plugin file in the first plugin folder

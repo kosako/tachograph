@@ -562,10 +562,18 @@ func statusLineWarning(command, exe string) (warning, note string) {
 	if bin == "" {
 		return "that command does not resolve — re-run `tacho setup claude --write`", ""
 	}
-	if exe == "" || !isTachoExecutable(bin) || sameInstall(bin, exe) {
+	if !runsAnotherTacho(bin, exe) {
 		return "", ""
 	}
 	return "it runs a different tacho (" + bin + ") than this one — re-run `tacho setup claude --write` to point it here", ""
+}
+
+// runsAnotherTacho reports whether bin, the program a statusLine or the
+// SwiftBar plugin runs, is tacho or its npm launcher but not this install
+// (exe, "" when unknown). Programs that aren't tacho (a user's own script)
+// are not second-guessed.
+func runsAnotherTacho(bin, exe string) bool {
+	return exe != "" && isTachoExecutable(bin) && !sameInstall(bin, exe)
 }
 
 // isTachoExecutable reports whether path names tacho itself or its npm
