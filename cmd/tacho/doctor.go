@@ -392,8 +392,9 @@ func swiftBarPluginWarning(script, exe string) (warning, note string) {
 // an export whose value runs or expands anything but $NAME could exit or
 // reach another exec first, and on the exec line an operator, a
 // redirection, or an unterminated quote can keep the shell from running it
-// (a syntax error, or a redirection that fails). (A BASH_ENV in SwiftBar's
-// environment, which doctor can't see, could still redefine exec; tacho
+// (a syntax error, or a redirection that fails). (The environment SwiftBar
+// starts the plugin with, which doctor can't see, could still change the
+// shell, as a BASH_ENV that redefines exec or a SHELLOPTS would; tacho
 // doesn't second-guess that.)
 func pluginExecCommand(script string) (command string, ok bool) {
 	if len(script) > maxPluginScript || strings.ContainsRune(script, '\r') {
@@ -458,11 +459,11 @@ func cutWord(line, word string) (rest string, ok bool) {
 }
 
 // isPlainAssignment reports whether s, an export's arguments, sets one
-// variable (NAME=value, then at most a comment) other than unsafeExports to
-// a plain word (see plainWordLen), or to nothing.
+// variable (NAME=value, then at most a comment) that isPluginExportName
+// allows to a plain word (see plainWordLen), or to nothing.
 func isPlainAssignment(s string) bool {
 	eq := strings.IndexByte(s, '=')
-	if eq < 0 || !isShellName(s[:eq]) || unsafeExports[s[:eq]] {
+	if eq < 0 || !isPluginExportName(s[:eq]) {
 		return false
 	}
 	n := plainWordLen(s[eq+1:])
@@ -548,14 +549,21 @@ func plainQuotedLen(s string) int {
 	return -1
 }
 
-// unsafeExports are the variables whose export changes how doctor would
-// read the exec line, or ends the shell before it: HOME, which a ~ there
-// expands to (doctor would look under its own HOME), and the ones bash makes
-// readonly, whose assignment is an error that ends a shell in POSIX mode
-// (sh) at the export.
-var unsafeExports = map[string]bool{
-	"HOME":     true,
-	"BASHOPTS": true, "BASH_VERSINFO": true, "EUID": true, "PPID": true, "SHELLOPTS": true, "UID": true,
+// isPluginExportName reports whether name is a variable a plugin of tacho's
+// shape may export and stay checkable: PATH (the line setup writes), the
+// TACHO_ ones (the display settings and tacho's own dirs), and the agents'
+// config dirs (CLAUDE_CONFIG_DIR, CODEX_HOME), which tacho reads. Other
+// names are refused, since the shell gives many a meaning of its own: HOME
+// changes what a ~ on the exec line expands to, a readonly one (UID) ends
+// sh at the export, and assigning one bash evaluates as arithmetic
+// (RANDOM=HOME=0) sets another (#482).
+func isPluginExportName(name string) bool {
+	switch name {
+	case "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME":
+		return true
+	}
+	rest, ok := strings.CutPrefix(name, "TACHO_")
+	return ok && rest != "" && isShellName(name)
 }
 
 // shellNameLen returns the length of the shell variable name s starts with,
