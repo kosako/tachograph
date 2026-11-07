@@ -450,12 +450,15 @@ func cutWord(line, word string) (rest string, ok bool) {
 }
 
 // isPlainAssignment reports whether s, an export's arguments, sets one
-// variable (NAME=value, then at most a comment) to a value that runs and
-// expands nothing but $NAME: unquoted inert characters, single quotes, and
-// double quotes with no backslash or backquote.
+// variable (NAME=value, then at most a comment) other than unsafeExports to
+// a value that runs and expands nothing but $NAME: unquoted inert
+// characters, single quotes, and double quotes with no backslash or
+// backquote. An unquoted $NAME is refused too: some shells (dash, which
+// /bin/sh can be) split it into words in export's arguments, and a word
+// that isn't a name makes export fail.
 func isPlainAssignment(s string) bool {
 	eq := strings.IndexByte(s, '=')
-	if eq < 0 || !isShellName(s[:eq]) {
+	if eq < 0 || !isShellName(s[:eq]) || unsafeExports[s[:eq]] {
 		return false
 	}
 	for i := eq + 1; i < len(s); i++ {
@@ -475,17 +478,21 @@ func isPlainAssignment(s string) bool {
 				return false
 			}
 			i += j + 1
-		case c == '$':
-			n := shellNameLen(s[i+1:])
-			if n == 0 {
-				return false // ${…}, $(…), $1, $?, …
-			}
-			i += n
 		case !isInertShellByte(c):
 			return false
 		}
 	}
 	return true
+}
+
+// unsafeExports are the variables whose export changes how doctor would
+// read the exec line, or ends the shell before it: HOME, which a ~ there
+// expands to (doctor would look under its own HOME), and the ones bash makes
+// readonly, whose assignment is an error that ends a shell in POSIX mode
+// (sh) at the export.
+var unsafeExports = map[string]bool{
+	"HOME":     true,
+	"BASHOPTS": true, "BASH_VERSINFO": true, "EUID": true, "PPID": true, "SHELLOPTS": true, "UID": true,
 }
 
 // isPlainQuoted reports whether s, the inside of double quotes, expands
@@ -499,7 +506,7 @@ func isPlainQuoted(s string) bool {
 		case '$':
 			n := shellNameLen(s[i+1:])
 			if n == 0 {
-				return false
+				return false // ${…}, $(…), $1, $?, …
 			}
 			i += n
 		}

@@ -328,9 +328,9 @@ saved as `~/.config/tachograph/swiftbar-plugin.bak`. Run it again after moving
 or reinstalling tacho (for an npm install, also after switching Node
 versions). `tacho doctor` warns when the tacho the plugin's `exec` line runs
 is missing, isn't executable, or is a different install than this one; it
-doesn't check, and notes so, a plugin that looks tacho up on the PATH
-(`exec tacho swiftbar`) or one with commands besides `export` lines. To
-install by hand, copy `contrib/tacho.30s.sh` into the plugin
+doesn't check, and notes so, a plugin that strays from the shape tacho
+writes, such as one that looks tacho up on the PATH (`exec tacho swiftbar`)
+or one with commands besides `export` lines. To install by hand, copy `contrib/tacho.30s.sh` into the plugin
 folder and `chmod +x` it — but that script adds only `/opt/homebrew/bin` and
 `~/go/bin` to PATH, so it won't find a tacho installed elsewhere (`GOBIN`, an
 npm global under nvm / mise, …).

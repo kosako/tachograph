@@ -50,7 +50,7 @@ func TestSwiftBarPluginWarning(t *testing.T) {
 		{"another tacho at a quoted path", setup.SwiftBarPlugin(stale), "different tacho (" + stale + ")"},
 		{"not tacho", setup.SwiftBarPlugin(script), ""},
 		{"a display setting added", tweaked, "runs " + missing + ", which is " + gone},
-		{"an export of names, quotes, and a ~", "#!/bin/bash\nexport A=~/bin:$X1:'b c'\"$PATH d\"\nexec " + missing + " swiftbar\n", gone},
+		{"an export of quotes, names, and a ~", "#!/bin/bash\nexport A=~/bin:'b c'\"$X1:$PATH d\"\nexec " + missing + " swiftbar\n", gone},
 		{"a ~/ path", "#!/bin/bash\nexec ~/gone/tacho swiftbar\n", "runs " + filepath.Join(home, "gone", "tacho") + ", which is " + gone},
 		{"an env shebang", "#!/usr/bin/env bash\nexec " + missing + " swiftbar\n", gone},
 		{"sh, indented, a comment, no final newline", "#!/bin/sh\n\n  exec " + missing + " swiftbar # gauges", gone},
@@ -106,11 +106,18 @@ func TestSwiftBarPluginWarningNotChecked(t *testing.T) {
 		{"a word continued onto a comment-like line", "#!/bin/bash\nexec " + gone + "\\\n#x swiftbar\n", unknown},
 		{"a command substitution in an export", "#!/bin/bash\nexport A=$(/opt/tacho swiftbar)\n" + execGone, unknown},
 		{"an expansion that can exit", "#!/bin/bash\nexport A=${UNSET:?}\n" + execGone, unknown},
+		{"a quoted expansion that can exit", "#!/bin/bash\nexport A=\"${UNSET:?}\"\n" + execGone, unknown},
+		// Some shells (dash, which /bin/sh can be) split it into words.
+		{"an unquoted $NAME", "#!/bin/sh\nexport A=$X\n" + execGone, unknown},
+		// The ~ is the new HOME, which doctor doesn't look under.
+		{"HOME changed before a ~", "#!/bin/bash\nexport HOME=\"$HOME/alt\"\nexec ~/bin/tacho swiftbar\n", unknown},
+		// A readonly variable's export ends sh there, before exec.
+		{"a readonly variable", "#!/bin/sh\nexport UID=1\n" + execGone, unknown},
 		{"a backslash in double quotes", "#!/bin/bash\nexport A=\"a\\\"b\"\n" + execGone, unknown},
 		// \" doesn't end the quotes, so the shell runs exit before exec.
 		{"an escaped quote hiding a command", "#!/bin/bash\nexport A=\"\\\" #\"; exit\n" + execGone, unknown},
 		{"a backquote in double quotes", "#!/bin/bash\nexport A=\"`/opt/tacho swiftbar`\"\n" + execGone, unknown},
-		{"a special parameter", "#!/bin/bash\nexport A=$1\n" + execGone, unknown},
+		{"a special parameter", "#!/bin/bash\nexport A=\"$1\"\n" + execGone, unknown},
 		{"two assignments", "#!/bin/bash\nexport A=1 B=2\n" + execGone, unknown},
 		{"an export with no value", "#!/bin/bash\nexport A\n" + execGone, unknown},
 		{"an unterminated quote in an export", "#!/bin/bash\nexport A='x\n" + execGone, unknown},
