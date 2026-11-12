@@ -471,13 +471,17 @@ in `~/.config/tachograph/pricing.json` (USD per million tokens):
 Only the fields you set override the built-in defaults (e.g. set just `input`
 and the other rates stay at their defaults — partial overrides merge). A **new
 model id** not in the table has no defaults, so any rate you leave out is `0` —
-even when the key extends a built-in one (`claude-fable-5-2` does not inherit
+even when the key extends a built-in one (`claude-fable-5-3` does not inherit
 `claude-fable`'s rates). Keys match model ids by prefix (`claude-fable` matches
-`claude-fable-5`), and the **longest matching key wins**: to override a tier
-that has its own built-in entry (`claude-fable-5-1`, `claude-mythos-5-1`,
-`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-haiku-5-5`,
-…), use that exact key — an override on `claude-fable` does not reach
-`claude-fable-5-1`. A Bedrock-style id such as `us.anthropic.claude-…` that
+`claude-fable-5`), except that a key ending in a digit doesn't match where the
+id goes on with another digit (`claude-fable-5-2` doesn't match
+`claude-fable-5-20260801`, which prices as `claude-fable`), and the **longest
+matching key wins**: to override a tier
+that has its own built-in entry (`claude-fable-5-2`, `claude-mythos-5-2`,
+`claude-fable-5-1`, `claude-mythos-5-1`, `claude-opus-5-5`,
+`claude-sonnet-5-5`, `claude-sonnet-5`, `claude-haiku-5-5`, …), use that exact
+key — an override on `claude-fable` does not reach `claude-fable-5-1` or
+`claude-fable-5-2`. A Bedrock-style id such as `us.anthropic.claude-…` that
 matches no key as written is retried without its `[region.]anthropic.` /
 `openai.` prefix, so a key that keeps the prefix, e.g.
 `us.anthropic.claude-fable-5`, applies only to Bedrock ids starting with it —
@@ -486,8 +490,9 @@ transcript records 1-hour cache writes, they are priced at 2x the input rate
 (`cache_write` is the 5-minute rate and does not apply to them). Long-prompt
 premiums are not modeled: Claude Haiku 5.5, for example, bills every category
 at 5x for prompts over 100K tokens, but tacho counts them at the standard rate,
-so those come out low. A response served in Claude's fast mode (Opus 5.5 /
-Opus 5 / Opus 4.8; the transcript's usage reports `speed` as `fast`) is priced
+so those come out low. A response served in Claude's fast mode (Fable 5.2 /
+Mythos 5.2 / Opus 5.5 / Opus 5 / Opus 4.8; the transcript's usage reports
+`speed` as `fast`) is priced
 at twice that model's rate — its `pricing.json` override, if any — in all four
 categories, matching the published fast-mode prices. A response that ran at
 standard speed is priced at the standard rate even with `/fast` on, and a

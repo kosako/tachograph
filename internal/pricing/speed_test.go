@@ -20,6 +20,8 @@ func TestForSpeed(t *testing.T) {
 		want         Rate
 	}{
 		// The published fast-mode prices, cache multipliers on top.
+		{"claude-fable-5-2", SpeedFast, Rate{In: 16, Out: 80, CacheRead: 0.4, CacheWrite: 20}},
+		{"claude-mythos-5-2", SpeedFast, Rate{In: 16, Out: 80, CacheRead: 0.4, CacheWrite: 20}},
 		{"claude-opus-5-5", SpeedFast, Rate{In: 8, Out: 40, CacheRead: 0.4, CacheWrite: 10}},
 		{"claude-opus-5", SpeedFast, Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}},
 		{"claude-opus-4-8", SpeedFast, Rate{In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}},
@@ -31,7 +33,10 @@ func TestForSpeed(t *testing.T) {
 		{"claude-opus-5[1m]", SpeedFast, double(tab["claude-opus"])},
 		{"claude-opus-5-20260501", SpeedFast, double(tab["claude-opus"])},
 		{"claude-opus-4-8-20260527", SpeedFast, double(tab["claude-opus"])},
+		{"claude-fable-5-2[1m]", SpeedFast, double(tab["claude-fable-5-2"])},
+		{"anthropic.claude-fable-5-2-20261110", SpeedFast, double(tab["claude-fable-5-2"])},
 		// Standard, or speed not recorded: the standard rate.
+		{"claude-fable-5-2", "standard", tab["claude-fable-5-2"]},
 		{"claude-opus-5-5", "standard", tab["claude-opus-5-5"]},
 		{"claude-opus-5-5", "", tab["claude-opus-5-5"]},
 		{"claude-opus-5-5[1m]", "standard", tab["claude-opus-5-5"]},
@@ -42,6 +47,12 @@ func TestForSpeed(t *testing.T) {
 		{"claude-opus-5-5-preview", SpeedFast, tab["claude-opus-5-5"]},
 		{"claude-opus-5-5-2026", SpeedFast, tab["claude-opus-5-5"]}, // not an 8-digit date
 		{"claude-sonnet-5-5", SpeedFast, tab["claude-sonnet-5-5"]},
+		// The earlier Fable / Mythos have no fast mode (#484).
+		{"claude-fable-5-1", SpeedFast, tab["claude-fable-5-1"]},
+		{"claude-mythos-5-1", SpeedFast, tab["claude-mythos-5-1"]},
+		{"claude-fable-5", SpeedFast, tab["claude-fable"]},
+		{"claude-fable-5-20260801", SpeedFast, tab["claude-fable"]}, // not the 5.2 key, no premium
+		{"claude-mythos-5-20260801[1m]", SpeedFast, tab["claude-mythos"]},
 	}
 	for _, c := range cases {
 		r, ok := tab.ForSpeed(c.model, c.speed)

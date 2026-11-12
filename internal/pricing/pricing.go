@@ -23,9 +23,10 @@ type Rate struct {
 
 // defaults are approximate first-party API prices (USD per million tokens),
 // matched by model-id prefix. Cache rates follow each provider's convention:
-// Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / Mythos 5.1 and 0.05x
-// on Opus 5.5 / Sonnet 5.5, the documented exceptions), write (5-min ephemeral)
-// = 1.25x input; OpenAI uses its published cached-input price for reads. For
+// Anthropic cache read = 0.1x input (0.025x on Fable 5.1 / 5.2 and Mythos
+// 5.1 / 5.2, 0.05x on Opus 5.5 / Sonnet 5.5, the documented exceptions),
+// write (5-min ephemeral) = 1.25x input; OpenAI uses its published
+// cached-input price for reads. For
 // cache writes, gpt-5.5 and earlier are modeled at the input rate (OpenAI
 // didn't bill writes separately), while gpt-5.6 and later publish a 1.25x-input
 // write price. Long-prompt premiums (the GPT-5.4/5.5/5.6 and GPT-6 >272K rates,
@@ -61,11 +62,16 @@ var defaults = map[string]Rate{
 	"claude-fable":     {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Fable 5
 	"claude-mythos":    {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5}, // Mythos 5
 	// Fable 5.1 / Mythos 5.1 match the 5 series everywhere except cache hits,
-	// which Anthropic prices at 0.025x input ($0.25) instead of the usual 0.1x
-	// — the only models with that multiplier. Without these keys the 5.1 ids
-	// resolve to the 5 series by prefix and bill cache reads at 4x (#225).
+	// which Anthropic prices at 0.025x input ($0.25) instead of the usual 0.1x.
+	// Without these keys the 5.1 ids resolve to the 5 series by prefix and bill
+	// cache reads at 4x (#225).
 	"claude-fable-5-1":  {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
 	"claude-mythos-5-1": {In: 10, Out: 50, CacheRead: 0.25, CacheWrite: 12.5},
+	// Fable 5.2 / Mythos 5.2 cut the price to $8/$40 and keep 5.1's 0.025x
+	// cache hits ($0.20). Without these keys the 5.2 ids resolve to the 5
+	// series by prefix and bill cache reads at 5x, the rest at 1.25x (#484).
+	"claude-fable-5-2":  {In: 8, Out: 40, CacheRead: 0.2, CacheWrite: 10},
+	"claude-mythos-5-2": {In: 8, Out: 40, CacheRead: 0.2, CacheWrite: 10},
 	// GPT-6 ships as per-tier ids — Astra (2026-09-03, #220), Sol and Luna
 	// (2026-09-23, #252) — which Codex logs verbatim. OpenAI publishes no bare
 	// "gpt-6" alias, so none is added here — an unknown future gpt-6 tier stays
@@ -88,8 +94,9 @@ var defaults = map[string]Rate{
 	// for the default Sol tier, and Codex logs the full "gpt-5.6-sol" id (which
 	// prefix-matches this base). Unlike earlier gpt-5.x, 5.6 publishes a
 	// cache-write price at 1.25x input. Rates reflect the 2026-07-30 Terra/Luna
-	// cuts and the 2026-08-21 Sol promotional price (in effect at least through
-	// 2026-11-21) — #216.
+	// cuts and the 2026-08-21 Sol promotional price (available until
+	// 2026-11-30 per OpenAI's pricing page; the price after it is unpublished)
+	// — #216, #484.
 	"gpt-5.6":       {In: 4, Out: 20, CacheRead: 0.4, CacheWrite: 5}, // Sol (default tier); alias of gpt-5.6-sol
 	"gpt-5.6-terra": {In: 2, Out: 12, CacheRead: 0.2, CacheWrite: 2.5},
 	"gpt-5.6-luna":  {In: 0.2, Out: 1.2, CacheRead: 0.02, CacheWrite: 0.25},
@@ -230,7 +237,7 @@ func (t Table) For(model string) (Rate, bool) {
 func (t Table) match(model string) (Rate, bool) {
 	best := ""
 	for key := range t {
-		if strings.HasPrefix(model, key) && len(key) > len(best) {
+		if keyMatches(model, key) && len(key) > len(best) {
 			best = key
 		}
 	}
@@ -240,6 +247,22 @@ func (t Table) match(model string) (Rate, bool) {
 	return t[best], true
 }
 
+// keyMatches reports whether key is a prefix of model that doesn't stop in
+// the middle of a number: a key ending in a digit doesn't match where the
+// model id goes on with another digit. Without this, "claude-fable-5-2"
+// would capture a dated Fable 5 id such as "claude-fable-5-20260801" (#484).
+func keyMatches(model, key string) bool {
+	if !strings.HasPrefix(model, key) {
+		return false
+	}
+	if key == "" || len(model) == len(key) {
+		return true
+	}
+	return !isDigit(key[len(key)-1]) || !isDigit(model[len(key)])
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
 // SpeedFast is the usage.speed an Anthropic response reports when it was
 // served in fast mode ("standard" otherwise).
 const SpeedFast = "fast"
@@ -247,14 +270,16 @@ const SpeedFast = "fast"
 // fastModeMultipliers are Anthropic's fast-mode premiums, by bare model id
 // (see fastModelID): a fast response bills every category at the standard
 // rate times this
-// (Opus 5.5 $8/$40 against $4/$20, Opus 5 and Opus 4.8 $10/$50 against
-// $5/$25), prompt-caching multipliers applying on top so cache reads and
-// writes scale too. Fast mode exists only for these models and only on the
-// first-party API (#407).
+// (Fable 5.2 and Mythos 5.2 $16/$80 against $8/$40, Opus 5.5 $8/$40 against
+// $4/$20, Opus 5 and Opus 4.8 $10/$50 against $5/$25), prompt-caching
+// multipliers applying on top so cache reads and writes scale too. Fast mode
+// exists only for these models (#407, #484).
 var fastModeMultipliers = map[string]float64{
-	"claude-opus-5-5": 2,
-	"claude-opus-5":   2,
-	"claude-opus-4-8": 2,
+	"claude-fable-5-2":  2,
+	"claude-mythos-5-2": 2,
+	"claude-opus-5-5":   2,
+	"claude-opus-5":     2,
+	"claude-opus-4-8":   2,
 }
 
 // ForSpeed returns the rate for a model at the speed one response reports
