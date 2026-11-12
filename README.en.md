@@ -473,7 +473,10 @@ and the other rates stay at their defaults — partial overrides merge). A **new
 model id** not in the table has no defaults, so any rate you leave out is `0` —
 even when the key extends a built-in one (`claude-fable-5-3` does not inherit
 `claude-fable`'s rates). Keys match model ids by prefix (`claude-fable` matches
-`claude-fable-5`), and the **longest matching key wins**: to override a tier
+`claude-fable-5`), except that a key ending in a digit doesn't match where the
+id goes on with another digit (`claude-fable-5-2` doesn't match
+`claude-fable-5-20260801`, which prices as `claude-fable`), and the **longest
+matching key wins**: to override a tier
 that has its own built-in entry (`claude-fable-5-2`, `claude-mythos-5-2`,
 `claude-fable-5-1`, `claude-mythos-5-1`, `claude-opus-5-5`,
 `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-haiku-5-5`, …), use that exact

@@ -51,6 +51,8 @@ func TestForSpeed(t *testing.T) {
 		{"claude-fable-5-1", SpeedFast, tab["claude-fable-5-1"]},
 		{"claude-mythos-5-1", SpeedFast, tab["claude-mythos-5-1"]},
 		{"claude-fable-5", SpeedFast, tab["claude-fable"]},
+		{"claude-fable-5-20260801", SpeedFast, tab["claude-fable"]}, // not the 5.2 key, no premium
+		{"claude-mythos-5-20260801[1m]", SpeedFast, tab["claude-mythos"]},
 	}
 	for _, c := range cases {
 		r, ok := tab.ForSpeed(c.model, c.speed)

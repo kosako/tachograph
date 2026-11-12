@@ -108,6 +108,12 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-fable-5-2[1m]", Rate{8, 40, 0.2, 10}},       // 1M-context suffix → 5.2 key
 		{"anthropic.claude-fable-5-2", Rate{8, 40, 0.2, 10}}, // Bedrock form of the same
 		{"us.anthropic.claude-mythos-5-2", Rate{8, 40, 0.2, 10}},
+		// A dated Fable 5 / Mythos 5 id starts with "...-5-2" too; the 5.2 key
+		// must not capture it (#484).
+		{"claude-fable-5-20260801", Rate{10, 50, 1, 12.5}},
+		{"claude-mythos-5-20260801", Rate{10, 50, 1, 12.5}},
+		{"claude-fable-5-20260801[1m]", Rate{10, 50, 1, 12.5}},
+		{"anthropic.claude-mythos-5-20260801", Rate{10, 50, 1, 12.5}},
 		// 5.1 prices cache hits at 0.025x input, so it needs its own key rather
 		// than falling to claude-fable's 0.1x (#225).
 		{"claude-fable-5-1", Rate{10, 50, 0.25, 12.5}},
@@ -215,6 +221,38 @@ func TestOverrideOfSpecificTierApplies(t *testing.T) {
 	r, ok := Load().For("claude-fable-5-1")
 	if !ok || r.CacheRead != 0.5 || r.In != 10 {
 		t.Errorf("claude-fable-5-1 = %+v %v, want CacheRead=0.5 with In=10 from defaults", r, ok)
+	}
+}
+
+// A pricing.json key ending in a digit follows the same rule as the built-in
+// keys: it doesn't match where the id goes on with another digit, and does
+// where the id ends there or goes on with a non-digit (#484).
+func TestOverrideKeyStopsAtNumber(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TACHO_CONFIG_DIR", dir)
+	over := `{"gpt-5.1":{"input":3,"output":30,"cache_read":0.3,"cache_write":3},` +
+		`"claude-opus-5-5-2026":{"input":7,"output":7,"cache_read":7,"cache_write":7},` +
+		`"gpt-7.":{"input":9,"output":9,"cache_read":9,"cache_write":9}}`
+	if err := os.WriteFile(filepath.Join(dir, "pricing.json"), []byte(over), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab := Load()
+	user := Rate{3, 30, 0.3, 3}
+	for _, c := range []struct {
+		model string
+		want  Rate
+	}{
+		{"gpt-5.1", user},
+		{"gpt-5.1-codex", user},
+		{"gpt-5.1[1m]", user},
+		{"gpt-5.10", tab["gpt-5"]},                           // a different number
+		{"claude-opus-5-5-20260923", tab["claude-opus-5-5"]}, // the key stops inside the date
+		{"claude-opus-5-5-2026-preview", Rate{7, 7, 7, 7}},   // the number ends with the key
+		{"gpt-7.2", Rate{9, 9, 9, 9}},                        // a key ending in a non-digit
+	} {
+		if r, ok := tab.For(c.model); !ok || r != c.want {
+			t.Errorf("%s: got %+v (ok=%v), want %+v", c.model, r, ok, c.want)
+		}
 	}
 }
 

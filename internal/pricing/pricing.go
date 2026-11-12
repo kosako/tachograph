@@ -237,7 +237,7 @@ func (t Table) For(model string) (Rate, bool) {
 func (t Table) match(model string) (Rate, bool) {
 	best := ""
 	for key := range t {
-		if strings.HasPrefix(model, key) && len(key) > len(best) {
+		if keyMatches(model, key) && len(key) > len(best) {
 			best = key
 		}
 	}
@@ -246,6 +246,22 @@ func (t Table) match(model string) (Rate, bool) {
 	}
 	return t[best], true
 }
+
+// keyMatches reports whether key is a prefix of model that doesn't stop in
+// the middle of a number: a key ending in a digit doesn't match where the
+// model id goes on with another digit. Without this, "claude-fable-5-2"
+// would capture a dated Fable 5 id such as "claude-fable-5-20260801" (#484).
+func keyMatches(model, key string) bool {
+	if !strings.HasPrefix(model, key) {
+		return false
+	}
+	if key == "" || len(model) == len(key) {
+		return true
+	}
+	return !isDigit(key[len(key)-1]) || !isDigit(model[len(key)])
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
 
 // SpeedFast is the usage.speed an Anthropic response reports when it was
 // served in fast mode ("standard" otherwise).
