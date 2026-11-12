@@ -100,6 +100,14 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"claude-haiku-5-5", Rate{0.1, 0.5, 0.01, 0.125}},
 		{"anthropic.claude-haiku-5-5", Rate{0.1, 0.5, 0.01, 0.125}}, // Bedrock form of the same
 		{"claude-fable-5", Rate{10, 50, 1, 12.5}},
+		// 5.2 cuts the price to $8/$40 and keeps 0.025x cache hits; without its
+		// own key it fell to claude-fable / claude-mythos, the 5 series (#484).
+		{"claude-fable-5-2", Rate{8, 40, 0.2, 10}},
+		{"claude-mythos-5-2", Rate{8, 40, 0.2, 10}},
+		{"claude-fable-5-2-20261110", Rate{8, 40, 0.2, 10}},  // dated id → 5.2 key
+		{"claude-fable-5-2[1m]", Rate{8, 40, 0.2, 10}},       // 1M-context suffix → 5.2 key
+		{"anthropic.claude-fable-5-2", Rate{8, 40, 0.2, 10}}, // Bedrock form of the same
+		{"us.anthropic.claude-mythos-5-2", Rate{8, 40, 0.2, 10}},
 		// 5.1 prices cache hits at 0.025x input, so it needs its own key rather
 		// than falling to claude-fable's 0.1x (#225).
 		{"claude-fable-5-1", Rate{10, 50, 0.25, 12.5}},
