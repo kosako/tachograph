@@ -87,9 +87,12 @@ var defaults = map[string]Rate{
 	// Standard tier for inputs up to 272K tokens on OpenAI's API pricing page.
 	"gpt-6.1-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	"gpt-6.1-terra": {In: 1, Out: 5, CacheRead: 0.05, CacheWrite: 1.25},
-	// gpt-5.4 / gpt-5.5 / gpt-5.6 and their variants are priced separately from
-	// the original gpt-5; the more specific keys win by longest-prefix match.
-	// -codex variants aren't separately priced, so they fall to the base.
+	// gpt-5.2 / gpt-5.4 / gpt-5.5 / gpt-5.6, their variants, and gpt-5's
+	// mini / nano / pro are priced separately from the original gpt-5; the more
+	// specific keys win by longest-prefix match. -codex variants aren't
+	// separately priced, so they fall to the base (gpt-5.2-codex to gpt-5.2).
+	// gpt-5.3 is published only as gpt-5.3-codex, so that is its key and no
+	// bare "gpt-5.3" is guessed (#486).
 	// gpt-5.6 ships Sol/Terra/Luna/Cyber tiers; bare "gpt-5.6" is OpenAI's alias
 	// for the default Sol tier, and Codex logs the full "gpt-5.6-sol" id (which
 	// prefix-matches this base). Unlike earlier gpt-5.x, 5.6 publishes a
@@ -103,11 +106,20 @@ var defaults = map[string]Rate{
 	"gpt-5.6-cyber": {In: 12.5, Out: 75, CacheRead: 1.25, CacheWrite: 15.625},
 	"gpt-5.5":       {In: 5, Out: 30, CacheRead: 0.5, CacheWrite: 5},
 	"gpt-5.5-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30}, // cached input unpublished; 0.1x convention
-	"gpt-5.4":       {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
-	"gpt-5.4-mini":  {In: 0.75, Out: 4.5, CacheRead: 0.075, CacheWrite: 0.75},
-	"gpt-5.4-nano":  {In: 0.2, Out: 1.25, CacheRead: 0.02, CacheWrite: 0.2},
-	"gpt-5.4-pro":   {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30},        // cached input unpublished; 0.1x convention
-	"gpt-5":         {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
+	// A Cyber tier for trusted access, at 5.6 Cyber's rates but without a
+	// published cache-write price, so writes take the input rate (#486).
+	"gpt-5.5-cyber-preview": {In: 12.5, Out: 75, CacheRead: 1.25, CacheWrite: 12.5},
+	"gpt-5.4":               {In: 2.5, Out: 15, CacheRead: 0.25, CacheWrite: 2.5},
+	"gpt-5.4-mini":          {In: 0.75, Out: 4.5, CacheRead: 0.075, CacheWrite: 0.75},
+	"gpt-5.4-nano":          {In: 0.2, Out: 1.25, CacheRead: 0.02, CacheWrite: 0.2},
+	"gpt-5.4-pro":           {In: 30, Out: 180, CacheRead: 3, CacheWrite: 30}, // cached input unpublished; 0.1x convention
+	"gpt-5.3-codex":         {In: 1.75, Out: 14, CacheRead: 0.175, CacheWrite: 1.75},
+	"gpt-5.2":               {In: 1.75, Out: 14, CacheRead: 0.175, CacheWrite: 1.75},
+	"gpt-5.2-pro":           {In: 21, Out: 168, CacheRead: 2.1, CacheWrite: 21}, // cached input unpublished; 0.1x convention
+	"gpt-5-mini":            {In: 0.25, Out: 2, CacheRead: 0.025, CacheWrite: 0.25},
+	"gpt-5-nano":            {In: 0.05, Out: 0.4, CacheRead: 0.005, CacheWrite: 0.05},
+	"gpt-5-pro":             {In: 15, Out: 120, CacheRead: 1.5, CacheWrite: 15},      // cached input unpublished; 0.1x convention
+	"gpt-5":                 {In: 1.25, Out: 10, CacheRead: 0.125, CacheWrite: 1.25}, // original gpt-5 / base
 	// Codex's auto-review agent logs this id; OpenAI publishes no price for it
 	// but announced (2026-07-30) it runs on GPT-5.6 Luna, so approximate at
 	// Luna's rate instead of letting it fall to the codex catch-all (#216).

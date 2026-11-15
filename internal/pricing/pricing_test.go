@@ -137,6 +137,25 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"gpt-5.4-mini", Rate{0.75, 4.5, 0.075, 0.75}},
 		{"gpt-5.4-nano", Rate{0.2, 1.25, 0.02, 0.2}},
 		{"gpt-5.4-pro", Rate{30, 180, 3, 30}},
+		// Tiers OpenAI's pricing page lists that had no key and fell to a
+		// shorter one, mostly gpt-5's $1.25/$10 (#486).
+		{"gpt-5.5-cyber-preview", Rate{12.5, 75, 1.25, 12.5}}, // not gpt-5.5
+		{"gpt-5.3-codex", Rate{1.75, 14, 0.175, 1.75}},
+		{"gpt-5.2", Rate{1.75, 14, 0.175, 1.75}},
+		{"openai.gpt-5.2", Rate{1.75, 14, 0.175, 1.75}}, // Bedrock form of the same
+		{"gpt-5.2-codex", Rate{1.75, 14, 0.175, 1.75}},  // -codex variant falls to the base price
+		{"gpt-5.2-pro", Rate{21, 168, 2.1, 21}},         // not gpt-5.2
+		{"gpt-5-mini", Rate{0.25, 2, 0.025, 0.25}},
+		{"gpt-5-mini-2025-08-07", Rate{0.25, 2, 0.025, 0.25}}, // dated id → mini key
+		{"gpt-5-nano", Rate{0.05, 0.4, 0.005, 0.05}},
+		{"gpt-5-nano-2025-08-07", Rate{0.05, 0.4, 0.005, 0.05}}, // dated id → nano key
+		{"gpt-5-pro", Rate{15, 120, 1.5, 15}},
+		// The original gpt-5 and the ids priced like it stay on the base.
+		{"gpt-5", Rate{1.25, 10, 0.125, 1.25}},
+		{"gpt-5-2025-08-07", Rate{1.25, 10, 0.125, 1.25}},
+		{"gpt-5-codex", Rate{1.25, 10, 0.125, 1.25}},
+		{"gpt-5.1", Rate{1.25, 10, 0.125, 1.25}},
+		{"gpt-5.1-codex", Rate{1.25, 10, 0.125, 1.25}},
 	}
 	for _, c := range cases {
 		r, ok := tab.For(c.model)
