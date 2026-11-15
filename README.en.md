@@ -481,7 +481,10 @@ that has its own built-in entry (`claude-fable-5-2`, `claude-mythos-5-2`,
 `claude-fable-5-1`, `claude-mythos-5-1`, `claude-opus-5-5`,
 `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-haiku-5-5`, …), use that exact
 key — an override on `claude-fable` does not reach `claude-fable-5-1` or
-`claude-fable-5-2`. A Bedrock-style id such as `us.anthropic.claude-…` that
+`claude-fable-5-2`, and one on `gpt-5` does not reach `gpt-5-mini`,
+`gpt-5-nano`, `gpt-5-pro`, `gpt-5.2`, or the other OpenAI tiers with their
+own entry.
+A Bedrock-style id such as `us.anthropic.claude-…` that
 matches no key as written is retried without its `[region.]anthropic.` /
 `openai.` prefix, so a key that keeps the prefix, e.g.
 `us.anthropic.claude-fable-5`, applies only to Bedrock ids starting with it —
