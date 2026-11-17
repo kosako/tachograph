@@ -87,6 +87,18 @@ var defaults = map[string]Rate{
 	// Standard tier for inputs up to 272K tokens on OpenAI's API pricing page.
 	"gpt-6.1-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	"gpt-6.1-terra": {In: 1, Out: 5, CacheRead: 0.05, CacheWrite: 1.25},
+	// GPT-6.2 Astra and Sol (2026-11-17, #490) bill cache hits at 0.05x input
+	// and writes at 1.25x. Astra's input, output, and write rates are 20% below
+	// GPT-6 Astra's, and its cache hits 60% below; Sol keeps 6.1 Sol's rates.
+	// No bare "gpt-6.2" alias is guessed. The -law configuration of 6.2 Astra
+	// prices the same and resolves here by prefix.
+	"gpt-6.2-astra": {In: 8, Out: 40, CacheRead: 0.4, CacheWrite: 10},
+	"gpt-6.2-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	// Trusted-access GPT-6 tiers from the Specialized section, which no other
+	// key prefix-matches (#490). Rosalind's rate is promotional, through at
+	// least 2026-12-31 per OpenAI's pricing page.
+	"gpt-6-cyber":    {In: 20, Out: 100, CacheRead: 2, CacheWrite: 25},
+	"gpt-6-rosalind": {In: 10, Out: 50, CacheRead: 1, CacheWrite: 12.5},
 	// gpt-5.2 / gpt-5.4 / gpt-5.5 / gpt-5.6, their variants, and gpt-5's
 	// mini / nano / pro are priced separately from the original gpt-5; the more
 	// specific keys win by longest-prefix match. -codex variants aren't

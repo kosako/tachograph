@@ -124,6 +124,12 @@ func TestDefaultPricesCurrent(t *testing.T) {
 		{"gpt-6-luna", Rate{0.1, 0.5, 0.01, 0.125}},             // GPT-6 Luna, launched 2026-09-23; previously unpriced (#252)
 		{"gpt-6.1-sol", Rate{2, 10, 0.1, 2.5}},                  // GPT-6.1 Sol, launched 2026-09-29; previously unpriced (#296)
 		{"gpt-6.1-terra", Rate{1, 5, 0.05, 1.25}},               // GPT-6.1 Terra, launched 2026-10-26; previously unpriced (#431)
+		{"gpt-6.2-astra", Rate{8, 40, 0.4, 10}},                 // GPT-6.2 Astra, launched 2026-11-17; previously unpriced (#490)
+		{"openai.gpt-6.2-astra", Rate{8, 40, 0.4, 10}},          // Bedrock form of the same
+		{"gpt-6.2-astra-law", Rate{8, 40, 0.4, 10}},             // legal configuration, same price, by prefix
+		{"gpt-6.2-sol", Rate{2, 10, 0.1, 2.5}},                  // GPT-6.2 Sol, launched 2026-11-17; previously unpriced (#490)
+		{"gpt-6-cyber", Rate{20, 100, 2, 25}},                   // Specialized trusted-access tier; previously unpriced (#490)
+		{"gpt-6-rosalind", Rate{10, 50, 1, 12.5}},               // Specialized, promotional rate; previously unpriced (#490)
 		{"gpt-5.6", Rate{4, 20, 0.4, 5}},                        // Sol (default tier), promo price since 2026-08-21 (#216)
 		{"gpt-5.6-sol", Rate{4, 20, 0.4, 5}},                    // full Sol id → base alias
 		{"gpt-5.6-terra", Rate{2, 12, 0.2, 2.5}},                // 2026-07-30 cut
@@ -165,12 +171,13 @@ func TestDefaultPricesCurrent(t *testing.T) {
 	}
 }
 
-// GPT-6 / GPT-6.1 have no bare alias: an id that isn't a published tier
-// stays unpriced instead of borrowing a guessed rate (#220, #252, #296).
+// GPT-6 / GPT-6.1 / GPT-6.2 have no bare alias: an id that isn't a published
+// tier stays unpriced instead of borrowing a guessed rate (#220, #252, #296,
+// #490).
 func TestNoBareGPT6Alias(t *testing.T) {
 	t.Setenv("TACHO_CONFIG_DIR", t.TempDir()) // pure defaults, ignore any local pricing.json
 	tab := Load()
-	for _, model := range []string{"gpt-6", "gpt-6-unknown", "gpt-6.1", "gpt-6.1-unknown"} {
+	for _, model := range []string{"gpt-6", "gpt-6-unknown", "gpt-6.1", "gpt-6.1-unknown", "gpt-6.2", "gpt-6.2-unknown"} {
 		if r, ok := tab.For(model); ok {
 			t.Errorf("%s: priced %+v, want unpriced", model, r)
 		}
