@@ -88,9 +88,10 @@ var defaults = map[string]Rate{
 	"gpt-6.1-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	"gpt-6.1-terra": {In: 1, Out: 5, CacheRead: 0.05, CacheWrite: 1.25},
 	// GPT-6.2 Astra and Sol (2026-11-17, #490) bill cache hits at 0.05x input
-	// and writes at 1.25x. Astra is 20% below GPT-6 Astra; Sol keeps 6.1 Sol's
-	// rates. No bare "gpt-6.2" alias is guessed. The -law configuration of 6.2
-	// Astra prices the same and resolves here by prefix.
+	// and writes at 1.25x. Astra's input, output, and write rates are 20% below
+	// GPT-6 Astra's, and its cache hits 60% below; Sol keeps 6.1 Sol's rates.
+	// No bare "gpt-6.2" alias is guessed. The -law configuration of 6.2 Astra
+	// prices the same and resolves here by prefix.
 	"gpt-6.2-astra": {In: 8, Out: 40, CacheRead: 0.4, CacheWrite: 10},
 	"gpt-6.2-sol":   {In: 2, Out: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	// Trusted-access GPT-6 tiers from the Specialized section, which no other
