@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR cancels the run still going for its older head (#497):
+# only the run on the head the PR would merge counts. The group is the PR's
+# number, so PRs don't cancel each other; a push to main has no PR number and
+# gets a group of its own run, so every main commit keeps a full run. The
+# npm-smoke job's reusable workflow runs inside this run and is cancelled with
+# it; release.yml calls that workflow on its own and isn't affected.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
