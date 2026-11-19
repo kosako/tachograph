@@ -59,6 +59,51 @@ func TestRunFlagErrorBeforeHelp(t *testing.T) {
 	}
 }
 
+// A subcommand's flag errors come back from run with the exit code
+// flag.ExitOnError used to end the process with: 2 for a bad flag, 0 for -h,
+// both with the flag package's message and flag list on stderr and nothing
+// on stdout. A command that still ended the process here would end the test
+// binary instead (#494).
+func TestSubcommandFlagErrors(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		code int
+		want []string // on stderr
+	}{
+		{[]string{"swiftbar", "--bogus"}, 2, []string{"flag provided but not defined: -bogus", "Usage of swiftbar:", "-png"}},
+		{[]string{"swiftbar", "-h"}, 0, []string{"Usage of swiftbar:", "-png"}},
+		{[]string{"daily", "--days=x"}, 2, []string{`invalid value "x" for flag -days`, "Usage of daily:"}},
+		{[]string{"daily", "-h"}, 0, []string{"Usage of daily:", "-days"}},
+		{[]string{"watch", "--bogus"}, 2, []string{"flag provided but not defined: -bogus", "Usage of watch:"}},
+		{[]string{"watch", "-help"}, 0, []string{"Usage of watch:", "-n int"}},
+		{[]string{"statusline", "-template"}, 2, []string{"flag needs an argument: -template", "Usage of statusline:"}},
+		{[]string{"statusline", "-h"}, 0, []string{"Usage of statusline:", "-template"}},
+		{[]string{"status", "--json=x"}, 2, []string{`invalid boolean value "x" for -json`, "Usage of status:"}},
+		{[]string{"status", "-h"}, 0, []string{"Usage of status:", "-json"}},
+		{[]string{"setup", "claude", "--bogus"}, 2, []string{"flag provided but not defined: -bogus", "Usage of setup:"}},
+		{[]string{"setup", "claude", "-h"}, 0, []string{"Usage of setup:", "-write"}},
+		{[]string{"setup", "swiftbar", "--write=x"}, 2, []string{`invalid boolean value "x" for -write`, "Usage of setup swiftbar:"}},
+		{[]string{"setup", "swiftbar", "-h"}, 0, []string{"Usage of setup swiftbar:", "-write"}},
+	} {
+		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
+			isolateRun(t)
+			var code int
+			var stdout string
+			stderr := capture(t, &os.Stderr, func() {
+				stdout = capture(t, &os.Stdout, func() { code = run(c.args) })
+			})
+			if code != c.code || stdout != "" {
+				t.Errorf("run(%q) = %d, stdout %q; want %d and no stdout", c.args, code, stdout, c.code)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(stderr, w) {
+					t.Errorf("run(%q) stderr %q, want %q", c.args, stderr, w)
+				}
+			}
+		})
+	}
+}
+
 // An unknown command still prints the usage on stderr and exits 2.
 func TestRunUnknownCommand(t *testing.T) {
 	var code int
