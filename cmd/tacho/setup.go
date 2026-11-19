@@ -39,9 +39,11 @@ func runSetup(args []string) int {
 		fmt.Fprint(os.Stderr, setupUsage)
 		return 2
 	}
-	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	write := fs.Bool("write", false, "merge into settings.json (~/.claude/settings.json, or the one under CLAUDE_CONFIG_DIR)")
-	fs.Parse(args[1:])
+	if code, ok := parseFlags(fs, args[1:]); !ok {
+		return code
+	}
 	if unexpectedArgs("tacho setup claude", fs.Args()) {
 		return 2
 	}
@@ -125,9 +127,11 @@ func runSetup(args []string) int {
 // absolute path on its exec line: SwiftBar runs plugins with launchd's
 // minimal PATH, which misses most install locations (#270).
 func runSetupSwiftBar(args []string) int {
-	fs := flag.NewFlagSet("setup swiftbar", flag.ExitOnError)
+	fs := flag.NewFlagSet("setup swiftbar", flag.ContinueOnError)
 	write := fs.Bool("write", false, "write it into SwiftBar's plugin folder")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	if unexpectedArgs("tacho setup swiftbar", fs.Args()) {
 		return 2
 	}

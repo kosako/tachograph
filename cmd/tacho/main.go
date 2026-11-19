@@ -128,6 +128,24 @@ func run(args []string) int {
 	}
 }
 
+// parseFlags parses args with fs, made with flag.ContinueOnError, and
+// reports whether the command goes on; when it doesn't, code is the exit code
+// flag.ExitOnError would have exited with: 0 for -h / -help, 2 for a bad flag.
+// The flag package has already printed the error and the flag list on
+// stderr either way. Returning the code instead of exiting leaves os.Exit to
+// main, so a command's parse errors can be tested through run (#494).
+func parseFlags(fs *flag.FlagSet, args []string) (code int, ok bool) {
+	err := fs.Parse(args)
+	switch {
+	case err == nil:
+		return 0, true
+	case errors.Is(err, flag.ErrHelp):
+		return 0, false
+	default:
+		return 2, false
+	}
+}
+
 // unexpectedArgs reports, on stderr, positional arguments left after the
 // flags of a command that takes none (rest is the FlagSet's Args), and
 // whether there were any. The flag package stops at the first non-flag, so
@@ -169,9 +187,11 @@ func style(noColor bool, cfg config.Config) render.Style {
 }
 
 func runSwiftbar(args []string) int {
-	fs := flag.NewFlagSet("swiftbar", flag.ExitOnError)
+	fs := flag.NewFlagSet("swiftbar", flag.ContinueOnError)
 	pngOut := fs.String("png", "", "write the menu bar gauge image to this PNG file (preview)")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	ignoredArgs("tacho swiftbar", fs.Args())
 
 	now := time.Now()
@@ -541,9 +561,11 @@ func runOnce(args []string) int {
 // figures are recomputed from the logs on every call — nothing is cached or
 // stored — so the table only ever shows what is still on disk (#242).
 func runDaily(args []string) int {
-	fs := flag.NewFlagSet("daily", flag.ExitOnError)
+	fs := flag.NewFlagSet("daily", flag.ContinueOnError)
 	days := fs.Int("days", 30, "number of days to show, ending today")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	if unexpectedArgs("tacho daily", fs.Args()) {
 		return 2
 	}
@@ -568,10 +590,12 @@ func dailyRange(now time.Time, days int) (from, to time.Time) {
 }
 
 func runWatch(args []string) int {
-	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	interval := fs.Int("n", 5, "refresh interval in seconds (at most 86400)")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	if unexpectedArgs("tacho watch", fs.Args()) {
 		return 2
 	}
@@ -621,10 +645,12 @@ func runStatusline(args []string) int {
 }
 
 func runStatuslineWithIO(args []string, stdin io.Reader, stdout io.Writer, now time.Time) int {
-	fs := flag.NewFlagSet("statusline", flag.ExitOnError)
+	fs := flag.NewFlagSet("statusline", flag.ContinueOnError)
 	tmplFlag := fs.String("template", "", "override the statusline template")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	ignoredArgs("tacho statusline", fs.Args())
 
 	input, _ := io.ReadAll(stdin)
@@ -654,10 +680,12 @@ func loadTemplate() string {
 }
 
 func runStatus(args []string) int {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit the unified schema JSON")
 	noCache := fs.Bool("no-cache", false, "bypass the TTL cache")
-	fs.Parse(args)
+	if code, ok := parseFlags(fs, args); !ok {
+		return code
+	}
 	if unexpectedArgs("tacho status", fs.Args()) {
 		return 2
 	}
