@@ -26,7 +26,10 @@ func isolateRun(t *testing.T) (cfgDir, claudeDir string) {
 // argument it didn't expect, before doing anything: the flag package stops
 // at the first non-flag, so `tacho daily 7 --days 1` used to show 30 days
 // and `tacho setup claude --write unexpected` wrote settings.json, both with
-// exit 0. `config statusline-preset` takes one name, or --list (#441).
+// exit 0. `config statusline-preset` takes one name, or --list (#441);
+// `config show` and `config path` take none, and used to print and exit 0
+// (#499).
+// Nothing reaches stdout either.
 func TestUnexpectedArgumentsExitTwo(t *testing.T) {
 	for _, args := range [][]string{
 		{"extra"},
@@ -38,15 +41,21 @@ func TestUnexpectedArgumentsExitTwo(t *testing.T) {
 		{"setup", "claude", "--write", "unexpected"},
 		{"setup", "swiftbar", "--write", "unexpected"},
 		{"config", "statusline-preset", "moon", "--list"},
+		{"config", "show", "extra"},
+		{"config", "path", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cfgDir, claudeDir := isolateRun(t)
 			var code int
+			var stdout string
 			stderr := capture(t, &os.Stderr, func() {
-				capture(t, &os.Stdout, func() { code = run(args) })
+				stdout = capture(t, &os.Stdout, func() { code = run(args) })
 			})
 			if code != 2 {
 				t.Errorf("exit %d, want 2 (stderr %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout %q, want nothing", stdout)
 			}
 			if !strings.Contains(stderr, "unexpected argument") && !strings.Contains(stderr, "usage:") {
 				t.Errorf("stderr %q, want the unexpected argument or the usage", stderr)

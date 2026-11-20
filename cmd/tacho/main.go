@@ -292,6 +292,12 @@ func runConfig(args []string) int {
 	}
 	switch sub {
 	case "show":
+		// show and path take no argument: one left over used to be dropped
+		// with exit 0, unlike the other commands people type (#441, #499).
+		if len(args) > 0 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
 		c, err := config.LoadStrict()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "tacho: invalid config, showing defaults:", err)
@@ -308,6 +314,10 @@ func runConfig(args []string) int {
 		}
 		return 0
 	case "path":
+		if len(args) > 0 {
+			fmt.Fprint(os.Stderr, configUsage)
+			return 2
+		}
 		fmt.Println(config.Path())
 		return 0
 	case "set":
