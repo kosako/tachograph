@@ -28,16 +28,39 @@ func TestRunHelp(t *testing.T) {
 	}
 }
 
+// runCaptured runs args and returns the exit code and what reached stdout
+// and stderr.
+func runCaptured(t *testing.T, args []string) (code int, stdout, stderr string) {
+	t.Helper()
+	stderr = capture(t, &os.Stderr, func() {
+		stdout = capture(t, &os.Stdout, func() { code = run(args) })
+	})
+	return code, stdout, stderr
+}
+
 func TestRunVersionFlag(t *testing.T) {
 	// A leading --version answers before anything else, as it always did,
 	// and like -h it doesn't check what follows (#502); the version command
-	// does (TestUnexpectedArgumentsExitTwo).
+	// does (TestRunVersionCommand).
+	want := "tacho " + buildVersion() + "\n"
 	for _, args := range [][]string{{"--version"}, {"-version"}, {"--version", "-h"}, {"--version", "extra"}, {"-version", "extra"}} {
-		var code int
-		out := capture(t, &os.Stdout, func() { code = run(args) })
-		if code != 0 || !strings.HasPrefix(out, "tacho ") {
-			t.Errorf("run(%q) = %d, stdout %q; want 0 and the version", args, code, out)
+		code, stdout, stderr := runCaptured(t, args)
+		if code != 0 || stdout != want || stderr != "" {
+			t.Errorf("run(%q) = %d, stdout %q, stderr %q; want 0, %q, and nothing on stderr", args, code, stdout, stderr, want)
 		}
+	}
+}
+
+// The version command prints the version and takes no argument: one left
+// over is an error with the usage on stderr, as for the other commands
+// people type (#441, #502).
+func TestRunVersionCommand(t *testing.T) {
+	want := "tacho " + buildVersion() + "\n"
+	if code, stdout, stderr := runCaptured(t, []string{"version"}); code != 0 || stdout != want || stderr != "" {
+		t.Errorf("run(version) = %d, stdout %q, stderr %q; want 0, %q, and nothing on stderr", code, stdout, stderr, want)
+	}
+	if code, stdout, stderr := runCaptured(t, []string{"version", "extra"}); code != 2 || stdout != "" || stderr != usage {
+		t.Errorf("run(version extra) = %d, stdout %q, stderr %q; want 2, nothing on stdout, and the usage on stderr", code, stdout, stderr)
 	}
 }
 
