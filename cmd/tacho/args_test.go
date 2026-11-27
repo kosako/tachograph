@@ -28,7 +28,7 @@ func isolateRun(t *testing.T) (cfgDir, claudeDir string) {
 // and `tacho setup claude --write unexpected` wrote settings.json, both with
 // exit 0. `config statusline-preset` takes one name, or --list (#441);
 // `config show` and `config path` take none, and used to print and exit 0
-// (#499).
+// (#499), as `version` did (#502).
 // Nothing reaches stdout either.
 func TestUnexpectedArgumentsExitTwo(t *testing.T) {
 	for _, args := range [][]string{
@@ -43,6 +43,7 @@ func TestUnexpectedArgumentsExitTwo(t *testing.T) {
 		{"config", "statusline-preset", "moon", "--list"},
 		{"config", "show", "extra"},
 		{"config", "path", "extra"},
+		{"version", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cfgDir, claudeDir := isolateRun(t)
