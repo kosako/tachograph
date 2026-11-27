@@ -14,6 +14,8 @@ func TestRunHelp(t *testing.T) {
 		{"-h"}, {"--h"}, {"-help"}, {"--help"}, {"help"}, {"doctor", "-h"},
 		// After other one-shot flags, where the FlagSet used to answer.
 		{"-no-color", "-h"}, {"--no-cache", "--help"}, {"-no-color", "-no-cache", "-help"},
+		// help doesn't check what follows it; the usage lists daily too (#502).
+		{"help", "daily"}, {"help", "extra"},
 	} {
 		var code int
 		out := capture(t, &os.Stdout, func() { code = run(args) })
@@ -27,8 +29,10 @@ func TestRunHelp(t *testing.T) {
 }
 
 func TestRunVersionFlag(t *testing.T) {
-	// A leading --version answers before anything else, as it always did.
-	for _, args := range [][]string{{"--version"}, {"-version"}, {"--version", "-h"}} {
+	// A leading --version answers before anything else, as it always did,
+	// and like -h it doesn't check what follows (#502); the version command
+	// does (TestUnexpectedArgumentsExitTwo).
+	for _, args := range [][]string{{"--version"}, {"-version"}, {"--version", "-h"}, {"--version", "extra"}, {"-version", "extra"}} {
 		var code int
 		out := capture(t, &os.Stdout, func() { code = run(args) })
 		if code != 0 || !strings.HasPrefix(out, "tacho ") {

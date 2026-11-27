@@ -94,6 +94,12 @@ func run(args []string) int {
 	}
 	switch cmd {
 	case "version":
+		// version takes no argument: one left over used to be dropped with
+		// exit 0, unlike the other commands people type (#441, #502).
+		if len(args) > 0 {
+			fmt.Fprint(os.Stderr, usage)
+			return 2
+		}
 		fmt.Println("tacho " + buildVersion())
 		return 0
 	case "status":
@@ -113,10 +119,13 @@ func run(args []string) int {
 	case "doctor":
 		return runDoctor(args)
 	case "help":
+		// What follows help is not checked: `tacho help daily` shows this
+		// usage, which lists the command too, and help writes nothing (#502).
 		fmt.Print(usage)
 		return 0
 	case "":
-		// The one-shot FlagSet would reject -version (#269).
+		// The one-shot FlagSet would reject -version (#269). Like -h, the
+		// flag answers without looking at what follows it (#502).
 		if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
 			fmt.Println("tacho " + buildVersion())
 			return 0
